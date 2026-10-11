@@ -1658,11 +1658,14 @@ dependencies = [
 name = "kaleido-proto"
 version = "0.0.0"
 dependencies = [
+ "mpv-ffi",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "windows",
 ]
 
 [[package]]

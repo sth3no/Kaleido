@@ -17,3 +17,21 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy -p mpv-ffi -p kaleido-mpv --all-targets -- -D warnings
       - run: cargo test -p mpv-ffi -p kaleido-mpv
+
+  prototype:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: prototype
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: prototype/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo clippy -p kaleido-proto --all-targets -- -D warnings
+      - run: cargo test -p kaleido-proto
