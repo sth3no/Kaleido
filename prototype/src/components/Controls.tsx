@@ -1,3 +1,4 @@
+import { blurAfterPointer } from '../input/forward';
 import { playerCommand } from '../player';
 import { formatTime, type PlayerState } from '../playerState';
 
@@ -15,6 +16,7 @@ export function Controls({ s }: { s: PlayerState }) {
           value={Math.min(s.timePos, s.duration || 0)}
           aria-label="Pozice"
           onChange={(e) => playerCommand({ type: 'seekAbsolute', seconds: Number(e.target.value) })}
+          {...blurAfterPointer}
         />
         <span className="time">{formatTime(s.duration)}</span>
       </div>
@@ -27,12 +29,14 @@ export function Controls({ s }: { s: PlayerState }) {
           value={s.volume}
           aria-label="Hlasitost"
           onChange={(e) => playerCommand({ type: 'setVolume', value: Number(e.target.value) })}
+          {...blurAfterPointer}
         />
         <span className="spacer" />
         <button
           className="icon-btn play"
           aria-label={s.pause ? 'Přehrát' : 'Pozastavit'}
           onClick={() => playerCommand({ type: 'togglePause' })}
+          {...blurAfterPointer}
         >
           {s.pause ? '▶' : '❚❚'}
         </button>
@@ -41,6 +45,7 @@ export function Controls({ s }: { s: PlayerState }) {
           className="icon-btn"
           aria-label="Celá obrazovka"
           onClick={() => playerCommand({ type: 'setFullscreen', on: !s.fullscreen })}
+          {...blurAfterPointer}
         >
           ⛶
         </button>

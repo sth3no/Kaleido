@@ -1,4 +1,5 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { blurAfterPointer } from '../input/forward';
 
 export function TitleBar({ title, badge }: { title: string; badge?: string }) {
   const win = getCurrentWindow();
@@ -10,9 +11,9 @@ export function TitleBar({ title, badge }: { title: string; badge?: string }) {
         {badge && <span className="badge">{badge}</span>}
       </div>
       <div className="capsule glass titlebar-right" data-glass>
-        <button className="icon-btn" aria-label="Minimalizovat" onClick={() => win.minimize()}>–</button>
-        <button className="icon-btn" aria-label="Maximalizovat" onClick={() => win.toggleMaximize()}>□</button>
-        <button className="icon-btn" aria-label="Zavřít" onClick={() => win.close()}>✕</button>
+        <button className="icon-btn" aria-label="Minimalizovat" onClick={() => win.minimize()} {...blurAfterPointer}>–</button>
+        <button className="icon-btn" aria-label="Maximalizovat" onClick={() => win.toggleMaximize()} {...blurAfterPointer}>□</button>
+        <button className="icon-btn" aria-label="Zavřít" onClick={() => win.close()} {...blurAfterPointer}>✕</button>
       </div>
     </>
   );

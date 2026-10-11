@@ -117,3 +117,5 @@ html, body, #root {
   z-index: 100;
 }
 .curtain.on { opacity: 1; transition: none; }
+
+.video-catcher { position: absolute; inset: 0; }

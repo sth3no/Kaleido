@@ -52,3 +52,12 @@ pub fn player_command(engine: State<'_, Arc<Engine>>, cmd: PlayerCmd) -> CmdResu
 pub fn surface_set_layout(surface: State<'_, SurfaceState>, layout: Layout) {
     surface.set_layout(layout);
 }
+
+#[tauri::command]
+pub fn player_input(engine: State<'_, Arc<Engine>>, ev: crate::input::InputEvent) -> CmdResult {
+    let Some(args) = crate::input::to_command(&ev) else {
+        return Err(format!("rejected input {ev:?}"));
+    };
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    engine.mpv.command(&args).map_err(err)
+}

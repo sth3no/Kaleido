@@ -2,6 +2,7 @@
 
 mod commands;
 mod engine;
+mod input;
 mod options;
 mod surface;
 
@@ -68,6 +69,7 @@ fn main() {
             commands::open_file,
             commands::player_command,
             commands::surface_set_layout,
+            commands::player_input,
         ])
         .run(tauri::generate_context!())
         .expect("Kaleido M0 se nepodařilo spustit");

@@ -6,13 +6,21 @@ use tauri::{AppHandle, Manager};
 /// Files the prototype hands to mpv.
 pub struct Paths {
     pub data_dir: PathBuf,
+    pub click_target: PathBuf,
 }
 
 impl Paths {
     pub fn resolve(app: &AppHandle) -> Result<Paths, Box<dyn Error>> {
         let data_dir = app.path().app_local_data_dir()?;
         std::fs::create_dir_all(&data_dir)?;
-        Ok(Paths { data_dir })
+        let click_target = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test-scripts/click-target.lua"
+        ));
+        Ok(Paths {
+            data_dir,
+            click_target,
+        })
     }
 }
 
@@ -35,5 +43,6 @@ pub fn mpv_options(paths: &Paths) -> Vec<(&'static str, String)> {
             "log-file",
             paths.data_dir.join("mpv.log").display().to_string(),
         ),
+        ("scripts", paths.click_target.display().to_string()),
     ]
 }
