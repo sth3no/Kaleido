@@ -45,15 +45,27 @@ pub enum EndFileReason {
 pub enum Event {
     None,
     Shutdown,
-    LogMessage { prefix: String, level: String, text: String },
+    LogMessage {
+        prefix: String,
+        level: String,
+        text: String,
+    },
     StartFile,
     FileLoaded,
-    EndFile { reason: EndFileReason },
+    EndFile {
+        reason: EndFileReason,
+    },
     VideoReconfig,
     Seek,
     PlaybackRestart,
-    PropertyChange { id: u64, name: String, value: PropertyValue },
-    ClientMessage { args: Vec<String> },
+    PropertyChange {
+        id: u64,
+        name: String,
+        value: PropertyValue,
+    },
+    ClientMessage {
+        args: Vec<String>,
+    },
     Other(i32),
 }
 
@@ -61,7 +73,9 @@ unsafe fn string(ptr: *const c_char) -> String {
     if ptr.is_null() {
         return String::new();
     }
-    unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 unsafe fn property_value(format: sys::mpv_format, data: *mut c_void) -> PropertyValue {

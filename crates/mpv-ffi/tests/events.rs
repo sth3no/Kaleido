@@ -17,7 +17,9 @@ fn plays_generated_clip_to_eof() {
     assert!(seen.contains(&Event::FileLoaded), "{seen:#?}");
     assert_eq!(
         seen.last(),
-        Some(&Event::EndFile { reason: EndFileReason::Eof })
+        Some(&Event::EndFile {
+            reason: EndFileReason::Eof
+        })
     );
 }
 
@@ -40,7 +42,9 @@ fn missing_file_ends_with_error() {
     assert!(
         matches!(
             seen.last(),
-            Some(Event::EndFile { reason: EndFileReason::Error { .. } })
+            Some(Event::EndFile {
+                reason: EndFileReason::Error { .. }
+            })
         ),
         "{seen:#?}"
     );
@@ -51,9 +55,11 @@ fn error_log_messages_are_delivered() {
     let mpv = common::headless();
     mpv.request_log_messages("error").unwrap();
     mpv.command(&["loadfile", MISSING]).unwrap();
-    common::wait_for(&mpv, 20, |e| {
-        matches!(e, Event::LogMessage { level, .. } if level == "error")
-    });
+    common::wait_for(
+        &mpv,
+        20,
+        |e| matches!(e, Event::LogMessage { level, .. } if level == "error"),
+    );
 }
 
 #[test]
@@ -73,7 +79,8 @@ fn observed_flag_reports_initial_value_and_changes() {
 #[test]
 fn script_message_reaches_host_client() {
     let mpv = common::headless();
-    mpv.command(&["script-message", "kaleido", "hello world"]).unwrap();
+    mpv.command(&["script-message", "kaleido", "hello world"])
+        .unwrap();
     common::wait_for(&mpv, 5, |e| {
         *e == Event::ClientMessage {
             args: vec!["kaleido".into(), "hello world".into()],

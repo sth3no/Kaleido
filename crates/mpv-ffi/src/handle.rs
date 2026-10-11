@@ -78,7 +78,9 @@ impl Mpv {
             });
         }
         // SAFETY: mpv returned an owned C string that we must release with mpv_free.
-        let value = unsafe { CStr::from_ptr(out) }.to_string_lossy().into_owned();
+        let value = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
         unsafe { (self.api.free)(out.cast()) };
         Ok(value)
     }
@@ -105,7 +107,9 @@ impl Mpv {
     pub fn client_name(&self) -> String {
         // SAFETY: returns a string owned by the handle, valid while ctx lives.
         let ptr = unsafe { (self.api.client_name)(self.ctx) };
-        unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Delivers `Event::PropertyChange { id, .. }` now and on every change.

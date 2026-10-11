@@ -81,5 +81,8 @@ fn fails_cleanly_without_libmpv() {
         .arg("--idle")
         .spawn()
         .unwrap();
-    assert_eq!(wait_with_timeout(&mut child, Duration::from_secs(10)).code(), Some(1));
+    assert_eq!(
+        wait_with_timeout(&mut child, Duration::from_secs(10)).code(),
+        Some(1)
+    );
 }

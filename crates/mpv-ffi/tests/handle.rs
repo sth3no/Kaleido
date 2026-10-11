@@ -51,7 +51,10 @@ fn unknown_option_reports_mpv_error_code() {
 #[test]
 fn interior_nul_never_reaches_mpv() {
     let mpv = common::headless();
-    assert!(matches!(mpv.command(&["show-text", "a\0b"]), Err(Error::Nul(_))));
+    assert!(matches!(
+        mpv.command(&["show-text", "a\0b"]),
+        Err(Error::Nul(_))
+    ));
 }
 
 #[test]

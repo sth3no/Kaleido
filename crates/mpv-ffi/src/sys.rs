@@ -164,6 +164,8 @@ impl Api {
         if ptr.is_null() {
             return format!("mpv error {code}");
         }
-        unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
     }
 }
