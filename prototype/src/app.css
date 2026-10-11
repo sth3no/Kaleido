@@ -106,3 +106,14 @@ html, body, #root {
 .volume { width: 90px; accent-color: var(--k-accent); }
 .play { font-size: 18px; width: 30px; height: 30px; }
 .badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(255, 255, 255, 0.22); }
+
+.curtain {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 100;
+}
+.curtain.on { opacity: 1; transition: none; }
