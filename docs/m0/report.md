@@ -15,13 +15,13 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
 
 | # | Ověřit | Kritérium | Výsledek | Měření / pozorování | Rozhodnutí |
 |---|---|---|---|---|---|
-| 1 | průhledné WebView2 nad D3D11 podoknem | bez blikání při změně velikosti a přesunu, 60 fps | ⏳ | | |
+| 1 | průhledné WebView2 nad D3D11 podoknem | bez blikání při změně velikosti a přesunu, 60 fps | ⏳ | Auto: video se skládá pod průhledným UI jen s `wid` = hlavní okno (viz Další zjištění). Ruční: blikání při změně velikosti. | `wid` = hlavní okno, přesouvá se okno `mpv` |
 | 2 | HDR | HDR10 se zapnutým i vypnutým HDR ve Windows, UI nerozbije HDR | ⏳ | | |
-| 3 | přeposílání vstupu | klávesy s modifikátory, myš, kolečko; konzole; menu v obraze | ⏳ | | |
-| 4 | fullscreen a DPI | černá clona, přesun mezi monitory s různým DPI | ⏳ | | |
-| 5 | shader sklo | oblasti za běhu, ≤ 1 ms GPU ve 4K, sleduje animaci | ⏳ | | |
-| 6 | mini přehrávač | podokno synchronně s animací UI | ⏳ | | |
-| 7 | thumbfast | `kaleido-mpv.exe` + `thumbfast-render` v React bublině | ⏳ | | |
+| 3 | přeposílání vstupu | klávesy s modifikátory, myš, kolečko; konzole; menu v obraze | ⏳ | Auto: 37 testů převodu kláves/myši, `click-target.lua` se načte a zaregistruje `MBTN_LEFT`. | |
+| 4 | fullscreen a DPI | černá clona, přesun mezi monitory s různým DPI | ⏳ | Auto: pořadí kroků clony (3 testy). | |
+| 5 | shader sklo | oblasti za běhu, ≤ 1 ms GPU ve 4K, sleduje animaci | ⏳ | Auto: libplacebo zaregistroval 3 průchody, shaderc 0 chyb; UI posílá oblasti (`count=3`) i během animace. | |
+| 6 | mini přehrávač | podokno synchronně s animací UI | ⏳ | Auto: umístění okna podle třídy ověřeno testem se skutečnými okny. | |
+| 7 | thumbfast | `kaleido-mpv.exe` + `thumbfast-render` v React bublině | ⏳ | Auto: e2e test `thumbfast_renders_through_kaleido_mpv` – thumbfast v libmpv spustí `kaleido-mpv`, pošle `thumbfast-render`, soubor `.bgra` má w·h·4 B (0,65 s). Ruční: bublina v UI. | |
 | 8 | snímek obrazovky | bez rozmazaných oblastí skla | ⏳ | | |
 
 ## Další zjištění
