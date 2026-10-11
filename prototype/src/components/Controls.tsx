@@ -1,6 +1,7 @@
 import { blurAfterPointer } from '../input/forward';
 import { playerCommand } from '../player';
 import { formatTime, type PlayerState } from '../playerState';
+import { Seekbar } from './Seekbar';
 
 type Props = { s: PlayerState; hidden?: boolean; onMini(): void };
 
@@ -9,17 +10,7 @@ export function Controls({ s, hidden = false, onMini }: Props) {
     <div className={`capsule glass controls${hidden ? ' hidden' : ''}`} data-glass>
       <div className="row">
         <span className="time">{formatTime(s.timePos)}</span>
-        <input
-          className="seek"
-          type="range"
-          min={0}
-          max={s.duration || 0}
-          step={0.1}
-          value={Math.min(s.timePos, s.duration || 0)}
-          aria-label="Pozice"
-          onChange={(e) => playerCommand({ type: 'seekAbsolute', seconds: Number(e.target.value) })}
-          {...blurAfterPointer}
-        />
+        <Seekbar timePos={s.timePos} duration={s.duration} />
         <span className="time">{formatTime(s.duration)}</span>
       </div>
       <div className="row">

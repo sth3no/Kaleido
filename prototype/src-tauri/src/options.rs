@@ -10,6 +10,8 @@ pub struct Paths {
     pub data_dir: PathBuf,
     pub click_target: PathBuf,
     pub shader: PathBuf,
+    pub thumbfast: PathBuf,
+    pub helper_exe: PathBuf,
 }
 
 impl Paths {
@@ -23,10 +25,18 @@ impl Paths {
         // The file stem is the shader name that glsl-shader-opts prefixes target.
         let shader = data_dir.join(format!("{}.glsl", glass::SHADER));
         std::fs::write(&shader, glass::shader_source())?;
+        let thumbfast = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../vendor/thumbfast/thumbfast.lua"
+        ));
+        // Built next to us by `beforeDevCommand` (cargo build -p kaleido-mpv).
+        let helper_exe = std::env::current_exe()?.with_file_name("kaleido-mpv.exe");
         Ok(Paths {
             data_dir,
             click_target,
             shader,
+            thumbfast,
+            helper_exe,
         })
     }
 }
@@ -50,7 +60,22 @@ pub fn mpv_options(paths: &Paths) -> Vec<(&'static str, String)> {
             "log-file",
             paths.data_dir.join("mpv.log").display().to_string(),
         ),
-        ("scripts", paths.click_target.display().to_string()),
+        // Windows path-list separator is ';'.
+        (
+            "scripts",
+            format!(
+                "{};{}",
+                paths.thumbfast.display(),
+                paths.click_target.display()
+            ),
+        ),
+        (
+            "script-opts",
+            format!(
+                "thumbfast-mpv_path={},thumbfast-network=no",
+                paths.helper_exe.display()
+            ),
+        ),
         ("glsl-shaders", paths.shader.display().to_string()),
         ("screenshot-dir", "~~desktop/".into()),
     ]

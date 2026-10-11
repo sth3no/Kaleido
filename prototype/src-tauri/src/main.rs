@@ -6,6 +6,7 @@ mod glass;
 mod input;
 mod options;
 mod surface;
+mod thumbs;
 
 use std::sync::Arc;
 
@@ -72,6 +73,9 @@ fn main() {
             commands::surface_set_layout,
             commands::player_input,
             commands::glass_set_regions,
+            commands::thumb_request,
+            commands::thumb_clear,
+            commands::thumb_fetch,
         ])
         .run(tauri::generate_context!())
         .expect("Kaleido M0 se nepodařilo spustit");

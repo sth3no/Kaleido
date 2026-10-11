@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter};
 
 use crate::glass::{self, GlassRect, OutputOrigin};
+use crate::thumbs;
 
 /// Properties the UI renders (M0 subset of spec 4.4 `player:state`).
 const OBSERVED: &[(&str, PropertyKind)] = &[
@@ -37,12 +38,19 @@ struct GlassState {
 pub struct Engine {
     pub mpv: Mpv,
     glass: Mutex<GlassState>,
+    thumb: Mutex<Vec<u8>>,
 }
 
 #[derive(Clone, Serialize)]
 struct Prop {
     name: String,
     value: Value,
+}
+
+#[derive(Clone, Serialize)]
+struct ThumbReady {
+    width: u32,
+    height: u32,
 }
 
 pub fn to_json(value: &PropertyValue) -> Value {
@@ -79,6 +87,7 @@ impl Engine {
                 scale: 1.0,
                 ..GlassState::default()
             }),
+            thumb: Mutex::new(Vec::new()),
         });
         let pump = Arc::clone(&engine);
         thread::Builder::new()
@@ -86,6 +95,26 @@ impl Engine {
             .spawn(move || pump.run_events(&app))
             .expect("spawn mpv event thread");
         Ok(engine)
+    }
+
+    pub fn latest_thumb(&self) -> Vec<u8> {
+        self.thumb.lock().unwrap().clone()
+    }
+
+    fn on_thumbfast_render(&self, app: &AppHandle, json: &str) {
+        match thumbs::load(json, &std::env::temp_dir()) {
+            Ok(thumb) => {
+                let ready = ThumbReady {
+                    width: thumb.width,
+                    height: thumb.height,
+                };
+                *self.thumb.lock().unwrap() = thumb.rgba;
+                let _ = app.emit("thumb:ready", ready);
+            }
+            Err(e) => {
+                let _ = app.emit("player:log", format!("thumbfast-render rejected: {e:?}"));
+            }
+        }
     }
 
     pub fn set_glass(&self, rects: Vec<GlassRect>, scale: f64) -> mpv_ffi::Result<()> {
@@ -177,6 +206,7 @@ impl Engine {
             [target, action] if target == "kaleido" && action == "screenshot" => {
                 self.screenshot_without_glass()
             }
+            [message, json] if message == "thumbfast-render" => self.on_thumbfast_render(app, json),
             _ => {
                 let _ = app.emit("player:message", args);
             }

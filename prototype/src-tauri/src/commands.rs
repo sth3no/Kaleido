@@ -71,3 +71,35 @@ pub fn glass_set_regions(
     let scale = window.scale_factor().map_err(|e| e.to_string())?;
     engine.set_glass(rects, scale).map_err(err)
 }
+
+#[tauri::command]
+pub fn thumb_request(engine: State<'_, Arc<Engine>>, seconds: f64) -> CmdResult {
+    // Empty x/y + our client name = "send me thumbfast-render instead of drawing an overlay".
+    let me = engine.mpv.client_name();
+    let time = format!("{:.3}", seconds.max(0.0));
+    engine
+        .mpv
+        .command(&[
+            "script-message-to",
+            "thumbfast",
+            "thumb",
+            &time,
+            "",
+            "",
+            &me,
+        ])
+        .map_err(err)
+}
+
+#[tauri::command]
+pub fn thumb_clear(engine: State<'_, Arc<Engine>>) -> CmdResult {
+    engine
+        .mpv
+        .command(&["script-message-to", "thumbfast", "clear"])
+        .map_err(err)
+}
+
+#[tauri::command]
+pub fn thumb_fetch(engine: State<'_, Arc<Engine>>) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(engine.latest_thumb())
+}
