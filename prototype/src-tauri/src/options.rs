@@ -3,10 +3,13 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
+use crate::glass;
+
 /// Files the prototype hands to mpv.
 pub struct Paths {
     pub data_dir: PathBuf,
     pub click_target: PathBuf,
+    pub shader: PathBuf,
 }
 
 impl Paths {
@@ -17,9 +20,13 @@ impl Paths {
             env!("CARGO_MANIFEST_DIR"),
             "/test-scripts/click-target.lua"
         ));
+        // The file stem is the shader name that glsl-shader-opts prefixes target.
+        let shader = data_dir.join(format!("{}.glsl", glass::SHADER));
+        std::fs::write(&shader, glass::shader_source())?;
         Ok(Paths {
             data_dir,
             click_target,
+            shader,
         })
     }
 }
@@ -44,5 +51,7 @@ pub fn mpv_options(paths: &Paths) -> Vec<(&'static str, String)> {
             paths.data_dir.join("mpv.log").display().to_string(),
         ),
         ("scripts", paths.click_target.display().to_string()),
+        ("glsl-shaders", paths.shader.display().to_string()),
+        ("screenshot-dir", "~~desktop/".into()),
     ]
 }

@@ -61,3 +61,13 @@ pub fn player_input(engine: State<'_, Arc<Engine>>, ev: crate::input::InputEvent
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     engine.mpv.command(&args).map_err(err)
 }
+
+#[tauri::command]
+pub fn glass_set_regions(
+    window: tauri::WebviewWindow,
+    engine: State<'_, Arc<Engine>>,
+    rects: Vec<crate::glass::GlassRect>,
+) -> CmdResult {
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    engine.set_glass(rects, scale).map_err(err)
+}

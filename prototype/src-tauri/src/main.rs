@@ -2,6 +2,7 @@
 
 mod commands;
 mod engine;
+mod glass;
 mod input;
 mod options;
 mod surface;
@@ -70,6 +71,7 @@ fn main() {
             commands::player_command,
             commands::surface_set_layout,
             commands::player_input,
+            commands::glass_set_regions,
         ])
         .run(tauri::generate_context!())
         .expect("Kaleido M0 se nepodařilo spustit");

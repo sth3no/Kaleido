@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -6,6 +6,8 @@ use mpv_ffi::{Event, Mpv, PropertyKind, PropertyValue, load_api, locate_libmpv};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter};
+
+use crate::glass::{self, GlassRect, OutputOrigin};
 
 /// Properties the UI renders (M0 subset of spec 4.4 `player:state`).
 const OBSERVED: &[(&str, PropertyKind)] = &[
@@ -25,8 +27,16 @@ const OBSERVED: &[(&str, PropertyKind)] = &[
 
 const TIME_POS_INTERVAL: Duration = Duration::from_millis(100);
 
+#[derive(Default)]
+struct GlassState {
+    rects: Vec<GlassRect>,
+    scale: f64,
+    origin: OutputOrigin,
+}
+
 pub struct Engine {
     pub mpv: Mpv,
+    glass: Mutex<GlassState>,
 }
 
 #[derive(Clone, Serialize)]
@@ -61,13 +71,59 @@ impl Engine {
             mpv.observe(id as u64, name, *kind)?;
         }
         mpv.request_log_messages("warn")?;
-        let engine = Arc::new(Engine { mpv });
+        // `s` = screenshot with the glass regions removed first (spec 5.4 #8); `S` stays mpv's default.
+        mpv.command(&["keybind", "s", "script-message kaleido screenshot"])?;
+        let engine = Arc::new(Engine {
+            mpv,
+            glass: Mutex::new(GlassState {
+                scale: 1.0,
+                ..GlassState::default()
+            }),
+        });
         let pump = Arc::clone(&engine);
         thread::Builder::new()
             .name("mpv-events".into())
             .spawn(move || pump.run_events(&app))
             .expect("spawn mpv event thread");
         Ok(engine)
+    }
+
+    pub fn set_glass(&self, rects: Vec<GlassRect>, scale: f64) -> mpv_ffi::Result<()> {
+        let mut glass = self.glass.lock().unwrap();
+        glass.rects = rects;
+        glass.scale = scale;
+        self.apply_glass(&glass)
+    }
+
+    fn apply_glass(&self, glass: &GlassState) -> mpv_ffi::Result<()> {
+        let opts = glass::shader_opts(&glass.rects, glass.scale, glass.origin);
+        self.mpv.set_property("glsl-shader-opts", &opts)
+    }
+
+    fn on_output_margin(&self, name: &str, value: &PropertyValue) {
+        if !glass::OUTPUT_EXCLUDES_MARGINS {
+            return;
+        }
+        let PropertyValue::Int64(px) = value else {
+            return;
+        };
+        let mut glass = self.glass.lock().unwrap();
+        match name {
+            "osd-dimensions/ml" => glass.origin.x = *px as f64,
+            "osd-dimensions/mt" => glass.origin.y = *px as f64,
+            _ => return,
+        }
+        let _ = self.apply_glass(&glass);
+    }
+
+    fn screenshot_without_glass(&self) {
+        let glass = self.glass.lock().unwrap();
+        let _ = self.mpv.set_property(
+            "glsl-shader-opts",
+            &glass::shader_opts(&[], 1.0, OutputOrigin::default()),
+        );
+        let _ = self.mpv.command(&["screenshot"]);
+        let _ = self.apply_glass(&glass);
     }
 
     fn run_events(&self, app: &AppHandle) {
@@ -85,6 +141,9 @@ impl Engine {
                             continue;
                         }
                         last_time_pos = Instant::now();
+                    }
+                    if name.starts_with("osd-dimensions/m") {
+                        self.on_output_margin(&name, &value);
                     }
                     let _ = app.emit(
                         "player:prop",
@@ -114,6 +173,13 @@ impl Engine {
     }
 
     fn on_client_message(&self, app: &AppHandle, args: Vec<String>) {
-        let _ = app.emit("player:message", args);
+        match args.as_slice() {
+            [target, action] if target == "kaleido" && action == "screenshot" => {
+                self.screenshot_without_glass()
+            }
+            _ => {
+                let _ = app.emit("player:message", args);
+            }
+        }
     }
 }

@@ -2,9 +2,9 @@ import { blurAfterPointer } from '../input/forward';
 import { playerCommand } from '../player';
 import { formatTime, type PlayerState } from '../playerState';
 
-export function Controls({ s }: { s: PlayerState }) {
+export function Controls({ s, hidden = false }: { s: PlayerState; hidden?: boolean }) {
   return (
-    <div className="capsule glass controls" data-glass>
+    <div className={`capsule glass controls${hidden ? ' hidden' : ''}`} data-glass>
       <div className="row">
         <span className="time">{formatTime(s.timePos)}</span>
         <input

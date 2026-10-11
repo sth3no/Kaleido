@@ -119,3 +119,11 @@ html, body, #root {
 .curtain.on { opacity: 1; transition: none; }
 
 .video-catcher { position: absolute; inset: 0; }
+
+.titlebar-left, .titlebar-right {
+  transition: opacity var(--k-motion-fast) ease, translate var(--k-motion-fast) var(--k-ease);
+}
+.capsule.hidden { opacity: 0; pointer-events: none; }
+.titlebar-left.hidden, .titlebar-right.hidden { translate: 0 -12px; }
+.controls.hidden { translate: 0 12px; }
+.app.idle { cursor: none; }
