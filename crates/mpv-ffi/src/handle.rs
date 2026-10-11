@@ -2,6 +2,7 @@ use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
+use crate::event::{self, Event, PropertyKind};
 use crate::sys::{self, Api};
 
 const MPV_ERROR_PROPERTY_UNAVAILABLE: i32 = -10;
@@ -105,6 +106,37 @@ impl Mpv {
         // SAFETY: returns a string owned by the handle, valid while ctx lives.
         let ptr = unsafe { (self.api.client_name)(self.ctx) };
         unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()
+    }
+
+    /// Delivers `Event::PropertyChange { id, .. }` now and on every change.
+    pub fn observe(&self, id: u64, name: &str, kind: PropertyKind) -> Result<()> {
+        let n = CString::new(name)?;
+        // SAFETY: ctx is live; name outlives the call.
+        let code = unsafe { (self.api.observe_property)(self.ctx, id, n.as_ptr(), kind.format()) };
+        self.check(code, || format!("observe {name}"))
+    }
+
+    /// `min_level` is an mpv log level: "no", "fatal", "error", "warn", "info", "v", "debug", "trace".
+    pub fn request_log_messages(&self, min_level: &str) -> Result<()> {
+        let level = CString::new(min_level)?;
+        // SAFETY: ctx is live; level outlives the call.
+        let code = unsafe { (self.api.request_log_messages)(self.ctx, level.as_ptr()) };
+        self.check(code, || format!("request_log_messages {min_level}"))
+    }
+
+    /// Blocks up to `timeout_secs` (negative = forever). Call from a single thread only.
+    pub fn wait_event(&self, timeout_secs: f64) -> Event {
+        // SAFETY: the returned event is converted before any further libmpv call on this thread.
+        unsafe {
+            let raw = (self.api.wait_event)(self.ctx, timeout_secs);
+            event::from_raw(&self.api, raw)
+        }
+    }
+
+    /// Makes a blocked `wait_event` return `Event::None`.
+    pub fn wakeup(&self) {
+        // SAFETY: ctx is live; mpv_wakeup is explicitly thread-safe.
+        unsafe { (self.api.wakeup)(self.ctx) }
     }
 
     fn get_raw(&self, name: &str, format: sys::mpv_format, out: *mut c_void) -> Result<()> {

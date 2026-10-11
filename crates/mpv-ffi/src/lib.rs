@@ -1,6 +1,7 @@
 //! Thin, safe wrapper over the upstream libmpv client API, loaded at runtime (spec 3, 4.2).
 
 mod error;
+mod event;
 mod handle;
 pub mod sys;
 #[doc(hidden)]
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use error::{Error, Result};
+pub use event::{EndFileReason, Event, PropertyKind, PropertyValue};
 pub use handle::Mpv;
 
 /// Overrides where libmpv is loaded from.
