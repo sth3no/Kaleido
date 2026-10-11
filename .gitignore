@@ -1,0 +1,6 @@
+/target/
+/vendor/
+node_modules/
+/prototype/dist/
+/prototype/src-tauri/gen/
+*.log
