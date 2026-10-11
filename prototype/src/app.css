@@ -127,3 +127,32 @@ html, body, #root {
 .titlebar-left.hidden, .titlebar-right.hidden { translate: 0 -12px; }
 .controls.hidden { translate: 0 12px; }
 .app.idle { cursor: none; }
+
+/* Window controls stay above the page and its mini-player shadow. */
+.titlebar-left, .titlebar-right { z-index: 5; }
+.page {
+  position: absolute;
+  top: 80px;
+  left: 40px;
+  font-size: 20px;
+  font-weight: 700;
+  z-index: 2;
+}
+/* The huge spread shadow paints the opaque page around a transparent hole. */
+.mini-frame {
+  position: absolute;
+  border-radius: 16px;
+  box-shadow: 0 0 0 100vmax var(--k-page-solid), 0 10px 34px rgba(0, 0, 0, 0.5);
+  outline: 1px solid var(--k-glass-border);
+  z-index: 1;
+}
+.mini-bar {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+}

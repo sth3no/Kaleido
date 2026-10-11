@@ -2,7 +2,9 @@ import { blurAfterPointer } from '../input/forward';
 import { playerCommand } from '../player';
 import { formatTime, type PlayerState } from '../playerState';
 
-export function Controls({ s, hidden = false }: { s: PlayerState; hidden?: boolean }) {
+type Props = { s: PlayerState; hidden?: boolean; onMini(): void };
+
+export function Controls({ s, hidden = false, onMini }: Props) {
   return (
     <div className={`capsule glass controls${hidden ? ' hidden' : ''}`} data-glass>
       <div className="row">
@@ -41,6 +43,9 @@ export function Controls({ s, hidden = false }: { s: PlayerState; hidden?: boole
           {s.pause ? '▶' : '❚❚'}
         </button>
         <span className="spacer" />
+        <button className="icon-btn" aria-label="Mini přehrávač" onClick={onMini} {...blurAfterPointer}>
+          ▣
+        </button>
         <button
           className="icon-btn"
           aria-label="Celá obrazovka"
