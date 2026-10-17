@@ -19,7 +19,7 @@ use crate::player::{Engine, Request};
 pub const MPV_WINDOW_CLASS: &str = "mpv";
 
 /// The label of the main window (tauri.conf.json).
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)

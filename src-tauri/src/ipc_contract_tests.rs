@@ -49,6 +49,7 @@ use crate::system::clipboard::PasteOutcome;
 use crate::system::diagnostics::License;
 use crate::system::dialog::DialogPurpose;
 use crate::system::{self, OpenRequestEvent};
+use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbReady};
 
 // ---------------------------------------------------------------------------------------------
@@ -217,7 +218,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 16] = [
+const WITHOUT_ARGUMENTS: [&str; 17] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -234,6 +235,7 @@ const WITHOUT_ARGUMENTS: [&str; 16] = [
     "system_copy_diagnostics",
     "system_open_logs",
     "system_licenses",
+    "system_appearance",
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -872,6 +874,33 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     );
     for settings in &all_settings {
         serialized(out, &fixture_name(settings::CHANGED_EVENT), settings);
+    }
+    // What Windows says: the event and the answer of `system_appearance` are the same payload.
+    // Windows 11 as it comes, Windows 10 without transparency, high contrast on a new build.
+    let system_appearances = [
+        SystemAppearance {
+            transparency_effects: true,
+            high_contrast: false,
+            windows_build: 22631,
+        },
+        SystemAppearance {
+            transparency_effects: false,
+            high_contrast: false,
+            windows_build: 19045,
+        },
+        SystemAppearance {
+            transparency_effects: true,
+            high_contrast: true,
+            windows_build: 26200,
+        },
+    ];
+    for appearance in &system_appearances {
+        serialized(
+            out,
+            &fixture_name(themes::APPEARANCE_CHANGED_EVENT),
+            appearance,
+        );
+        serialized(out, "returns.system_appearance", appearance);
     }
 
     // What commands resolve with.

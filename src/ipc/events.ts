@@ -16,6 +16,7 @@ import type {
   PlayerMessage,
   PlayerStateBatch,
   Settings,
+  SystemAppearance,
   ThumbReady,
 } from './types';
 
@@ -66,3 +67,7 @@ export const onGlassState = (callback: (payload: GlassState) => void) =>
 /** Kaleido's settings changed; the payload is all of them. */
 export const onSettingsChanged = (callback: (payload: Settings) => void) =>
   on('settings:changed', callback);
+
+/** Windows' transparency effects, high contrast or build changed. Comes only on a change: ask with `systemAppearance` at start. */
+export const onSystemAppearanceChanged = (callback: (payload: SystemAppearance) => void) =>
+  on('system:appearance-changed', callback);

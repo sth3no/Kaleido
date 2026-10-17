@@ -86,6 +86,22 @@ pub fn report(engine: &Engine, paths: &AppPaths) -> String {
 }
 
 fn windows_version() -> String {
+    match os_version() {
+        Some(info) => format!(
+            "{}.{}.{}",
+            info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber
+        ),
+        None => UNKNOWN.to_owned(),
+    }
+}
+
+/// The Windows build number (`RtlGetVersion`, which the manifest does not change), `None` if it
+/// cannot be read. 22000 and up is Windows 11 (the appearance uses it for Mica).
+pub(crate) fn windows_build() -> Option<u32> {
+    os_version().map(|info| info.dwBuildNumber)
+}
+
+fn os_version() -> Option<OSVERSIONINFOW> {
     let mut info = OSVERSIONINFOW {
         dwOSVersionInfoSize: size_of::<OSVERSIONINFOW>() as u32,
         ..OSVERSIONINFOW::default()
@@ -94,13 +110,10 @@ fn windows_version() -> String {
     let status = unsafe { RtlGetVersion(&mut info) };
     // NT_SUCCESS: success and informational codes are not negative.
     if status.0 >= 0 {
-        format!(
-            "{}.{}.{}",
-            info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber
-        )
+        Some(info)
     } else {
         tracing::warn!("cannot read the Windows version: status {:#x}", status.0);
-        UNKNOWN.to_owned()
+        None
     }
 }
 

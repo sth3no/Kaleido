@@ -158,3 +158,9 @@ export const systemOpenLogs = () => call('system_open_logs');
 
 /** The licenses of the third-party software Kaleido ships. */
 export const systemLicenses = () => call('system_licenses');
+
+/**
+ * Windows' transparency effects, high contrast and build. Ask when the UI starts: the event
+ * (`onSystemAppearanceChanged`) comes only on a change.
+ */
+export const systemAppearance = () => call('system_appearance');

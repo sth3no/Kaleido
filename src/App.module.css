@@ -1,7 +1,8 @@
 /* Opaque until the video is loaded (spec 5.1): the window is transparent, so without a
-   background the desktop shows through. index.html paints the same colour before the bundle
-   has loaded. */
+   background the desktop shows through. The background is the token's gradient, or nothing on
+   Windows 11 where Mica is behind the window (global.css). index.html paints the dark token's
+   colour before the bundle has loaded. */
 .root {
   min-height: 100vh;
-  background: #0e0e12;
+  background: var(--k-backdrop);
 }

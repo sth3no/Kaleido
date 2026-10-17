@@ -9,6 +9,7 @@ pub mod player;
 pub mod settings;
 pub mod surface;
 pub mod system;
+pub mod themes;
 pub mod thumbs;
 
 #[cfg(test)]
@@ -58,6 +59,8 @@ pub fn run() {
         .manage(opens)
         // Before the engine: a preview may arrive as soon as thumbfast has started.
         .manage(thumbs::ThumbStore::default())
+        // Empty until the setup has made the glass; the appearance events wait for it.
+        .manage(themes::ThemeState::default())
         .invoke_handler(tauri::generate_handler![
             commands::player_command,
             commands::player_input,
@@ -87,6 +90,7 @@ pub fn run() {
             commands::system_copy_diagnostics,
             commands::system_open_logs,
             commands::system_licenses,
+            commands::system_appearance,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
@@ -145,6 +149,9 @@ pub fn run() {
             let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
             glass.set_scale(window.scale_factor()?);
             app.manage(glass);
+            // After the glass: Windows' transparency and the settings decide whether it runs,
+            // and the window gets Mica.
+            themes::start(app.handle());
             // Without it only dropping files fails; the dialog still opens them.
             if let Err(error) = system::drop::install(window.as_ref()) {
                 tracing::error!("dropped files will not open: {error:#}");
@@ -162,6 +169,11 @@ pub fn run() {
                     glass.set_scale(*scale_factor);
                 }
                 surface::window_resized(window);
+            }
+            // Windows' dark or light theme flipped. Its transparency switch and high contrast
+            // do not send this, so the focus looks again too (see `themes::refresh`).
+            WindowEvent::ThemeChanged(_) | WindowEvent::Focused(true) => {
+                themes::refresh(window.app_handle());
             }
             WindowEvent::CloseRequested { api, .. } => {
                 // mpv saves the position first. The wait runs on another thread: this one has

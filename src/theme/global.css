@@ -1,0 +1,101 @@
+/*
+ * Global styles. The design tokens are CSS variables (--k-*) that useAppearance writes to the
+ * root element (tokens.ts); components take every value from them. The root also carries
+ * data-theme ("dark" or "light"), data-reduce-transparency and data-mica, and --k-ui-scale.
+ */
+
+:root {
+  color-scheme: dark;
+  /*
+   * The UI scale, 90 to 150 % (spec 8.9), as zoom. Never transform: scale on an ancestor of an
+   * element with backdrop-filter: Chromium draws it wrong (spec 8.2).
+   */
+  zoom: var(--k-ui-scale, 1);
+  /*
+   * What pages paint behind their content: the gradient, or nothing where Mica is behind the
+   * window (Windows 11). On Windows 10 there is no Mica, so the gradient is what is shown.
+   */
+  --k-backdrop: var(--k-color-backdrop);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-mica] {
+  --k-backdrop: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--k-backdrop);
+}
+
+body {
+  color: var(--k-color-text);
+  font-family: var(--k-font-family, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif);
+  font-size: var(--k-font-size-m);
+}
+
+/* Times and other numbers that change: digits of one width, so that they do not jitter. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Everything can be reached with the keyboard, and where it is is always visible (spec 8.9). */
+:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+}
+
+/*
+ * Reduced motion (the animations are off in Windows): only fades are left. The properties that
+ * move or resize things do not transition, so panels and islands appear and go in place, and the
+ * spring curve is a plain one.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --k-motion-spring: ease !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-property: opacity, color, background-color, border-color, outline-color !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * A high-contrast theme of Windows: the system colours instead of ours. The tokens are set on
+ * the root element by script (a style attribute), so only !important beats them. A selected item
+ * is painted Highlight: what sits on it should use HighlightText.
+ */
+@media (forced-colors: active) {
+  :root {
+    --k-color-bg: Canvas !important;
+    --k-color-backdrop: Canvas !important;
+    --k-color-text: CanvasText !important;
+    --k-color-text-muted: CanvasText !important;
+    --k-color-text-subtle: GrayText !important;
+    --k-color-border: CanvasText !important;
+    --k-color-divider: GrayText !important;
+    --k-color-hover: transparent !important;
+    --k-color-selected: Highlight !important;
+    --k-color-glass-border: CanvasText !important;
+    --k-color-glass-highlight: transparent !important;
+    --k-color-on-glass: CanvasText !important;
+    --k-color-on-accent: HighlightText !important;
+    --k-color-danger: CanvasText !important;
+    --k-glass-tint: Canvas !important;
+    --k-accent-gradient: linear-gradient(90deg, Highlight, Highlight) !important;
+    --k-accent-solid: Highlight !important;
+    --k-shadow-glass: none !important;
+    --k-shadow-popover: none !important;
+    --k-shadow-text: none !important;
+    --k-focus-ring: 2px solid Highlight !important;
+  }
+}

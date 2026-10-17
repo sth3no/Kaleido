@@ -124,7 +124,7 @@ export type GlassRect = {
 export type GlassReason =
   /** The user turned transparency off. */
   | 'user'
-  /** Windows turned transparency effects off. */
+  /** Windows turned transparency effects off, or a high-contrast theme replaced them. */
   | 'system'
   /** The shader or the GPU failed; the glass stays off until Kaleido restarts. */
   | 'gpuFailure';
@@ -204,6 +204,19 @@ export type SettingsError =
   | { type: 'io'; message: string }
   /** The player is not running (yet). */
   | { type: 'unavailable' };
+
+/**
+ * What Windows says about the look of the desktop (src-tauri/src/themes.rs): what
+ * `system_appearance` returns and the payload of `system:appearance-changed`.
+ */
+export interface SystemAppearance {
+  /** Windows' "Transparency effects" switch. */
+  transparencyEffects: boolean;
+  /** A high-contrast theme is on (the UI's `forced-colors`). */
+  highContrast: boolean;
+  /** The Windows build number, 0 if unknown; 22000 and up is Windows 11, which has Mica. */
+  windowsBuild: number;
+}
 
 /** An audio output from mpv's `audio-device-list`. */
 export type AudioDevice = {
@@ -310,7 +323,7 @@ export type VideoParams = {
 export type OsdDimensions = { w: number; h: number; ml: number; mr: number; mt: number; mb: number };
 
 // ---------------------------------------------------------------------------------------------
-// Events (Rust emits them; src-tauri/src/lib.rs, player/state.rs, glass.rs, thumbs.rs, system, commands.rs)
+// Events (Rust emits them; src-tauri/src/lib.rs, player/state.rs, glass.rs, thumbs.rs, themes.rs, system, commands.rs)
 
 /** Why a file stopped. */
 export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
@@ -345,6 +358,7 @@ export interface EventTable {
   'system:paste-empty': EmptyPayload;
   'glass:state': GlassState;
   'settings:changed': Settings;
+  'system:appearance-changed': SystemAppearance;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -388,6 +402,7 @@ export interface CommandTable {
   system_copy_diagnostics: { args: undefined; result: Nothing };
   system_open_logs: { args: undefined; result: Nothing };
   system_licenses: { args: undefined; result: License[] };
+  system_appearance: { args: undefined; result: SystemAppearance };
 }
 
 /**

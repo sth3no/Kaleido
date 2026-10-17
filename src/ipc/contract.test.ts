@@ -34,6 +34,7 @@ import rejectsSettingsSetJson from '../../src-tauri/tests/fixtures/ipc/rejects.s
 import rejectsSystemOpenTextJson from '../../src-tauri/tests/fixtures/ipc/rejects.system_open_text.json';
 import returnsSettingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_audio_devices.json';
 import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_bindings.json';
+import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
 import returnsSystemLicensesJson from '../../src-tauri/tests/fixtures/ipc/returns.system_licenses.json';
 import returnsSystemPasteJson from '../../src-tauri/tests/fixtures/ipc/returns.system_paste.json';
 import settingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/settings_audio_devices.json';
@@ -47,6 +48,8 @@ import settingsResetBindingJson from '../../src-tauri/tests/fixtures/ipc/setting
 import settingsSetJson from '../../src-tauri/tests/fixtures/ipc/settings_set.json';
 import settingsSetMpvJson from '../../src-tauri/tests/fixtures/ipc/settings_set_mpv.json';
 import surfaceSetLayoutJson from '../../src-tauri/tests/fixtures/ipc/surface_set_layout.json';
+import systemAppearanceEventJson from '../../src-tauri/tests/fixtures/ipc/system.appearance-changed.json';
+import systemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/system_appearance.json';
 import systemCopyDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_copy_diagnostics.json';
 import systemDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_diagnostics.json';
 import systemFontsJson from '../../src-tauri/tests/fixtures/ipc/system_fonts.json';
@@ -97,6 +100,7 @@ import type {
   Settings,
   SettingsError,
   SourceError,
+  SystemAppearance,
   ThemeMode,
   ThumbReady,
   TrackKind,
@@ -145,6 +149,7 @@ const commandFixtures = {
   settings_set: settingsSetJson,
   settings_set_mpv: settingsSetMpvJson,
   surface_set_layout: surfaceSetLayoutJson,
+  system_appearance: systemAppearanceJson,
   system_copy_diagnostics: systemCopyDiagnosticsJson,
   system_diagnostics: systemDiagnosticsJson,
   system_fonts: systemFontsJson,
@@ -170,6 +175,7 @@ const eventFixtures = {
   'player:state': playerStateEventJson,
   'player:thumb': playerThumbEventJson,
   'settings:changed': settingsChangedEventJson,
+  'system:appearance-changed': systemAppearanceEventJson,
   'system:open-request': systemOpenRequestEventJson,
   'system:paste-empty': systemPasteEventJson,
 } satisfies { [K in keyof EventTable]: Fixture<EventTable[K]> };
@@ -178,12 +184,16 @@ const eventFixtures = {
 const returnFixtures = {
   settings_audio_devices: returnsSettingsAudioDevicesJson,
   settings_bindings: returnsSettingsBindingsJson,
+  system_appearance: returnsSystemAppearanceJson,
   system_licenses: returnsSystemLicensesJson,
   system_paste: returnsSystemPasteJson,
 } satisfies {
-  [K in 'settings_audio_devices' | 'settings_bindings' | 'system_licenses' | 'system_paste']: Fixture<
-    CommandTable[K]['result']
-  >;
+  [K in
+    | 'settings_audio_devices'
+    | 'settings_bindings'
+    | 'system_appearance'
+    | 'system_licenses'
+    | 'system_paste']: Fixture<CommandTable[K]['result']>;
 };
 
 /** What a command rejects with (the `Err` of its `Result`). */
@@ -297,6 +307,9 @@ const APPEARANCE: Shape<Appearance> = {
     reduceTransparency: 'required',
     uiScale: 'required',
   },
+};
+const SYSTEM_APPEARANCE: Shape<SystemAppearance> = {
+  fields: { transparencyEffects: 'required', highContrast: 'required', windowsBuild: 'required' },
 };
 const PLAYBACK: Shape<Playback> = { fields: { openWhilePlaying: 'required' } };
 const SETTINGS: Shape<Settings> = {
@@ -462,6 +475,18 @@ describe('fixtures type-check against the IPC types', () => {
     expectAll(changed.map(({ playback }) => playback.openWhilePlaying), LOAD_MODES, 'open while playing');
   });
 
+  test('system:appearance-changed and system_appearance carry the same payloads', () => {
+    const changed = eventFixtures['system:appearance-changed'];
+    expect(returnFixtures.system_appearance).toEqual(changed);
+    // Each switch is on in one sample and off in another, so that a constant would show.
+    for (const key of ['transparencyEffects', 'highContrast'] as const) {
+      expect([...new Set(changed.map((sample) => sample[key]))].sort(), key).toEqual([false, true]);
+    }
+    // Windows 10 and Windows 11 builds (Mica starts at 22000).
+    expect(changed.some(({ windowsBuild }) => windowsBuild < 22000)).toBe(true);
+    expect(changed.some(({ windowsBuild }) => windowsBuild >= 22000)).toBe(true);
+  });
+
   test('structs have exactly the fields of their types, nested ones too', () => {
     // What the UI sends.
     expectShape(
@@ -478,12 +503,14 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(eventFixtures['system:open-request'], OPEN_REQUEST, 'OpenRequest');
     expectShape(eventFixtures['glass:state'], GLASS_STATE, 'GlassState');
     expectShape(eventFixtures['settings:changed'], SETTINGS, 'Settings');
+    expectShape(eventFixtures['system:appearance-changed'], SYSTEM_APPEARANCE, 'SystemAppearance');
     for (const channel of ['player:file-loaded', 'system:paste-empty'] as const) {
       for (const payload of eventFixtures[channel]) expect(Object.keys(payload), channel).toEqual([]);
     }
     // What commands resolve or reject with.
     expectShape(returnFixtures.settings_bindings.flat(), BINDING, 'Binding');
     expectShape(returnFixtures.settings_audio_devices.flat(), AUDIO_DEVICE, 'AudioDevice');
+    expectShape(returnFixtures.system_appearance, SYSTEM_APPEARANCE, 'SystemAppearance');
     expectShape(returnFixtures.system_licenses.flat(), LICENSE, 'License');
     expectShape(
       [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text],
@@ -538,6 +565,7 @@ const wrappers = {
   settings_set: ({ patch }) => commands.settingsSet(patch),
   settings_set_mpv: ({ key, value }) => commands.settingsSetMpv(key, value),
   surface_set_layout: ({ layout }) => commands.surfaceSetLayout(layout),
+  system_appearance: () => commands.systemAppearance(),
   system_copy_diagnostics: () => commands.systemCopyDiagnostics(),
   system_diagnostics: () => commands.systemDiagnostics(),
   system_fonts: () => commands.systemFonts(),
@@ -563,6 +591,7 @@ const subscribers = {
   'player:state': events.onPlayerState,
   'player:thumb': events.onThumb,
   'settings:changed': events.onSettingsChanged,
+  'system:appearance-changed': events.onSystemAppearanceChanged,
   'system:open-request': events.onOpenRequest,
   'system:paste-empty': events.onPasteEmpty,
 } satisfies { [K in keyof EventTable]: (callback: (payload: EventTable[K]) => void) => Promise<unknown> };

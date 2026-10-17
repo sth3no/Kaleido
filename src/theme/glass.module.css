@@ -1,0 +1,70 @@
+/*
+ * Glass (spec 8.1, 8.2, 8.9). Over the video the blur is done by the shader in mpv (WebView2
+ * cannot see the video); this is the tint, the opacity, the edge and the light on top of it.
+ * Elsewhere backdrop-filter blurs the page behind, with the same blur and saturation.
+ *
+ * Never put transform: scale on an ancestor of a .glass: backdrop-filter breaks in WebView2.
+ * The UI scale is zoom on the root.
+ */
+
+.glass {
+  position: relative;
+  /* So that the light below can sit under the content and over the tint (z-index -1). */
+  isolation: isolate;
+  color: var(--k-color-on-glass);
+  /* Text on glass stays readable over any video (spec 8.9). */
+  text-shadow: var(--k-shadow-text);
+  /*
+   * The tint at its opacity. The opacity is held at 45 % at the least by the tokens (spec 8.9),
+   * so this is never thinner than the text can bear.
+   */
+  background: color-mix(
+    in srgb,
+    var(--k-glass-tint) calc(var(--k-glass-opacity) * 100%),
+    transparent
+  );
+  border: 1px solid var(--k-color-glass-border);
+  border-radius: var(--k-radius-l);
+  box-shadow: var(--k-shadow-glass);
+  backdrop-filter: blur(var(--k-glass-blur)) saturate(var(--k-glass-saturation));
+}
+
+/* The light in the top left corner. */
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 80% at 15% 0%, var(--k-color-glass-highlight), transparent 55%);
+}
+
+/*
+ * Reduced transparency (the setting, Windows without transparency effects, or a glass that
+ * failed): opaque, with no backdrop-filter; the shader is off then (spec 8.9, 10.6).
+ */
+:global([data-reduce-transparency]) .glass {
+  background: var(--k-glass-tint);
+  backdrop-filter: none;
+}
+
+:global([data-reduce-transparency]) .glass::before {
+  display: none;
+}
+
+/* A high-contrast theme of Windows: a plain panel in system colours. */
+@media (forced-colors: active) {
+  .glass {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+    text-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .glass::before {
+    display: none;
+  }
+}

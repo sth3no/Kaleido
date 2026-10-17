@@ -16,6 +16,7 @@ use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, Share
 use crate::surface::{Layout, Surface};
 use crate::system::diagnostics::{self, License};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
+use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbStore};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
@@ -156,6 +157,13 @@ async fn on_blocking_thread<T: Send + 'static>(
     }
 }
 
+/// Windows' transparency effects, high contrast and build, as `system:appearance-changed` says
+/// them when they change. Synchronous: it reads one registry value and two system settings.
+#[tauri::command]
+pub fn system_appearance() -> SystemAppearance {
+    themes::read()
+}
+
 /// Kaleido's own settings (settings.json). Reads the store only.
 #[tauri::command]
 pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
@@ -163,17 +171,24 @@ pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
 }
 
 /// Changes Kaleido's settings: `patch` is merged in (a JSON merge patch), checked and written;
-/// on an error nothing changed. The UI hears the new settings as `settings:changed`.
-/// Synchronous: it writes one small file and never waits for mpv.
+/// on an error nothing changed. The UI hears the new settings as `settings:changed`. A patch
+/// that touches the appearance is also applied here: the glass shader on or off, Mica, the
+/// window's theme. Synchronous: it writes one small file and never waits for mpv.
 #[tauri::command]
 pub fn settings_set(
     app: AppHandle,
     store: State<'_, SharedSettings>,
     patch: Value,
 ) -> Result<Settings, SettingsError> {
+    let appearance_changes = themes::touches_appearance(&patch);
     let settings = settings::lock(&store).update(patch)?;
     if let Err(error) = app.emit(settings::CHANGED_EVENT, &settings) {
         tracing::warn!("cannot send {} to the UI: {error}", settings::CHANGED_EVENT);
+    }
+    // Only for the appearance: setting the same window effect again would flicker, and the
+    // other settings have nothing to do with it.
+    if appearance_changes {
+        themes::on_settings_changed(&app, &settings.appearance);
     }
     Ok(settings)
 }

@@ -6,11 +6,23 @@
     <title>Kaleido</title>
     <style>
       /* The window is transparent and the video is not loaded yet (spec 5.1): paint an opaque
-         background before any script runs, or the desktop shows through. */
+         background before any script runs, or the desktop shows through. These are the `bg`
+         colours of the dark and the light design tokens (src/theme/tokens.ts, which a test
+         compares with this file). They apply only until the app sets data-theme on <html>; from
+         then on the tokens paint the page (global.css), or Mica shows through on Windows 11. */
       html,
       body {
         margin: 0;
-        background: #0e0e12;
+      }
+      html:not([data-theme]),
+      html:not([data-theme]) body {
+        background: #15122b;
+      }
+      @media (prefers-color-scheme: light) {
+        html:not([data-theme]),
+        html:not([data-theme]) body {
+          background: #f4f2fb;
+        }
       }
     </style>
   </head>

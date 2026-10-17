@@ -276,7 +276,8 @@ pub fn is_glass_failure(line: &LogLine) -> bool {
 pub enum GlassReason {
     /// The user turned transparency off.
     User,
-    /// Windows turned transparency effects off.
+    /// Windows turned transparency effects off, or a high-contrast theme replaced them
+    /// (`themes::plan`).
     System,
     /// The shader or the GPU failed (spec 10.6); the glass stays off until Kaleido restarts.
     GpuFailure,
