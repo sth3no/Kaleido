@@ -19,7 +19,7 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
 | 2 | HDR | HDR10 se zapnutým i vypnutým HDR ve Windows, UI nerozbije HDR | částečně | UI: syntetické HDR10 se načte, štítek „4K HDR“, obraz a sklo se vykreslí. Skutečný jas HDR, přepínání Windows HDR a oba režimy neověřeny. | otevřené |
 | 3 | přeposílání vstupu | klávesy s modifikátory, myš, kolečko; konzole; menu v obraze | částečně | UI: Space, šipka, seekbar, hlasitost, kolečko (60→62 %), click-target (0→1), dvojklik fullscreen, konzole a český text prošly. Držení/modifikátory a 150 % DPI zbývají. | |
 | 4 | fullscreen a DPI | černá clona, přesun mezi monitory s různým DPI | částečně | UI: tlačítko fullscreen a dvojklik zvětší video na 1920×1080; Escape vrátí okno. Snímky nezměří přechodové bliknutí; jiné DPI a 10 rychlých přepnutí zbývají. | |
-| 5 | shader sklo | oblasti za běhu, ≤ 1 ms GPU ve 4K, sleduje animaci | částečně | UI: rozmazání pod kapslemi; `g` vypne/zapne i při pauze; autohide a letterbox ověřeny. Statistika u 4K zdroje v okně 1280×720 ukázala průměr H/V/composite 20+6+24 µs; není to měření 4K výstupu ani obou GPU. | výkon ve 4K a DPI zbývá |
+| 5 | shader sklo | oblasti za běhu, ≤ 1 ms GPU ve 4K, sleduje animaci | částečně | UI: rozmazání pod kapslemi; `g` vypne/zapne i při pauze; při autohide rozmazání mizí s kapslemi (bliknutí neměřeno); letterbox je vidět, sedění rozmazání nad pruhy nepotvrzeno. Statistika u 4K zdroje v okně 1280×720 ukázala průměr H/V/composite 20+6+24 µs; není to měření 4K výstupu ani obou GPU. | výkon ve 4K a DPI zbývá |
 | 6 | mini přehrávač | podokno synchronně s animací UI | částečně | UI: zmenšení do rohu, pauza/přehrání a návrat tlačítkem fungují po opravě zachytávání ukazatele. Záznam animace po snímcích neproveden. | oprava nainstalována |
 | 7 | thumbfast | `kaleido-mpv.exe` + `thumbfast-render` v React bublině | částečně | UI: SDR i opravený syntetický HDR náhled v bublině fungují bez konzolového okna; červená a modrá se již neposouvají ani nebělají. Limit 300 ms a skutečný HDR materiál neověřeny. | společný AVFilter graf, Mobius → sRGB/BT.709; upstream thumbfast nezměněn |
 | 8 | snímek obrazovky | bez rozmazaných oblastí skla | prošlo | UI: `s` vytvořilo čistý JPG 1920×804 na Ploše, `Shift+s` obsahuje rozmazané oblasti. Oba výstupy vizuálně zkontrolovány. Opravena neplatná mpv cesta `~~desktop/`. | používá Windows cestu z Tauri |
@@ -41,7 +41,11 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
   DXGI/DirectComposition.
 - Riziko pro M1: spoléháme na název třídy okna `mpv`, což je interní detail upstreamu. Pokud se
   změní, `find_child` okno nenajde a mini přehrávač nebude umisťovat video (video zůstane na celém
-  okně). Ošetřit testem v CI s libmpv.
+  okně). Hlídá to test `surface_moves_the_window_libmpv_creates_inside_wid` (2026-10-17): spustí
+  připnutou libmpv s `wid`, `vo=gpu-next` a `gpu-api=d3d11`, ověří okno třídy `mpv` jako přímého
+  potomka a jeho přesun do obdélníku mini přehrávače. Běží v CI v jobu `prototype`, který si nově
+  stahuje libmpv. Projde i s vynuceným WARP (`d3d11-warp=yes`, „software adapter“), takže CI runner
+  bez GPU okno vytvoří a `#[ignore]` není potřeba. Se změněným názvem třídy test selže.
 
 ### Výkon (Task 13, 2026-10-17)
 
@@ -77,8 +81,6 @@ Odchylky od plánu:
 - Pauza je stav po dohrání s `keep-open=yes`, ne stisk mezerníku.
 - Platí pro výchozí GPU (RTX 5060 Ti, výstup 1920×1080 při 239 Hz). Integrovaná AMD a 4K zdroj
   měřeny nebyly.
-
-## Závěr a doporučení pro M1
 
 ## Otevírání z Windows (2026-10-14)
 
@@ -202,3 +204,85 @@ a režimem `-WhatIf` pro instalaci i odebrání registrace. Zástupce i registra
 kontrolu vlastnictví a odebrání registrace ponechává soubory aplikace.
 Po posledním zavření přes viditelné ✕ nezůstal proces Kaleida ani helperu. Poslední opakovaná
 instalace prošla a znovu byly porovnány všechny původní ProgID i hashe: beze změny.
+
+## Závěr a doporučení pro M1 (koncept)
+
+> **Koncept z 2026-10-17, ne konečný závěr.** Ruční kontroly z [checklist.md](checklist.md), které
+> potřebují oči uživatele, HDR monitor, jiné DPI nebo druhou GPU, zatím neproběhly a M0 je do té
+> doby rozpracované. Body označené **OTEVŘENÉ** se po kontrolách doplní nebo přepíšou; konečná
+> zpráva nesmí obsahovat čekající ani otevřené body (Task 13, krok 2).
+
+### Body 5.4
+
+| # | Stav | Prošlo | OTEVŘENÉ (čeká na ruční kontrolu) |
+|---|---|---|---|
+| 1 | částečně | video pod průhledným WebView2 v okně mpv; SDR, letterbox, 4K i syntetické HDR pod kapslemi; změna velikosti a maximalizace | blikání při rychlé změně velikosti a přesunu, 60 fps |
+| 2 | částečně | syntetické HDR10 se načte, štítek „4K HDR“, obraz i sklo se vykreslí | skutečné HDR10 na HDR monitoru, Windows HDR zapnuté i vypnuté |
+| 3 | částečně | mezerník, šipka, seekbar, hlasitost, kolečko, `click-target`, dvojklik, konzole s diakritikou | podržená šipka, Ctrl puštěný dřív než šipka, `click-target` při 150 %, ▶ a mezerník přepnou pauzu jen jednou |
+| 4 | částečně | fullscreen tlačítkem i dvojklikem, Esc vrátí okno | přechod přes černou clonu bez bliknutí, 10 rychlých přepnutí, monitory s různým DPI |
+| 5 | částečně | rozmazání pod kapslemi, `g`, mizí s kapslemi při autohide; 20 + 6 + 24 µs (4K zdroj v okně 1280×720, RTX 5060 Ti) | tvar při 150 %, sedění nad pruhy letterboxu, bliknutí při autohide, ≤ 1 ms při 4K výstupu na RTX 5060 Ti i integrované AMD |
+| 6 | částečně | zmenšení do rohu, ▶/❚❚ a návrat tlačítkem | záznam 60 fps (hrana videa zaostává nejvýš o 1 snímek), dvojklik v mini režimu |
+| 7 | částečně | `kaleido-mpv.exe` jako `mpv_path`, náhled v bublině bez konzolového okna, syntetické HDR barvy | náhled do 300 ms, skutečný HDR materiál |
+| 8 | prošlo | `s` bez skla, `S` se sklem, složka Plochy z Tauri | — |
+
+**Výkon (Task 13, krok 1):** všech pět cílů prošlo na RTX 5060 Ti s 1080p SDR. **OTEVŘENÉ:**
+integrovaná AMD a 4K zdroj (`scripts/measure-m0.ps1`, postup v sekci Výkon).
+
+**Záložní řešení ze spec 5.4:** žádný bod zatím neselhal, takže žádné záložní řešení není potřeba.
+**OTEVŘENÉ** do ručních kontrol: bod 1 (dvě okna), bod 5 (tónované sklo bez rozmazání, případně
+rozmazání ve sníženém rozlišení podle spec 13) a bod 6 (skok + prolnutí podle 8.6).
+
+**Uzavřená rozhodnutí**, promítnutá do spec 2026-10-17 (kapitoly 3, 4.1, 4.2, 5.1, 5.2, 5.4, 8.2,
+8.6, 9.3 a 15):
+
+- `wid` = hlavní okno; mpv si vytvoří okno třídy `mpv` pod WebView2 a mini přehrávač ho přesouvá
+  přes `SetWindowPos`. Vlastní podokno jako `wid` je zamítnuté.
+- `kaleido-mpv` přepisuje HDR filtr thumbfastu na jeden `lavfi` graf; upstream thumbfast se nemění.
+- `screenshot-dir` je cesta Plochy z Tauri, ne `~~desktop/`.
+- Jediná instance: požadavky čekají na připravené UI a otevřený soubor se vždy začne přehrávat.
+
+### Konstanty
+
+| Konstanta | Hodnota v kódu | Ověření |
+|---|---|---|
+| `SEND_EXPLICIT_DOUBLE_CLICK` (`prototype/src/input/forward.ts`) | `false`: dvojklik si mpv skládá samo z přeposlaných stisků tlačítka | potvrzeno v celém okně: dvojklik přepne fullscreen právě jednou (Computer Use 2026-10-15). **OTEVŘENÉ:** dvojklik v mini režimu |
+| `OUTPUT_EXCLUDES_MARGINS` (`prototype/src-tauri/src/glass.rs`) | `true`: textura OUTPUT začíná u obdélníku videa, ne u okraje okna | **nepotvrzeno, OTEVŘENÉ:** letterbox byl pod kapslemi vidět, ale kontrola, že rozmazání sedí i nad pruhy, neproběhla |
+
+### Co jde do M1
+
+Beze změny:
+
+- `crates/mpv-ffi`: načtení libmpv za běhu, kontrola API 2.x, příkazy, vlastnosti, události,
+  `testing::write_y4m` a 16 testů nad skutečnou libmpv.
+- `crates/kaleido-mpv`: bezhlavé CLI pro thumbfast včetně přepisu HDR filtru a testu s připnutým
+  thumbfastem.
+- `scripts/fetch-libmpv.ps1`, `scripts/fetch-thumbfast.ps1` a job `rust` v CI.
+
+Jen jako reference (`prototype/`; M1 to napíše znovu podle spec 4.2 a převezme testy):
+
+- `src-tauri/src/surface.rs` → modul `surface`: hledání a umisťování okna `mpv`, `to_physical`;
+  **převzít test se skutečnou libmpv**.
+- `glass.rs`: generátor shaderu a `glsl-shader-opts` (tři průchody H/V/composite, nejvýš 6 oblastí).
+- `input.rs` a `src/input/` (`keys`, `mouse`, `tracker`): převod vstupu včetně testů na českou
+  klávesnici, AltGr a zaseknuté klávesy.
+- `thumbs.rs`: ověření zprávy `thumbfast-render` (jen soubory v `%TEMP%`, velikost `w*h*4`).
+- `open_requests.rs`: fronta do připravenosti UI, `pause=no` a filtr argumentů shellu; v M1 ho
+  nahradí parser z 9.1 a 9.2.
+- `engine.rs`, `options.rs`: vlákno událostí, omezení `time-pos`, snímek bez skla. M0 má
+  `config=no`, M1 bude mít `config=yes` a `config-dir` (5.1).
+- UI: `fullscreen.ts` (černá clona), `surface/mini.ts` (animace obdélníku), `glass/regions.ts`,
+  `playerState.ts`.
+- `scripts/install-local-prototype.ps1` a `scripts/measure-m0.ps1` jsou pomůcky M0. Instalátor
+  přijde v M4 (11.2), skript měření může posloužit jako základ benchmarku (13).
+
+### Otevřené otázky pro plán M1
+
+1. Záložní řešení bodů 1, 5 a 6 podle ručních kontrol (viz výše).
+2. `OUTPUT_EXCLUDES_MARGINS` podle letterboxu; při 150 % a smíšeném DPI také přepočet oblastí skla.
+3. Výkon skla na integrované AMD při 4K výstupu; nad 1 ms rozmazání ve sníženém rozlišení (13).
+4. HDR: chování UI a náhledů na skutečném HDR10 se zapnutým i vypnutým HDR ve Windows a zda
+   stačí `target-colorspace-hint`.
+5. „Otevřít v programu“: moderní výběr Windows Kaleido na tomto PC nenabízí, ověřená je jen cesta
+   Send to (2026-10-16). Řeší se samostatně; pro M4 to určí registraci v instalátoru (8.12, 11.2).
+6. Co dělat, když test v CI odhalí změnu třídy okna `mpv` po aktualizaci libmpv: hledat okno jinak,
+   nebo aktualizaci odložit.

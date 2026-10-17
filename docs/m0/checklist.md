@@ -55,7 +55,8 @@ která píše zpětný apostrof).
 - [ ] Pod kapslemi je video rozmazané, tvar sedí (zaoblené konce, žádný posun ani převrácení), i při 150 %.
 - [ ] `letterbox-239.mkv`: rozmazání sedí i nad pruhy. Když je posunuté o výšku pruhu →
   `OUTPUT_EXCLUDES_MARGINS = false` v `prototype/src-tauri/src/glass.rs`.
-- [x] 2,5 s bez pohybu myši → kapsle zmizí a rozmazání mizí s nimi (UI snímky; krátké bliknutí nezměřeno).
+- [ ] 2,5 s bez pohybu myši → kapsle zmizí a rozmazání mizí s nimi bez bliknutí.
+  (Částečně: zmizení kapslí i rozmazání potvrdily snímky UI; bliknutí nikdo neměřil.)
 - [ ] `uhd-2160p.mkv` na celé obrazovce, `I` → `2`: součet časů `kaleido-glass blur H/V/composite`
   (cíl ≤ 1 ms) na RTX 5060 Ti a na integrované AMD (Nastavení → Grafika → Úspora energie).
 
@@ -80,3 +81,5 @@ která píše zpětný apostrof).
 - [x] `npm run tauri build -- --no-bundle`, spustit `target/release/kaleido-proto.exe`: čas do okna (≤ 500 ms),
   CPU v pauze 60 s (< 1 %), paměť `msedgewebview2.exe` (≤ 200 MB). Výsledky v [report.md](report.md)
   (Výkon, 2026-10-17); integrovaná AMD a 4K zdroj neměřeny.
+- [ ] Totéž na integrované AMD a s `uhd-2160p.mkv`: `scripts/measure-m0.ps1` (postup v report.md,
+  sekce Výkon).
