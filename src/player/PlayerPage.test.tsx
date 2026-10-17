@@ -13,6 +13,21 @@ import { AUTOHIDE_MS } from './useAutohide';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => undefined)) }));
 
+/**
+ * The timers the tests move. Not `setImmediate`: React's `await act(...)` waits on it, and a faked one
+ * would never come while the test is waiting.
+ */
+const FAKE: NonNullable<Parameters<typeof vi.useFakeTimers>[0]>['toFake'] = [
+  'setTimeout',
+  'clearTimeout',
+  'setInterval',
+  'clearInterval',
+  'Date',
+  'performance',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+];
+
 let measured: MockInstance<() => DOMRect>;
 
 beforeAll(() => {
@@ -20,7 +35,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: FAKE });
   vi.mocked(invoke).mockClear();
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
@@ -120,6 +135,19 @@ test('a hidden island keeps no glass region, and the subtitles drop with it', ()
   expect(island()).toBeNull();
   expect(regions()).toEqual([]);
   expect(margins()).toEqual([lifted[0], 0]);
+});
+
+test('there is no island while the file is only loading', () => {
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': false } });
+  });
+  render(<PlayerPage />);
+  expect(island()).toBeNull();
+
+  act(() => {
+    usePlayerStore.getState().fileLoaded();
+  });
+  expect(island()).not.toBeNull();
 });
 
 test('nothing hides while the video is paused or a panel is open', () => {

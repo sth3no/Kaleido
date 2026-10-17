@@ -48,6 +48,7 @@ describe('the picture', () => {
   };
 
   const putImageData = vi.fn();
+  const realGetContext = HTMLCanvasElement.prototype.getContext;
   /** Lets the answers that are on their way arrive. */
   const settle = async () => {
     for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
@@ -60,9 +61,9 @@ describe('the picture', () => {
     vi.mocked(invoke).mockImplementation(((command: string) =>
       command === 'thumb_get' ? Promise.resolve(preview()) : Promise.resolve(null)) as unknown as typeof invoke);
     // jsdom has no canvas and no ImageData.
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    HTMLCanvasElement.prototype.getContext = (() => ({
       putImageData,
-    } as unknown as RenderingContext);
+    })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     vi.stubGlobal(
       'ImageData',
       class {
@@ -78,7 +79,7 @@ describe('the picture', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    HTMLCanvasElement.prototype.getContext = realGetContext;
     vi.unstubAllGlobals();
   });
 
@@ -104,7 +105,8 @@ describe('the picture', () => {
     expect([image.width, image.height]).toEqual([2, 1]);
 
     // No 2D context (a canvas that cannot draw): nothing is drawn, and it is said.
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    HTMLCanvasElement.prototype.getContext = (() =>
+      null) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     expect(drawFrame(element, { width: 2, height: 1, rgba })).toBe(false);
   });
 

@@ -74,7 +74,6 @@ describe('useSubMargin', () => {
 
   afterEach(() => {
     setWindowHeight(realHeight);
-    vi.restoreAllMocks();
   });
 
   test('lifts the subtitles above the island while it is shown, and drops them when it hides or goes', () => {

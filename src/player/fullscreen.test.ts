@@ -13,6 +13,21 @@ import {
   type FullscreenDeps,
 } from './fullscreen';
 
+/**
+ * The timers the tests move. Not `setImmediate`: React's `await act(...)` waits on it, and a faked one
+ * would never come while the test is waiting.
+ */
+const FAKE: NonNullable<Parameters<typeof vi.useFakeTimers>[0]>['toFake'] = [
+  'setTimeout',
+  'clearTimeout',
+  'setInterval',
+  'clearInterval',
+  'Date',
+  'performance',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+];
+
 function fake(): { log: string[]; deps: FullscreenDeps } {
   const log: string[] = [];
   return {
@@ -124,7 +139,7 @@ describe('waiting for mpv to have the size of the window', () => {
   };
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: FAKE });
     usePlayerStore.setState(usePlayerStore.getInitialState(), true);
     vi.stubGlobal('devicePixelRatio', 1);
     setWindow(1000, 600);
@@ -213,7 +228,7 @@ describe('useFullscreenCurtain', () => {
   };
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: FAKE });
     usePlayerStore.setState(usePlayerStore.getInitialState(), true);
     vi.stubGlobal('devicePixelRatio', 1);
     setWindow(1000, 600);

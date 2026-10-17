@@ -79,11 +79,13 @@ test('a move or a key shows them at once and the 2500 ms start again', () => {
   expect(result.current).toBe(true);
 
   // A key does the same, whoever stops the event.
+  const control = document.createElement('div');
+  control.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+  });
+  document.body.append(control);
   act(() => {
-    document.body.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-    });
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    control.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
   });
   expect(result.current).toBe(false);
   advance(2500);
