@@ -29,7 +29,8 @@ která píše zpětný apostrof).
 - [x] Otevřít `sdr-1080p.mkv` → video je vidět pod poloprůhlednými kapslemi.
 - [ ] 10 s rychle měnit velikost okna a přesouvat ho: bliká něco? Zůstávají černé/bílé okraje?
 - [x] `Žluťoučký kůň (zkouška).mkv` se otevře.
-- [ ] ✕ během přehrávání → aplikace skončí do 2 s, `tasklist | findstr /i kaleido` nic nevypíše.
+- [x] ✕ během přehrávání → aplikace skončí do 2 s, `tasklist | findstr /i kaleido` nic nevypíše.
+  (✕ ukončilo procesy 2026-10-15; čas změřen přes `WM_CLOSE` 2026-10-17: ≤ 236 ms.)
 
 ## 2 · HDR
 - [ ] Windows HDR zapnuté → HDR10 video: štítek „HDR“, světla jasnější než bílé UI, UI není vybledlé.
@@ -76,5 +77,6 @@ která píše zpětný apostrof).
   obdélníky. Obsahuje je snímek z `S`?
 
 ## Měření pro Task 13 (lze až po ruční kontrole)
-- [ ] `npm run tauri build -- --no-bundle`, spustit `target/release/kaleido-proto.exe`: čas do okna (≤ 500 ms),
-  CPU v pauze 60 s (< 1 %), paměť `msedgewebview2.exe` (≤ 200 MB).
+- [x] `npm run tauri build -- --no-bundle`, spustit `target/release/kaleido-proto.exe`: čas do okna (≤ 500 ms),
+  CPU v pauze 60 s (< 1 %), paměť `msedgewebview2.exe` (≤ 200 MB). Výsledky v [report.md](report.md)
+  (Výkon, 2026-10-17); integrovaná AMD a 4K zdroj neměřeny.

@@ -43,6 +43,30 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
   změní, `find_child` okno nenajde a mini přehrávač nebude umisťovat video (video zůstane na celém
   okně). Ošetřit testem v CI s libmpv.
 
+### Výkon (Task 13, 2026-10-17)
+
+Nainstalovaný release build (`Kaleido.exe` má stejný hash jako `target/release/kaleido-proto.exe`),
+`sdr-1080p.mkv` (H.264 1080p30, bez zvuku), okno 1280×720, bez pohybu myši a bez vstupu do okna.
+Měřeno skriptem. CPU je podíl ze všech 16 logických procesorů jako ve Správci úloh a zahrnuje
+`Kaleido.exe` i celý jeho strom procesů (6× `msedgewebview2.exe`).
+
+| Měření | Cíl | Výsledek | Rozhodnutí |
+|---|---|---|---|
+| spuštění → viditelné okno | ≤ 500 ms | 257 ms za studena, pak 77–95 ms (medián 79 ms, 5 běhů) | prošlo; měřeno do viditelného okna, ne do vykreslení UI |
+| CPU v pauze, 60 s | < 1 % | `Kaleido.exe` 0,00 %, celý strom 0,01 % | prošlo |
+| CPU při přehrávání proti mpv | nejvýš +2 p. b. | Kaleido 0,56 % a 0,55 %, referenční libmpv 0,14 % a 0,07 % → rozdíl 0,4–0,5 p. b. | prošlo |
+| paměť WebView2 | ≤ 200 MB | soukromá pracovní sada 85–99 MB; soukromé bajty 177 MB; pracovní sada se sdílenou pamětí 341 MB | prošlo |
+| zavření (`WM_CLOSE`) při přehrávání i v pauze | ≤ 2 s | `Kaleido.exe` skončí za 97–183 ms, celý strom za ≤ 236 ms (jednou 1,1 s po studeném startu); nic nezůstalo | prošlo |
+
+Odchylky od plánu:
+
+- `mpv.exe` na tomto PC není. Referencí je `kaleido-mpv.exe` se stejnou libmpv (`accb7b2821`) ve
+  vlastním okně 1280×720 se stejnými volbami (`--vo=gpu-next --gpu-api=d3d11 --hwdec=auto-safe`,
+  `--osc=no`). Oba přehrávače dekódují přes d3d11va (log mpv).
+- Pauza je stav po dohrání s `keep-open=yes`, ne stisk mezerníku.
+- Platí pro výchozí GPU (RTX 5060 Ti, výstup 1920×1080 při 239 Hz). Integrovaná AMD a 4K zdroj
+  měřeny nebyly.
+
 ## Závěr a doporučení pro M1
 
 ## Otevírání z Windows (2026-10-14)
