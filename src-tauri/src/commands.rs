@@ -5,6 +5,7 @@
 use tauri::{AppHandle, State};
 
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
+use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
@@ -65,4 +66,12 @@ pub async fn system_open_roadmap() {
     if let Err(error) = tauri_plugin_opener::open_url(ROADMAP_URL, None::<&str>) {
         tracing::warn!("cannot open the roadmap: {error}");
     }
+}
+
+/// Where the video goes: the whole window, a frame of the mini-player animation, the mini player
+/// in its corner, or nowhere. Synchronous, so it runs on the main thread, which moves mpv's
+/// window; that does not wait for mpv's core.
+#[tauri::command]
+pub fn surface_set_layout(surface: State<'_, Surface>, layout: Layout) {
+    surface.set_layout(layout);
 }

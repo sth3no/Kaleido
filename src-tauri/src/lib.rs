@@ -4,6 +4,7 @@ pub mod commands;
 pub mod job;
 pub mod paths;
 pub mod player;
+pub mod surface;
 pub mod system;
 
 use std::time::{Duration, Instant};
@@ -12,6 +13,7 @@ use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use player::{Engine, EngineConfig, EventSink, PlayerEvent, Request, StateLoop};
+use surface::{Surface, WindowSync};
 use system::OpenThread;
 use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
@@ -51,6 +53,7 @@ pub fn run() {
             commands::system_paste,
             commands::system_open_text,
             commands::system_open_roadmap,
+            commands::surface_set_layout,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
@@ -59,10 +62,18 @@ pub fn run() {
             let window = app
                 .get_webview_window("main")
                 .context("the main window is missing")?;
+            let main = window.hwnd()?.0 as isize;
+            // Before the engine starts: its first state batch may already set the window's
+            // fullscreen or always-on-top.
+            let surface = Surface::new(main);
+            let size = window.inner_size()?;
+            surface.apply(size.width, size.height, window.scale_factor()?);
+            app.manage(surface);
+            app.manage(WindowSync::default());
             let engine = Engine::start(
                 EngineConfig {
                     paths: paths.clone(),
-                    wid: Some(window.hwnd()?.0 as isize),
+                    wid: Some(main),
                     vo: "gpu-next".into(),
                     ao: None,
                 },
@@ -87,8 +98,12 @@ pub fn run() {
             app.state::<OpenThread>().attach(app.handle().clone());
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            // The UI's layout is in CSS px, so a DPI change moves mpv's window too.
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                surface::window_resized(window);
+            }
+            WindowEvent::CloseRequested { api, .. } => {
                 // mpv saves the position first. The wait runs on another thread: this one has
                 // to handle what mpv's window, a child of this one, sends while it closes.
                 api.prevent_close();
@@ -100,6 +115,7 @@ pub fn run() {
                     app.exit(0);
                 });
             }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("failed to run Kaleido");
@@ -127,6 +143,11 @@ impl EventSink for AppSink {
 /// event. Messages from mpv that Rust acts on are added here.
 fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
     match event {
+        // The window follows mpv's fullscreen and ontop (spec 5.1); the UI gets the batch too.
+        PlayerEvent::State { changes } => {
+            surface::follow_mpv(app, changes);
+            false
+        }
         // mpv's own `quit` (the `q` key) ends the app (spec 5.1).
         PlayerEvent::Shutdown => {
             app.exit(0);
