@@ -19,19 +19,34 @@ impl Paths {
     pub fn resolve(app: &AppHandle) -> Result<Paths, Box<dyn Error>> {
         let data_dir = app.path().app_local_data_dir()?;
         std::fs::create_dir_all(&data_dir)?;
-        let click_target = PathBuf::from(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/test-scripts/click-target.lua"
-        ));
+        let exe = std::env::current_exe()?;
+        let resources = exe
+            .parent()
+            .ok_or("executable directory missing")?
+            .join("resources");
+        let bundled_click_target = resources.join("click-target.lua");
+        let click_target = if bundled_click_target.is_file() {
+            bundled_click_target
+        } else {
+            PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/test-scripts/click-target.lua"
+            ))
+        };
         // The file stem is the shader name that glsl-shader-opts prefixes target.
         let shader = data_dir.join(format!("{}.glsl", glass::SHADER));
         std::fs::write(&shader, glass::shader_source())?;
-        let thumbfast = PathBuf::from(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../vendor/thumbfast/thumbfast.lua"
-        ));
+        let bundled_thumbfast = resources.join("thumbfast.lua");
+        let thumbfast = if bundled_thumbfast.is_file() {
+            bundled_thumbfast
+        } else {
+            PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../vendor/thumbfast/thumbfast.lua"
+            ))
+        };
         // Built next to us by `beforeDevCommand` (cargo build -p kaleido-mpv).
-        let helper_exe = std::env::current_exe()?.with_file_name("kaleido-mpv.exe");
+        let helper_exe = exe.with_file_name("kaleido-mpv.exe");
         Ok(Paths {
             data_dir,
             screenshot_dir: app.path().desktop_dir()?,
