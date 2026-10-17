@@ -47,8 +47,19 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
 
 Nainstalovaný release build (`Kaleido.exe` má stejný hash jako `target/release/kaleido-proto.exe`),
 `sdr-1080p.mkv` (H.264 1080p30, bez zvuku), okno 1280×720, bez pohybu myši a bez vstupu do okna.
-Měřeno skriptem. CPU je podíl ze všech 16 logických procesorů jako ve Správci úloh a zahrnuje
-`Kaleido.exe` i celý jeho strom procesů (6× `msedgewebview2.exe`).
+Měřeno skriptem [`scripts/measure-m0.ps1`](../../scripts/measure-m0.ps1). CPU je podíl ze všech
+16 logických procesorů jako ve Správci úloh a zahrnuje `Kaleido.exe` i celý jeho strom procesů
+(6× `msedgewebview2.exe`).
+
+Zopakování na integrované AMD a se 4K zdrojem (Kaleido zavřené, během měření nehýbat myší):
+
+1. Ve Windows nastavit Nastavení → Systém → Obrazovka → Grafika → `Kaleido.exe` i
+   `kaleido-mpv.exe` z instalační složky → **Úspora energie** (pro AMD), jinak výchozí.
+2. Spustit
+   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-m0.ps1 -Clip "$env:USERPROFILE\Videos\kaleido-m0\uhd-2160p.mkv"`
+   (bez `-Clip` měří `sdr-1080p.mkv`).
+3. Řádky `GPU …, hwdec …` ve výstupu ověří, kterou GPU Kaleido i reference skutečně použily (čte se
+   z logu mpv). Délka vzorku přehrávání se u krátkého 4K klipu (20 s) sama zkrátí, aby nedohrál.
 
 | Měření | Cíl | Výsledek | Rozhodnutí |
 |---|---|---|---|
