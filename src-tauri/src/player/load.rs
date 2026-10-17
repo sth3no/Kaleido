@@ -106,8 +106,8 @@ impl LoadOptions {
 const LONG_PATH: usize = 240;
 
 impl Source {
-    /// The argument `loadfile` takes.
-    fn to_mpv(&self) -> String {
+    /// The argument `loadfile` (or `sub-add`) takes.
+    pub fn to_mpv(&self) -> String {
         match self {
             Source::File(path) => mpv_path(path),
             Source::Url(url) => url.as_str().to_owned(),
@@ -269,7 +269,26 @@ pub fn open_sources(
             }),
         }
     }
-    let commands = load_commands(&sources, mode, &LoadOptions::default());
+    open_checked(engine, &sources, mode, &LoadOptions::default());
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(issues)
+    }
+}
+
+/// Queues `sources`, which [`parse_source`] has accepted, on the engine, as [`open_sources`]
+/// does; `opts` go with the first one. For the open requests that check their sources
+/// themselves (`system`: command line, dialog, paste, drop). Options that do not
+/// [`validate`](LoadOptions::validate) are left out.
+pub fn open_checked(engine: &Engine, sources: &[Source], mode: LoadMode, opts: &LoadOptions) {
+    let opts = if opts.validate().is_ok() {
+        opts
+    } else {
+        tracing::warn!("invalid load options left out: {opts:?}");
+        &LoadOptions::default()
+    };
+    let commands = load_commands(sources, mode, opts);
     match mode {
         LoadMode::Replace => {
             for args in commands {
@@ -280,11 +299,6 @@ pub fn open_sources(
             engine.request(Request::Call(Box::new(move |mpv| append(mpv, &commands))));
         }
         LoadMode::Append => {}
-    }
-    if issues.is_empty() {
-        Ok(())
-    } else {
-        Err(issues)
     }
 }
 

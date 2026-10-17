@@ -4,13 +4,17 @@ pub mod commands;
 pub mod job;
 pub mod paths;
 pub mod player;
+pub mod system;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use player::{Engine, EngineConfig, EventSink, PlayerEvent, Request, StateLoop};
+use system::clipboard::PasteOutcome;
+use system::dialog::DialogPurpose;
+use system::open_queue::OpenQueue;
 
 /// How long closing the window waits for mpv to save the position and shut down.
 const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -22,9 +26,20 @@ pub fn run() {
         eprintln!("Kaleido: child processes will not end with the app: {error}");
     }
     tauri::Builder::default()
+        // First: a later launch hands over its command line and exits before anything else.
+        .plugin(system::instance::plugin())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(OpenQueue::new(system::JOIN_WINDOW))
+        .manage(system::OpenThread::start())
         .invoke_handler(tauri::generate_handler![
             commands::player_command,
-            commands::player_load
+            commands::player_load,
+            commands::system_ui_ready,
+            commands::system_open_dialog,
+            commands::system_paste,
+            commands::system_open_text,
+            commands::system_open_roadmap,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
@@ -53,6 +68,17 @@ pub fn run() {
             })));
             app.manage(paths);
             app.manage(engine);
+            // Without it only dropping files fails; the dialog still opens them.
+            if let Err(error) = system::drop::install(window.as_ref()) {
+                tracing::error!("dropped files will not open: {error:#}");
+            }
+            // This launch's own command line; it waits in the queue until the UI is ready.
+            system::open_command_line(
+                app.handle(),
+                Instant::now(),
+                std::env::args_os().skip(1).collect(),
+                std::env::current_dir().unwrap_or_default(),
+            );
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -100,6 +126,22 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
             app.exit(0);
             true
         }
+        // Ctrl+V and Ctrl+O in input.conf.
+        PlayerEvent::Message { args } => match args.as_slice() {
+            [action] if action == "paste" => {
+                if system::clipboard::paste(app) == PasteOutcome::Empty
+                    && let Err(error) = app.emit("system:paste-empty", serde_json::json!({}))
+                {
+                    tracing::warn!("cannot send system:paste-empty to the UI: {error}");
+                }
+                true
+            }
+            [action] if action == "open" => {
+                system::dialog::open(app, DialogPurpose::Media);
+                true
+            }
+            _ => false,
+        },
         _ => false,
     }
 }

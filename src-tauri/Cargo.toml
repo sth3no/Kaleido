@@ -19,14 +19,22 @@ tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
 tauri = { version = "2.12", features = [] }
+# 2.5.4 is the newest 2.x; the Windows startup race fixed after it is on the M1 checklist.
+tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-opener = "2"
 anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 url = "2"
+# The version wry uses, so that its WebView2 interfaces are the ones Tauri hands out.
+webview2-com = "0.39"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Security",
   "Win32_System_JobObjects",
   "Win32_System_Threading",
