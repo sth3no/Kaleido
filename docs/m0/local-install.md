@@ -2,23 +2,27 @@
 
 Samostatný build má UI uvnitř aplikace a nepotřebuje Vite ani npm při spuštění.
 Instaluje se pro aktuálního uživatele do `%LOCALAPPDATA%\Programs\Kaleido-M0\`.
+Podklad: výzkum „Kaleido — Open with, asociace souborů a výchozí přehrávač“ (AFFiNE,
+2026-10-17) a jeho ověření na tomto PC v [report.md](report.md) (sekce Open with, 2026-10-17).
 
-## Ověřený postup (2026-10-16)
+## Co funguje (ověřeno 2026-10-17)
 
-- **Files:** video → pravé tlačítko → **Send to → Kaleido**.
-- **Průzkumník s místním Nilesoft menu:** video → pravé tlačítko →
-  **More options → Send to → Kaleido**. Ve standardním klasickém menu je přímo **Odeslat**.
+| Cesta | Stav | Jak ověřeno |
+|---|---|---|
+| Klasické menu → **Přehrát v Kaleidu** | funguje pro všechny přípony | menu sestavené samotným Windows (`scripts/diagnose-associations.ps1`, sekce 7) pro `.mkv`, `.mp4`, `.y4m` |
+| Podnabídka **Otevřít v programu ›** (Průzkumník, panel Files) | Kaleido v ní je | objekt `OpenWithMenu`, který používá Průzkumník i Files (sekce 5) |
+| **Odeslat / Send to → Kaleido** | funguje | 2026-10-16 proklikáno v Průzkumníku i ve Files |
+| Dialog **Vybrat aplikaci** (OpenWith.exe) | neověřeno | programově ho nešlo zobrazit; dopoledne 2026-10-17 v něm Kaleido chybělo |
+| Výchozí přehrávač | volí uživatel v Nastavení | `-ChooseDefault`, výsledek přečte diagnostika (sekce 3) |
 
-Obě cesty byly skutečně proklikány přes Computer Use. Files spustil samostatnou aplikaci
-s vybraným videem; Průzkumník předal soubor `Žluťoučký kůň (zkouška).mkv` do stejného
-okna. Původní výchozí přehrávače se nemění.
-V místním Nilesoft menu se při opakování v menším okně jednou ukázala neúplná nabídka
-Send to. Po maximalizaci byla kompletní a otevření přes Kaleido znovu prošlo.
+Otevírání souborů z registrovaného příkazu (`"Kaleido.exe" -- "%1"`) i ze Send to prošlo
+za studena i do běžící instance: diakritika, mezery, `%`, `&`, `#`, emoji, název začínající
+pomlčkou za `--`, relativní cesta z jiného pracovního adresáře, dva soubory najednou
+(playlist) a tři téměř současná otevření (jedna instance). Po zavření nezůstane Kaleido
+ani `kaleido-mpv`.
 
-**Otevřít v programu / Open with stále není ověřená funkční cesta na tomto PC:**
-Windows registraci enumeruje, ale jeho skutečný moderní výběr Kaleido nenabízí.
-Totéž platí pro přímý statický verb „Přehrát v Kaleidu“, který v prohlédnutých nabídkách chybí.
-Pro přehrání z obou správců souborů používej výše ověřenou nabídku **Send to**.
+Dvojklik na `.mkv` na tomto PC nevede nikam: `UserChoice` ukazuje na odinstalovanou AppX
+aplikaci, takže se Windows zeptá. Kaleido to nemění; výchozí aplikaci vyber přes `-ChooseDefault`.
 
 ## Sestavení a registrace
 
@@ -32,28 +36,50 @@ cargo build --release -p kaleido-mpv
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-prototype.ps1
 ```
 
-Před aktualizací instalace zavři Kaleido. Skript zkopíruje aplikaci, libmpv, helper pro
-náhledy a oba skripty do vlastní instalační složky. Registruje 42 video přípon v HKCU:
+`-BuildDir <složka>` vezme `kaleido-proto.exe` a `kaleido-mpv.exe` z jiného buildu (např.
+z jiného worktree). Skript odmítne pokračovat, když Kaleido nebo `kaleido-mpv` z instalační
+složky běží, nebo když stejná jména patří jinému programu.
 
-- `Applications\Kaleido.exe` a `SupportedTypes` pro „Otevřít v programu“.
-- `Kaleido.M0.Video` s názvem, vydavatelem a ikonou aplikace; `OpenWithProgids` u přípon
-  v `Software\Classes` i `Explorer\FileExts`.
-- `Capabilities` a `RegisteredApplications` pro systémové Výchozí aplikace.
-- „Přehrát v Kaleidu“ jako statickou akci s filtrem na podporované video přípony.
-- Zástupce „Kaleido M0“ v nabídce Start.
-- Zástupce „Kaleido“ ve standardní uživatelské nabídce **Odeslat / Send to**.
+Registruje 41 video přípon, jen v HKCU a jen jako **schopnost** otevírat soubory:
 
-Stávající výchozí aplikace a klíče `UserChoice` se nemění. Skript po zápisu synchronně
-oznamuje změnu asociací shellu (`SHCNE_ASSOCCHANGED`, `SHCNF_FLUSH`). Kontroluje vlastnictví
-svých registračních klíčů a obou zástupců; cizí instalaci stejného názvu nepřepíše.
-Při aktualizaci znovu vytvoří zástupce a oznámí shellu i změnu jejich cest.
+- `Applications\Kaleido.exe` (název, ikona, příkaz) a `SupportedTypes`.
+- ProgID `Kaleido.M0.Video` s ikonou, metadaty `Application` a výchozí akcí „Přehrát“;
+  `AllowSilentDefaultTakeOver`, aby Kaleido zůstalo volbou v „Otevřít v programu“, ale Windows
+  ho samo nedosadilo jako výchozí.
+- `Classes\<přípona>\OpenWithProgids\Kaleido.M0.Video` (dokumentovaná cesta pro alternativní
+  aplikace).
+- `Capabilities` a `RegisteredApplications\Kaleido` pro Výchozí aplikace.
+- „Přehrát v Kaleidu“ jako doplňkovou akci v `SystemFileAssociations\<přípona>\shell`, takže je
+  v klasickém menu i u přípon, které otevírá jiná aplikace.
+- `App Paths\Kaleido.exe`, zástupce „Kaleido M0“ v nabídce Start a „Kaleido“ v **Odeslat**.
 
-Soubory se předávají jako samostatné argumenty, včetně mezer a diakritiky. Druhé spuštění
-předá soubor běžící instanci a obnoví její okno. Požadavky přijaté při startu čekají,
-dokud se UI nepřihlásí k událostem přehrávače. Více souborů v jednom spuštění vytvoří playlist.
-Toto je integrace prototypu M0; plný instalátor a další integrace patří do M4.
-Nově otevřený soubor se začne přehrávat také tehdy, když předchozí video bylo v pauze nebo
-dohrálo do konce. Stejné chování používá dialog Otevřít v přehrávači.
+Skript **nikdy** nezapisuje ani nemaže `UserChoice`, nepočítá hash, neobchází UCPD, nemění
+výchozí hodnotu přípony a nezapisuje do `Explorer\FileExts` (historie Windows). Hodnoty
+`Kaleido.M0.Video`, které tam zapsaly starší verze skriptu, při instalaci odstraní, a nic jiného.
+Přípona `.mod` (zároveň moduly Go a trackerová hudba, ve spec 8.12 není) se už neregistruje.
+Po zápisu oznamuje změnu asociací shellu (`SHCNE_ASSOCCHANGED`, `SHCNF_FLUSH`).
+
+## Výchozí přehrávač
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-prototype.ps1 -ChooseDefault
+```
+
+Otevře `ms-settings:defaultapps?registeredAppUser=Kaleido`, stránku Kaleida ve Výchozích
+aplikacích. Výběr udělá uživatel ve Windows; skript neohlásí úspěch, dokud ho neověří
+diagnostika (sekce 3, `QueryCurrentDefault`).
+
+## Diagnostika
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-associations.ps1
+```
+
+Jen čte: uložené registrace v HKCU i HKLM, příkaz ProgID přes `AssocQueryString`, skutečné
+výchozí aplikace (`QueryCurrentDefault`), `SHAssocEnumHandlers`, podnabídku „Otevřít
+v programu“ a klasické menu. `-PickerDialog` navíc zkusí otevřít dialog „Vybrat aplikaci“,
+přečte ho přes UI Automation a zavře bez výběru; z procesu bez vlastního okna popředí ho ale
+Windows většinou nezobrazí.
 
 ## Odebrání registrace
 
@@ -61,17 +87,12 @@ dohrálo do konce. Stejné chování používá dialog Otevřít v přehrávači
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local-prototype.ps1 -Unregister
 ```
 
-Odstraní jen vlastní registrace a zástupce; soubory aplikace zůstanou na disku.
-
-## Kontrola
-
-- Otevřít video přes **Send to → Kaleido** v obou správcích souborů bez vývojového serveru.
-- Otevřít druhé video; má se přehrát ve stejném okně.
-- Otevřít nové video z pauzy nebo po dohrání; má se samo rozběhnout.
-- Ověřit cestu s mezerami a diakritikou.
-- Ověřit, že Windows enumeruje Kaleido mezi doporučenými handlery pro video.
-- Ověřit, že původní výchozí aplikace u videí zůstala zachována.
+Odstraní jen položky, které stále ukazují na tuto instalaci (u cizích jen varuje), a prázdné
+klíče, které po nich zůstanou. Soubory aplikace a výchozí aplikace zvolené ve Windows nechá.
+Ověřeno snímky registru před a po: `UserChoice` ani hodnoty jiných programů se nezměnily
+a po odebrání nezůstala žádná položka Kaleida.
 
 Reference: [registrace aplikací ve Windows](https://learn.microsoft.com/en-us/windows/win32/shell/app-registration),
 [Default Programs](https://learn.microsoft.com/en-us/windows/win32/shell/default-programs),
-[Tauri Single Instance](https://v2.tauri.app/plugin/single-instance/).
+[Tauri Single Instance](https://v2.tauri.app/plugin/single-instance/); zdroje W1–W30 a T1–T13
+v reportu z AFFiNE.

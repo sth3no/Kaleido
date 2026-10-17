@@ -255,7 +255,90 @@ Zaznamenáno pro M1 (`prototype/` je jen reference, proto se neopravuje):
 
 Tři nálezy k `scripts/install-local-prototype.ps1` (odregistrace blokovaná kontrolou vlastnictví,
 kopírování bez kontroly běžících procesů, přípony `.ts` a `.mod` sdílené se zdrojovými soubory)
-jsou předané session, která na skriptu pracuje.
+jsou opravené v sekci Open with níže.
+
+## Open with – ověření výzkumu a opravy (2026-10-17)
+
+Podklad: výzkum „Kaleido — Open with, asociace souborů a výchozí přehrávač“ (AFFiNE). Report
+odlišuje doložené chování (dokumentace, zdrojový kód) od hypotéz; tady je jen to, co se změřilo
+na tomto PC (Windows 11 Pro 25H2, build 26200.9457). Nástroj: `scripts/diagnose-associations.ps1`.
+
+### Hypotéza cache pickeru: na tomto PC vyvrácená
+
+- PC naběhlo 2026-10-17 v 11:07, `explorer.exe` v 11:08. Registrace Kaleida jsou z 14.–16. 10.,
+  a dialog „Vybrat aplikaci“ přesto ve 12:46–13:20 (předchozí session) Kaleido nenabízel.
+  Vysvětlení „registrováno až po přihlášení“ tedy neplatí.
+- Podnabídka „Otevřít v programu ›“ (objekt `OpenWithMenu`, ze kterého ji staví Průzkumník
+  i panel Files) čte registrace živě. Ukázala Kaleido i testovací ProgID zapsané dnes po přihlášení.
+- Samotný dialog (`OpenWith.exe -Embedding`) se z procesu bez okna v popředí zobrazit nepodařilo;
+  vznikne jen dočasné okno „Pick an app“. Proč jeho seznam vynechává právě Kaleido a Claude,
+  zůstává neznámé (ruční kontrola v checklistu). Ukončen byl zaseknutý `OpenWith.exe -Embedding`
+  z předchozích testů (54 vláken, žádné okno), který nové požadavky polykal.
+- Odstraněny testovací registrace předchozí session (`KalTest.*`, `KalShape.*`, `.kaltest`,
+  `GhValid`, `KalSigned`/`KalUnsigned`), které se objevovaly jako aplikace pro `.mkv`. Záloha
+  `.reg` je v pracovní složce session.
+
+### Tauri NSIS: nálezy reportu platí i pro naše verze
+
+Ve lockfilech: tauri 2.12.3, tauri-utils 2.10.1, tauri-build 2.7.2, wry 0.57.0,
+tauri-plugin-single-instance 2.5.4, CLI 2.12.2 (report auditoval 2.12.4 / utils 2.10.2 /
+bundler 2.10.3 / CLI 2.12.3). Šablona NSIS vložená v binárce CLI 2.12.2:
+
+- `APP_ASSOCIATE` zapíše výchozí hodnotu `.přípony` = ProgID (`association.name`, jinak holá
+  přípona) a zálohu `<ProgID>_backup`. Příkaz je `$INSTDIR\Kaleido.exe "%1"`: exe bez uvozovek
+  a bez `--`.
+- `APP_UNASSOCIATE` zálohu bez kontroly obnoví do výchozí hodnoty, smaže ProgID a zálohu nechá.
+- `OpenWithProgids`, `Capabilities` ani `RegisteredApplications` šablona nezapisuje;
+  `UPDATEFILEASSOC` (SHChangeNotify) je definované, ale nikde se nevolá.
+- Totéž je vidět v registru: hodnoty `mkv_backup`, `mp4_backup`, … a ProgID `mkv` s příkazem
+  Canvy (stejná makra).
+
+Pro M4 z toho plyne rozhodnutí ve spec 11.2: na Windows prázdné `bundle.fileAssociations`
+a registrace přes NSIS hooky podle receptu ze skriptu.
+
+### Opravené nedostatky `scripts/install-local-prototype.ps1`
+
+| Nález | Oprava |
+|---|---|
+| Zapisoval `Kaleido.M0.Video` do `Explorer\FileExts\<přípona>\OpenWithProgids` (historie Windows, ne registrační vstup) | už nezapisuje; hodnoty ze starších verzí odstraní, nic jiného |
+| Windows bralo Kaleido jako záložní výchozí aplikaci pro `.mkv`, ačkoli ho uživatel nevybral (`QueryCurrentDefault`) | ProgID má `AllowSilentDefaultTakeOver`; výchozí volí uživatel přes `-ChooseDefault` (`ms-settings:defaultapps?registeredAppUser=Kaleido`) |
+| `-Unregister` skončil chybou dřív, než cokoli odebral, když se hodnota lišila (kontrola vlastnictví předem) | vlastnictví po položkách: smaže jen to, co ukazuje na tuto instalaci, u cizího varuje |
+| Kopíroval soubory i při běžícím Kaleidu nebo `kaleido-mpv` | odmítne a vypíše běžící procesy |
+| `.mod` (moduly Go, trackerová hudba) mezi videi; ve spec 8.12 není | vyřazená, registrace se při instalaci odebere |
+| Ikony bez uvozovek (`exe,0`) | `"exe",0` |
+| Výchozí akce ProgID i doplňková akce měly stejný popisek, takže „Přehrát v Kaleidu“ bylo v menu dvakrát | výchozí akce „Přehrát“ (jako VLC) |
+
+Doplňková akce je nově v `SystemFileAssociations\<přípona>\shell` místo jedné akce
+`*\shell` s filtrem `AppliesTo`. To není oprava chyby: filtrovaná akce se v menu sestaveném
+Windows zobrazovala i se všemi 42 příponami. Dřívější „chybějící akce“ byla jen prezentace
+v menu Nilesoft/Files. `SystemFileAssociations` je doporučená forma pro doplňkové akce a odebírá
+se po příponách.
+
+### Testy (2026-10-17, nainstalovaný build z 2026-10-16)
+
+| Test | Výsledek |
+|---|---|
+| Odebrání staré registrace (snímek registru před/po, 42 přípon) | `UserChoice` beze změny, hodnoty jiných programů beze změny, odebrané jen položky Kaleida a prázdné klíče po nich |
+| Instalace nové verze, pak opakovaná instalace | `UserChoice` a cizí hodnoty beze změny; druhá instalace nezměnila nic (0 rozdílů) |
+| Odebrání nové registrace a znovu instalace | po odebrání žádná položka Kaleida; stav shodný s prvním odebráním (navíc jen prázdný klíč `.y4m\OpenWithList`, který vytvořil Windows) |
+| Klasické menu (Windows, bez Nilesoft) | „Přehrát v Kaleidu“ u `.mkv`, `.mp4` (vedle VLC) i `.y4m` |
+| Podnabídka Otevřít v programu | Canva, Kaleido, VLC, Windows Media Player Legacy |
+| Otevření přes registrovaný ProgID (jako Průzkumník) a přes `Kaleido.exe --` (jako Send to) | 7/7: za studena (1,0 s do „Opening done“), do běžící instance, diakritika, mezery `% & #`, emoji, název s pomlčkou za `--`, relativní cesta z jiného cwd, dva soubory v jednom spuštění, tři téměř současná otevření → jedna instance; po zavření nic neběží |
+
+### Zbývající nejistoty
+
+- Proč dialog „Vybrat aplikaci“ (OpenWith.exe) vynechává Kaleido a Claude, zatímco
+  `SHAssocEnumHandlers` i podnabídka je nabízejí. Nevyřešeno; čistý profil nebo VM a Procmon
+  podle sekce 5 reportu.
+- `QueryCurrentDefault` hlásí pro `.mkv` „effective“ `Kaleido.M0.Video`, ačkoli `UserChoice`
+  ukazuje na odinstalovanou AppX aplikaci a `AssocQueryString` žádnou asociaci nenajde (dvojklik
+  se zeptá). `AllowSilentDefaultTakeOver` odpověď tohoto API nezměnil.
+- tauri-plugin-single-instance 2.5.4 nemá opravu startovního závodu na Windows, která přišla až
+  po 2.5.4 (report T13); M1 Task 5 má vzít novější vydání, až bude k dispozici a projde testy.
+- Tři téměř současná otevření prototyp přehraje postupně s náhradou; spojení do playlistu do
+  300 ms (spec 9.3) přinese M1.
+- macOS a Linux tu nejsou řešené. Nálezy reportu (MKV → `public.mpeg-4` v odvození UTI,
+  chybějící `%F`/`%U` v desktop šabloně) patří do fáze macOS + Linux.
 
 ## Závěr a doporučení pro M1 (koncept)
 
@@ -340,8 +423,9 @@ Jen jako reference (`prototype/`; M1 to napíše znovu podle spec 4.2 a převezm
 3. Výkon skla na integrované AMD při 4K výstupu; nad 1 ms rozmazání ve sníženém rozlišení (13).
 4. HDR: chování UI a náhledů na skutečném HDR10 se zapnutým i vypnutým HDR ve Windows a zda
    stačí `target-colorspace-hint`.
-5. „Otevřít v programu“: moderní výběr Windows Kaleido na tomto PC nenabízí, ověřená je jen cesta
-   Send to (2026-10-16). Řeší se samostatně; pro M4 to určí registraci v instalátoru (8.12, 11.2).
+5. „Otevřít v programu“: klasické menu, podnabídka i Send to fungují; dialog „Vybrat aplikaci“
+   Kaleido na tomto PC nenabízí z neznámého důvodu (sekce Open with). Registraci a odinstalaci
+   pro M4 už určuje spec 8.12 a 11.2 (2026-10-17).
 6. Co dělat, když test v CI odhalí změnu třídy okna `mpv` po aktualizaci libmpv: hledat okno jinak,
    nebo aktualizaci odložit.
 7. Snímek, který plugin vyvolá přímo příkazem `screenshot`, sklo obsahuje (spec 8.2).

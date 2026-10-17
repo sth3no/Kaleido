@@ -86,6 +86,15 @@ která píše zpětný apostrof).
 - [x] S viditelným ovládáním `s` a `S` → soubory na ploše. Ve snímku z `s` nesmí být rozmazané
   obdélníky. Obsahuje je snímek z `S`?
 
+## 9 · Otevírání z Windows (místní instalace, [local-install.md](local-install.md))
+- [x] Klasické menu „Přehrát v Kaleidu“, podnabídka „Otevřít v programu ›“, Send to a otevření
+  za studena i do běžící instance (skripty, 2026-10-17; výsledky v report.md, sekce Open with).
+- [x] Odebrání a opakovaná instalace nemění `UserChoice` ani hodnoty jiných programů (snímky registru).
+- [ ] Pravé tlačítko na `.mkv` → Otevřít v programu → **Vybrat jinou aplikaci**: je v seznamu Kaleido?
+  Nic nevybírat, jen zavřít. Totéž z aplikace Files.
+- [ ] `scripts/install-local-prototype.ps1 -ChooseDefault` → v Nastavení vybrat Kaleido pro `.mkv`
+  → `scripts/diagnose-associations.ps1` (sekce 3) ukáže `Kaleido.M0.Video` a dvojklik otevře Kaleido.
+
 ## Měření pro Task 13 (lze až po ruční kontrole)
 - [x] `npm run tauri build -- --no-bundle`, spustit `target/release/kaleido-proto.exe`: čas do okna (≤ 500 ms),
   CPU v pauze 60 s (< 1 %), paměť `msedgewebview2.exe` (≤ 200 MB). Výsledky v [report.md](report.md)
