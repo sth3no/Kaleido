@@ -4,14 +4,24 @@
 
 use tauri::{AppHandle, State};
 
+use crate::glass::{GlassController, GlassRect};
 use crate::input::{self, InputEvent};
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
+/// A screenshot goes to the glass, which takes the glass out of the picture first (spec 8.2).
 #[tauri::command]
-pub fn player_command(engine: State<'_, Engine>, cmd: PlayerCommand) -> Result<(), String> {
+pub fn player_command(
+    engine: State<'_, Engine>,
+    glass: State<'_, GlassController>,
+    cmd: PlayerCommand,
+) -> Result<(), String> {
+    if let PlayerCommand::Screenshot { mode } = cmd {
+        glass.screenshot(mode);
+        return Ok(());
+    }
     player::command::send(&engine, &cmd).map_err(|error| error.to_string())
 }
 
@@ -85,4 +95,11 @@ pub async fn system_open_roadmap() {
 #[tauri::command]
 pub fn surface_set_layout(surface: State<'_, Surface>, layout: Layout) {
     surface.set_layout(layout);
+}
+
+/// The glass elements the UI measured (CSS px), nothing for no glass. Synchronous: it only
+/// queues the new regions on the engine.
+#[tauri::command]
+pub fn glass_set_regions(glass: State<'_, GlassController>, rects: Vec<GlassRect>) {
+    glass.set_regions(rects);
 }

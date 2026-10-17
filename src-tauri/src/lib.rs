@@ -1,6 +1,7 @@
 //! Kaleido: the Tauri shell around libmpv.
 
 pub mod commands;
+pub mod glass;
 pub mod input;
 pub mod job;
 pub mod paths;
@@ -8,11 +9,14 @@ pub mod player;
 pub mod surface;
 pub mod system;
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
+use glass::{AppHost, GlassController};
+use player::command::ScreenshotMode;
 use player::{Engine, EngineConfig, EventSink, PlayerEvent, Request, StateLoop};
 use surface::{Surface, WindowSync};
 use system::OpenThread;
@@ -56,6 +60,7 @@ pub fn run() {
             commands::system_open_text,
             commands::system_open_roadmap,
             commands::surface_set_layout,
+            commands::glass_set_regions,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
@@ -90,8 +95,14 @@ pub fn run() {
                     tracing::error!("cannot observe the player state: {error}");
                 }
             })));
+            let shader = glass::shader_path(&paths.cache_dir);
             app.manage(paths);
             app.manage(engine);
+            // After the engine: the glass queues its shader on it. Always managed, also when
+            // the shader cannot be written (then it starts off), so the commands find it.
+            let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
+            glass.set_scale(window.scale_factor()?);
+            app.manage(glass);
             // Without it only dropping files fails; the dialog still opens them.
             if let Err(error) = system::drop::install(window.as_ref()) {
                 tracing::error!("dropped files will not open: {error:#}");
@@ -101,8 +112,13 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // The UI's layout is in CSS px, so a DPI change moves mpv's window too.
-            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+            WindowEvent::Resized(_) => surface::window_resized(window),
+            // The UI's layout is in CSS px, so a DPI change moves mpv's window too, and the
+            // glass regions (the UI measured the same CSS px) become other physical ones.
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(glass) = window.try_state::<GlassController>() {
+                    glass.set_scale(*scale_factor);
+                }
                 surface::window_resized(window);
             }
             WindowEvent::CloseRequested { api, .. } => {
@@ -148,6 +164,20 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
         // The window follows mpv's fullscreen and ontop (spec 5.1); the UI gets the batch too.
         PlayerEvent::State { changes } => {
             surface::follow_mpv(app, changes);
+            // Where the picture starts in the window (letterbox bars): the glass regions are
+            // measured from there.
+            if let Some(osd) = changes.get("osd-dimensions")
+                && let Some(glass) = app.try_state::<GlassController>()
+            {
+                glass.set_origin(osd);
+            }
+            false
+        }
+        // The shader failed: the glass goes off (spec 10.6). The UI hears the line too.
+        PlayerEvent::Log(line) => {
+            if let Some(glass) = app.try_state::<GlassController>() {
+                glass.on_log(line);
+            }
             false
         }
         // mpv's own `quit` (the `q` key) ends the app (spec 5.1).
@@ -169,8 +199,30 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
                 system::dialog::open(app, DialogPurpose::Media);
                 true
             }
+            // s, S, Ctrl+s and Alt+s in input.conf: without the glass (spec 8.2).
+            [action] if action == "screenshot" => {
+                screenshot(app, None);
+                true
+            }
+            [action, mode] if action == "screenshot" => {
+                screenshot(app, Some(mode.as_str()));
+                true
+            }
             _ => false,
         },
         _ => false,
+    }
+}
+
+/// `script-message kaleido screenshot [mode]`: a binding without a mode takes mpv's default.
+fn screenshot(app: &AppHandle, mode: Option<&str>) {
+    let parsed = match mode {
+        None => Some(ScreenshotMode::Subtitles),
+        Some(name) => glass::parse_mode(name),
+    };
+    match (parsed, app.try_state::<GlassController>()) {
+        (Some(mode), Some(glass)) => glass.screenshot(mode),
+        (None, _) => tracing::warn!("no such screenshot mode: {mode:?}"),
+        (_, None) => tracing::warn!("no screenshot: the glass is not set up yet"),
     }
 }
