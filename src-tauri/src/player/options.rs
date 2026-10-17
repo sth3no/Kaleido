@@ -139,8 +139,8 @@ pub fn load_thumbfast(engine: &Engine, paths: &AppPaths) {
 /// belongs to the user and is never replaced.
 pub fn ensure_defaults(paths: &AppPaths) -> io::Result<()> {
     for (name, built_in) in [
-        ("mpv.conf", DEFAULT_MPV_CONF),
-        ("input.conf", DEFAULT_INPUT_CONF),
+        (settings::MPV_CONF, DEFAULT_MPV_CONF),
+        (settings::INPUT_CONF, DEFAULT_INPUT_CONF),
     ] {
         let target = paths.config_dir.join(name);
         if target.try_exists()? {
