@@ -1,10 +1,12 @@
-//! The libmpv core behind the video (spec 4.2, 5.1): its threads and the options Kaleido
-//! enforces.
+//! The libmpv core behind the video (spec 4.2, 5.1): its threads, the options Kaleido enforces
+//! and the events it sends to the UI.
 
 pub mod engine;
 pub mod options;
+pub mod state;
 
 pub use engine::{ENGINE_OBSERVE_BASE, Engine, EngineConfig, EventLoop, Request};
+pub use state::{EndReason, EventSink, LogLine, PlayerEvent, StateLoop, observe_all, snapshot};
 
 #[cfg(test)]
 pub(crate) mod testing {
