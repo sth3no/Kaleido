@@ -17,6 +17,10 @@ cd C:/Users/PC/Projects/Apps/Kaleido/app/.claude/worktrees/m0-prototype/prototyp
 npm run tauri dev
 ```
 
+Opravy z review 2026-10-17 (mini přehrávač při přesunu okna, sklo po změně DPI, poslední
+`time-pos`, UTF-8 cesty pro Lua) jsou zatím jen ve zdrojích. Nainstalovaný build z 2026-10-16 je
+nemá; zkoušej přes `npm run tauri dev`, nebo až po nové instalaci.
+
 První spuštění sestaví `kaleido-mpv.exe` a aplikaci (asi minutu). Média jsou v
 `%USERPROFILE%\Videos\kaleido-m0\` (vygenerovaná: SDR 1080p, letterbox 2.39:1, 4K 60 fps,
 syntetické HDR10, kopie s českým názvem). Pro bod 2 se hodí i skutečné HDR10 video.
@@ -45,6 +49,7 @@ která píše zpětný apostrof).
 - [x] Dvojklik do videa → fullscreen se přepne právě jednou; Esc ho ukončí.
   Když nic: `SEND_EXPLICIT_DOUBLE_CLICK = true` v `prototype/src/input/forward.ts`.
 - [ ] Klik na ▶ a pak mezerník → pauza se přepne jen jednou.
+- [ ] `Alt+F4` zavře aplikaci (review: UI ruší výchozí akci u všech převedených kláves).
 
 ## 4 · Fullscreen a DPI
 - [ ] ⛶ → přechod jen přes černou, bez roztaženého snímku a bez bílého bliknutí; totéž zpět.
@@ -52,7 +57,8 @@ která píše zpětný apostrof).
 - [ ] Přetažení mezi monitory s různým měřítkem → video vyplní okno.
 
 ## 5 · Sklo
-- [ ] Pod kapslemi je video rozmazané, tvar sedí (zaoblené konce, žádný posun ani převrácení), i při 150 %.
+- [ ] Pod kapslemi je video rozmazané, tvar sedí (zaoblené konce, žádný posun ani převrácení), i při 150 %
+  a po přetažení okna na monitor s jiným měřítkem, i v pauze (oprava přepočtu 2026-10-17).
 - [ ] `letterbox-239.mkv`: rozmazání sedí i nad pruhy. Když je posunuté o výšku pruhu →
   `OUTPUT_EXCLUDES_MARGINS = false` v `prototype/src-tauri/src/glass.rs`.
 - [ ] 2,5 s bez pohybu myši → kapsle zmizí a rozmazání mizí s nimi bez bliknutí.

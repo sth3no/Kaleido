@@ -213,6 +213,50 @@ kontrolu vlastnictví a odebrání registrace ponechává soubory aplikace.
 Po posledním zavření přes viditelné ✕ nezůstal proces Kaleida ani helperu. Poslední opakovaná
 instalace prošla a znovu byly porovnány všechny původní ProgID i hashe: beze změny.
 
+## Review celé větve (2026-10-17)
+
+Review rozsahu `main..m0-prototype` (`ebb0932..e993cc0`) podle `superpowers:requesting-code-review`.
+Potvrzené nálezy jsou opravené, vždy nejdřív selhávajícím testem:
+
+| Nález | Oprava |
+|---|---|
+| Při přesunu nebo změně velikosti hlavního okna libmpv vrátí své okno na celou plochu; po přetažení okna v mini režimu bylo za stránkou video v plné velikosti. | obalení procedury okna `mpv`, test se skutečnou libmpv (`cbf2bd7`) |
+| `Mpv::wait_event` šlo z bezpečného kódu volat ze dvou vláken naráz, takže mohlo číst uvolněnou paměť. | interní zámek, test `a_second_waiter_waits_for_the_first` (`ac9b96c`) |
+| S `TEMP` v profilu s diakritikou thumbfast nikdy nedodal náhled. Ověřeno: e2e test thumbfastu s `TEMP=…\Videa čeština` (ANSI stránka 1250) selhal, protože `os.rename` v LuaJIT používá ANSI stránku. | `activeCodePage` UTF-8 v manifestu, test v podprocesu (`296fd93`) |
+| Omezení `time-pos` na 10×/s zahodilo poslední hodnotu (přetáčení v pauze). | `Throttle` pošle podrženou hodnotu po uplynutí intervalu (`c53ea40`) |
+| Oblasti skla zůstaly po změně DPI ve starém měřítku, dokud se nezměnila nějaká kapsle. | přepočet při `ScaleFactorChanged` (`5ece188`) |
+| CI job `prototype` nestahoval libmpv, ač ji jeho testy potřebují. | doplněno (`2e79295`) |
+| Spec tvrdila víc, než se ověřilo: snímky bez skla pro všechny vazby, `KeyboardEvent.code`, mini přehrávač „funguje“. | upravené formulace ve spec 5.3, 5.4, 8.2 a 8.6 |
+
+Zaznamenáno pro M1 (`prototype/` je jen reference, proto se neopravuje):
+
+- `thumbs.rs` načte celý soubor a teprve pak porovná velikost; kontrolovat nejdřív
+  `metadata().len()`.
+- `engine.rs` bere `std::env::temp_dir()` (nejdřív `TMP`), thumbfast `TEMP`; když se liší, Kaleido
+  všechny náhledy odmítne.
+- `kaleido-mpv` přepisuje HDR filtr jen při spuštění, `vf set` přes IPC ho obejde (spec 4.1).
+- `mpv-ffi`: `load_api` je bezpečná funkce nad nebezpečným načtením DLL z cesty, kterou může určit
+  proměnná `KALEIDO_LIBMPV`; záložní cesta do `vendor/` je zakompilovaná i v release buildu. DLL
+  se uvolní s posledním `Arc<Api>`; zvážit, zda ji nechat načtenou po celý běh.
+- `open_file` předá do `loadfile` libovolný řetězec z UI bez kontroly lokálního souboru (spec 4.4).
+- Kolečko posílá celý krok `WHEEL_*` na každou událost, přesné touchpady proto skáčou (`keypress`
+  v mpv umí měřítko).
+- Zkratka `g` se zachytává dřív než konzole mpv, do konzole ji nejde napsat.
+- `preventDefault` u všech převedených kláves možná spolkne `Alt+F4` a `Alt+Space` (neověřeno,
+  ruční kontrola v checklistu).
+- Obdélník mini přehrávače se po změně velikosti okna nepřepočítá; ořez ve `to_physical` pak video
+  zmáčkne.
+- Synchronní Tauri příkazy volají mpv z hlavního vlákna, které sdílí vstupní frontu s oknem mpv.
+  V M1 volat mpv mimo hlavní vlákno a vstup držet v jedné uspořádané frontě, jinak může `keyup`
+  předběhnout `keydown`.
+- Pořadí otevírání souborů z fronty drží jen to, že oba konzumenti běží na hlavním vlákně
+  (`open_files` běží mimo zámek).
+- Po pádu Kaleida může zůstat běžet `kaleido-mpv`; v M1 Job Object s `KILL_ON_JOB_CLOSE`.
+
+Tři nálezy k `scripts/install-local-prototype.ps1` (odregistrace blokovaná kontrolou vlastnictví,
+kopírování bez kontroly běžících procesů, přípony `.ts` a `.mod` sdílené se zdrojovými soubory)
+jsou předané session, která na skriptu pracuje.
+
 ## Závěr a doporučení pro M1 (koncept)
 
 > **Koncept z 2026-10-17, ne konečný závěr.** Ruční kontroly z [checklist.md](checklist.md), které
@@ -228,10 +272,10 @@ instalace prošla a znovu byly porovnány všechny původní ProgID i hashe: bez
 | 2 | částečně | syntetické HDR10 se načte, štítek „4K HDR“, obraz i sklo se vykreslí | skutečné HDR10 na HDR monitoru, Windows HDR zapnuté i vypnuté |
 | 3 | částečně | mezerník, šipka, seekbar, hlasitost, kolečko, `click-target`, dvojklik, konzole s diakritikou | podržená šipka, Ctrl puštěný dřív než šipka, `click-target` při 150 %, ▶ a mezerník přepnou pauzu jen jednou |
 | 4 | částečně | fullscreen tlačítkem i dvojklikem, Esc vrátí okno | přechod přes černou clonu bez bliknutí, 10 rychlých přepnutí, monitory s různým DPI |
-| 5 | částečně | rozmazání pod kapslemi, `g`, mizí s kapslemi při autohide; 20 + 6 + 24 µs (4K zdroj v okně 1280×720, RTX 5060 Ti) | tvar při 150 %, sedění nad pruhy letterboxu, bliknutí při autohide, ≤ 1 ms při 4K výstupu na RTX 5060 Ti i integrované AMD |
+| 5 | částečně | rozmazání pod kapslemi, `g`, mizí s kapslemi při autohide; 20 + 6 + 24 µs (4K zdroj v okně 1280×720, RTX 5060 Ti); po změně DPI se oblasti přepočítají (test, oprava z review) | tvar při 150 % a po přesunu mezi monitory s různým DPI, sedění nad pruhy letterboxu, bliknutí při autohide, ≤ 1 ms při 4K výstupu na RTX 5060 Ti i integrované AMD |
 | 6 | částečně | zmenšení do rohu, ▶/❚❚ a návrat tlačítkem; obdélník přežije přesun a změnu velikosti okna (test s libmpv) | záznam 60 fps (hrana videa zaostává nejvýš o 1 snímek), dvojklik v mini režimu, tažení okna v mini režimu bez bliknutí |
 | 7 | částečně | `kaleido-mpv.exe` jako `mpv_path`, náhled v bublině bez konzolového okna, syntetické HDR barvy | náhled do 300 ms, skutečný HDR materiál |
-| 8 | prošlo | `s` bez skla, `S` se sklem, složka Plochy z Tauri | — |
+| 8 | prošlo pro `s` | `s` bez skla, složka Plochy z Tauri; `S` (a `Ctrl+s`, `Alt+s`) jde v M0 přímo do mpv a sklo obsahuje | — (vazby snímku pro M1 viz spec 8.2) |
 
 **Výkon (Task 13, krok 1):** všech pět cílů prošlo na RTX 5060 Ti s 1080p SDR. **OTEVŘENÉ:**
 integrovaná AMD a 4K zdroj (`scripts/measure-m0.ps1`, postup v sekci Výkon).
@@ -240,8 +284,8 @@ integrovaná AMD a 4K zdroj (`scripts/measure-m0.ps1`, postup v sekci Výkon).
 **OTEVŘENÉ** do ručních kontrol: bod 1 (dvě okna), bod 5 (tónované sklo bez rozmazání, případně
 rozmazání ve sníženém rozlišení podle spec 13) a bod 6 (skok + prolnutí podle 8.6).
 
-**Uzavřená rozhodnutí**, promítnutá do spec 2026-10-17 (kapitoly 3, 4.1, 4.2, 5.1, 5.2, 5.4, 8.2,
-8.6, 9.3 a 15):
+**Uzavřená rozhodnutí**, promítnutá do spec 2026-10-17 (kapitoly 3, 4.1, 4.2, 5.1, 5.2, 5.3, 5.4,
+6.1, 8.2, 8.6, 9.3 a 15):
 
 - `wid` = hlavní okno; mpv si vytvoří okno třídy `mpv` pod WebView2 a mini přehrávač ho přesouvá
   přes `SetWindowPos`. Vlastní podokno jako `wid` je zamítnuté. Proti tomu, že libmpv při přesunu
@@ -250,6 +294,8 @@ rozmazání ve sníženém rozlišení podle spec 13) a bod 6 (skok + prolnutí 
 - `kaleido-mpv` přepisuje HDR filtr thumbfastu na jeden `lavfi` graf; upstream thumbfast se nemění.
 - `screenshot-dir` je cesta Plochy z Tauri, ne `~~desktop/`.
 - Jediná instance: požadavky čekají na připravené UI a otevřený soubor se vždy začne přehrávat.
+- `Kaleido.exe` má v manifestu `activeCodePage` UTF-8 (jako `mpv.exe`), jinak Lua pluginy
+  selžou na cestách s diakritikou (oprava z review, test v prototypu).
 
 ### Konstanty
 
@@ -263,7 +309,8 @@ rozmazání ve sníženém rozlišení podle spec 13) a bod 6 (skok + prolnutí 
 Beze změny:
 
 - `crates/mpv-ffi`: načtení libmpv za běhu, kontrola API 2.x, příkazy, vlastnosti, události,
-  `testing::write_y4m` a 16 testů nad skutečnou libmpv.
+  `testing::write_y4m` a 17 testů nad skutečnou libmpv. `wait_event` je od review chráněné zámkem,
+  takže ho bezpečný kód nemůže zavolat ze dvou vláken naráz.
 - `crates/kaleido-mpv`: bezhlavé CLI pro thumbfast včetně přepisu HDR filtru a testu s připnutým
   thumbfastem.
 - `scripts/fetch-libmpv.ps1`, `scripts/fetch-thumbfast.ps1` a job `rust` v CI.
@@ -278,7 +325,8 @@ Jen jako reference (`prototype/`; M1 to napíše znovu podle spec 4.2 a převezm
 - `thumbs.rs`: ověření zprávy `thumbfast-render` (jen soubory v `%TEMP%`, velikost `w*h*4`).
 - `open_requests.rs`: fronta do připravenosti UI, `pause=no` a filtr argumentů shellu; v M1 ho
   nahradí parser z 9.1 a 9.2.
-- `engine.rs`, `options.rs`: vlákno událostí, omezení `time-pos`, snímek bez skla. M0 má
+- `engine.rs`, `options.rs`: vlákno událostí, omezení `time-pos` (`Throttle` neztratí poslední
+  hodnotu), přepočet skla při změně DPI, snímek bez skla. M0 má
   `config=no`, M1 bude mít `config=yes` a `config-dir` (5.1).
 - UI: `fullscreen.ts` (černá clona), `surface/mini.ts` (animace obdélníku), `glass/regions.ts`,
   `playerState.ts`.
@@ -296,3 +344,6 @@ Jen jako reference (`prototype/`; M1 to napíše znovu podle spec 4.2 a převezm
    Send to (2026-10-16). Řeší se samostatně; pro M4 to určí registraci v instalátoru (8.12, 11.2).
 6. Co dělat, když test v CI odhalí změnu třídy okna `mpv` po aktualizaci libmpv: hledat okno jinak,
    nebo aktualizaci odložit.
+7. Snímek, který plugin vyvolá přímo příkazem `screenshot`, sklo obsahuje (spec 8.2).
+8. HDR přepis náhledů po `vf set` přes IPC (spec 4.1).
+9. Volání mpv mimo hlavní vlákno a jedna uspořádaná fronta vstupu (Review výše).
