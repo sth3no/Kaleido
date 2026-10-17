@@ -15,8 +15,27 @@
     }
   },
   "home": {
+    "title": "Drop a video here",
+    "subtitle": "or open a file, or paste a link to a video",
     "openFile": "Open file",
-    "pasteLink": "Paste link"
+    "pasteLink": "Paste link",
+    "pasteShortcut": "Ctrl+V",
+    "paste": {
+      "label": "Link to a video",
+      "placeholder": "Paste a link and press Enter",
+      "submit": "Play",
+      "cancel": "Cancel",
+      "errors": {
+        "invalid": "That is not a link. Paste one web address that starts with http:// or https://.",
+        "protocol": "Only web links (http or https) can be pasted here. To play a file, use Open file or drop it on the window."
+      }
+    },
+    "resume": {
+      "title": "Continue watching",
+      "badge": "ROADMAP",
+      "text": "Recently played videos with previews and the place where you stopped.",
+      "roadmap": "What we are building →"
+    }
   },
   "player": {
     "play": "Play",

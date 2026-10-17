@@ -1,4 +1,6 @@
 import styles from './App.module.css';
+import HomeScreen from './home/HomeScreen';
+import { useDrop } from './home/useDrop';
 import AppShell from './shell/AppShell';
 
 /**
@@ -6,9 +8,11 @@ import AppShell from './shell/AppShell';
  * start screen (Task 17), the player (Task 18) and the settings (Task 22).
  */
 export default function App() {
+  // The whole window takes drops, whichever page is shown; the start screen lights up its zone.
+  const dragging = useDrop();
   return (
     <div className={styles.root}>
-      <AppShell home={null} player={null} settings={null} />
+      <AppShell home={<HomeScreen dragging={dragging} />} player={null} settings={null} />
     </div>
   );
 }

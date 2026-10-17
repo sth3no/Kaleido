@@ -1,0 +1,84 @@
+/*
+ * The paste field of the start screen (PasteField.tsx): one text field with Play and Cancel
+ * beside it, and the reason a link did not open underneath. It sits on the drop zone's glass, so
+ * the text colour is inherited.
+ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  width: min(100%, 480px);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+}
+
+.input::placeholder {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* What the user typed is not a link: the edge says so, and the message underneath why. */
+.input[aria-invalid='true'] {
+  border-color: var(--k-color-danger);
+}
+
+.submit,
+.cancel {
+  flex: none;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.submit {
+  background: var(--k-color-text);
+  border-color: transparent;
+  color: var(--k-color-bg);
+  text-shadow: none;
+}
+
+.cancel:hover {
+  background: var(--k-color-hover);
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-m);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+  text-align: start;
+}
+
+/* High contrast: the system's colours, and the error is told by its text and the border. */
+@media (forced-colors: active) {
+  .input[aria-invalid='true'] {
+    border-width: 2px;
+  }
+
+  .submit {
+    border-color: ButtonText;
+  }
+}

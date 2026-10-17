@@ -15,8 +15,27 @@
     }
   },
   "home": {
+    "title": "Přetáhni sem video",
+    "subtitle": "nebo otevři soubor, nebo vlož odkaz na video",
     "openFile": "Otevřít soubor",
-    "pasteLink": "Vložit odkaz"
+    "pasteLink": "Vložit odkaz",
+    "pasteShortcut": "Ctrl+V",
+    "paste": {
+      "label": "Odkaz na video",
+      "placeholder": "Vlož odkaz a stiskni Enter",
+      "submit": "Přehrát",
+      "cancel": "Zrušit",
+      "errors": {
+        "invalid": "To není odkaz. Vlož jednu webovou adresu, která začíná http:// nebo https://.",
+        "protocol": "Sem jdou vložit jen webové odkazy (http nebo https). Soubor přehraješ tlačítkem Otevřít soubor, nebo ho přetáhni do okna."
+      }
+    },
+    "resume": {
+      "title": "Pokračovat ve sledování",
+      "badge": "ROADMAPA",
+      "text": "Nedávno přehrávaná videa s náhledy a místem, kde jsi skončil.",
+      "roadmap": "Co chystáme →"
+    }
   },
   "player": {
     "play": "Přehrát",

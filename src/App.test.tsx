@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
@@ -55,4 +55,52 @@ test('with nothing open the app shows the start page with the sidebar and the wi
   fireEvent.click(nav.getByRole('button', { name: 'Settings' }));
   expect(useUiStore.getState().page).toBe('settings');
   expect(screen.getByRole('main').getAttribute('data-view')).toBe('settings');
+});
+
+/** What a drag carries; jsdom has no DataTransfer, and the hook reads these members only. */
+function dragged(data: Record<string, string>) {
+  return {
+    types: Object.keys(data),
+    files: [],
+    getData: (type: string) => data[type] ?? '',
+    dropEffect: 'none',
+  } as unknown as DataTransfer;
+}
+
+test('the whole window takes a dropped link, and the start screen lights its zone while one is dragged over', async () => {
+  render(<App />);
+  await waitFor(() => {
+    expect(usePlayerStore.getState().props['idle-active']).toBe(true);
+  });
+  const zone = screen.getByRole('region', { name: 'Drop a video here' });
+  expect(zone.getAttribute('data-dragging')).toBe('false');
+
+  fireEvent.dragEnter(window, { dataTransfer: dragged({ 'text/uri-list': 'https://example.com/v' }) });
+  expect(zone.getAttribute('data-dragging')).toBe('true');
+
+  fireEvent.drop(window, { dataTransfer: dragged({ 'text/uri-list': 'https://example.com/v' }) });
+  expect(zone.getAttribute('data-dragging')).toBe('false');
+  expect(invoke).toHaveBeenCalledWith('player_load', {
+    sources: ['https://example.com/v'],
+    mode: 'replace',
+  });
+});
+
+test('a drop on the settings page is cancelled as well, and a link dropped there plays', async () => {
+  render(<App />);
+  await waitFor(() => {
+    expect(usePlayerStore.getState().props['idle-active']).toBe(true);
+  });
+  act(() => {
+    useUiStore.getState().setPage('settings');
+  });
+
+  // Nothing Kaleido opens: the drop is still cancelled, so that WebView2 does not go to it.
+  const notCancelled = fireEvent.drop(window, { dataTransfer: dragged({ 'text/html': '<p>x</p>' }) });
+  expect(notCancelled).toBe(false);
+
+  fireEvent.drop(window, { dataTransfer: dragged({ 'text/plain': 'https://example.com/v' }) });
+  await waitFor(() => {
+    expect(useUiStore.getState().page).toBe('player');
+  });
 });

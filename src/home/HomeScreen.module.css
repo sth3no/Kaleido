@@ -1,0 +1,205 @@
+/*
+ * The start screen (key-screens-v2.html, screen 1): the drop zone and, under it, the card of the
+ * roadmap's "Continue watching". It lives in the page beside the docked sidebar (AppShell.module.css)
+ * on the opaque background, so the glass here blurs the page's gradient. It comes after
+ * theme/glass.module.css, so its own rules win over the glass'.
+ */
+.home {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  overflow: auto;
+  /*
+   * The top of a docked page is the window's title bar (AppShell.module.css): its drag strip is
+   * over the page, so nothing of ours goes there.
+   */
+  padding: var(--shell-titlebar-height) var(--k-space-xl) var(--k-space-xl);
+}
+
+/* `margin: auto` centres the content, and a window too low for it scrolls instead of clipping the top. */
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-l);
+  width: min(100%, 720px);
+  margin: auto;
+}
+
+/* The zone: a dashed glass panel that takes a dropped video. */
+.zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-xxl) var(--k-space-xl);
+  border-style: dashed;
+  border-radius: calc(var(--k-radius-l) * 1.4);
+  text-align: center;
+  transition:
+    border-color var(--k-motion-fast) ease,
+    box-shadow var(--k-motion-fast) ease;
+}
+
+/* Something is dragged over the window: the zone says where it goes. */
+.zone[data-dragging='true'] {
+  border-style: solid;
+  border-color: var(--k-accent-solid);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--k-accent-solid) 40%, transparent),
+    var(--k-shadow-glass);
+}
+
+.orb {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--k-accent-gradient);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--k-accent-solid) 60%, transparent);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-xl);
+  font-weight: 700;
+}
+
+/* Softer than the title but of the glass' own text colour, which is light or dark as the tint needs. */
+.subtitle {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--k-space-m);
+  margin-top: var(--k-space-s);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+/* The white pill of the mockups: the page's text colour with the page's ground on it. */
+.primary {
+  background: var(--k-color-text);
+  color: var(--k-color-bg);
+  /* The glass' shadow is for light text on dark glass; this text is the other way round. */
+  text-shadow: none;
+}
+
+.ghost {
+  border-color: var(--k-color-border);
+  background: var(--k-color-hover);
+}
+
+.ghost:hover {
+  background: var(--k-color-selected);
+}
+
+.small {
+  padding: 6px 13px;
+  font-size: var(--k-font-size-s);
+}
+
+.kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-s);
+  font: inherit;
+  font-size: var(--k-font-size-xs);
+  font-weight: 400;
+}
+
+/* The roadmap card. */
+.resume {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-l);
+  padding: var(--k-space-l) var(--k-space-xl);
+}
+
+.resumeText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+}
+
+.resumeHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-s);
+}
+
+.resumeTitle {
+  margin: 0;
+  font-size: var(--k-font-size-l);
+  font-weight: 700;
+}
+
+.resumeSubtitle {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* "ROADMAP": what the card shows is not built yet. */
+.badge {
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--k-accent-solid) 60%, transparent);
+  border-radius: var(--k-radius-s);
+  background: color-mix(in srgb, var(--k-accent-solid) 32%, transparent);
+  font-size: var(--k-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/*
+ * The button's ::after covers the whole card, whose box is the nearest positioned ancestor (the
+ * glass is `position: relative`, the button is not): the card opens the roadmap with a click, and
+ * keyboard and screen reader users reach the same action as one button.
+ */
+.roadmap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--k-radius-l);
+}
+
+.resume:has(.roadmap:hover) {
+  border-color: var(--k-accent-solid);
+}
+
+/* High contrast: no shadows to light the zone with, so its edge is the system's highlight. */
+@media (forced-colors: active) {
+  .zone[data-dragging='true'] {
+    border-color: Highlight;
+    outline: 2px solid Highlight;
+  }
+
+  .badge {
+    border-color: CanvasText;
+    background: transparent;
+  }
+
+  .primary {
+    border-color: CanvasText;
+  }
+}
