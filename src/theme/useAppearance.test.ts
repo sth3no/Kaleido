@@ -43,6 +43,23 @@ describe('resolveRoot', () => {
     expect(resolveRoot({ ...DEFAULT_APPEARANCE, mode: 'light' }, windows(), true).theme).toBe('light');
   });
 
+  test('the default glass tint is white in the light mode and a chosen one stays (R35)', () => {
+    // The mode "system" with a light Windows, and the mode "light" with a dark one: the real path.
+    expect(resolveRoot(DEFAULT_APPEARANCE, windows(), false).tokens.glass.tint).toBe('#ffffff');
+    expect(resolveRoot({ ...DEFAULT_APPEARANCE, mode: 'light' }, windows(), true).tokens.glass.tint).toBe(
+      '#ffffff',
+    );
+    // Dark: the default stays the dark one.
+    expect(resolveRoot(DEFAULT_APPEARANCE, windows(), true).tokens.glass.tint).toBe(
+      DEFAULT_APPEARANCE.glassTint,
+    );
+    // A tint the user chose is theirs in both modes.
+    for (const prefersDark of [true, false]) {
+      const chosen = resolveRoot({ ...DEFAULT_APPEARANCE, glassTint: '#102030' }, windows(), prefersDark);
+      expect(chosen.tokens.glass.tint, `prefersDark ${prefersDark}`).toBe('#102030');
+    }
+  });
+
   test('reduces transparency for Windows, for high contrast and for the user, and Mica with it', () => {
     const off = windows({ transparencyEffects: false });
     expect(resolveRoot(DEFAULT_APPEARANCE, off, true)).toMatchObject({ reduceTransparency: true, mica: false });

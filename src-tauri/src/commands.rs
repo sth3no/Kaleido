@@ -158,10 +158,12 @@ async fn on_blocking_thread<T: Send + 'static>(
 }
 
 /// Windows' transparency effects, high contrast and build, as `system:appearance-changed` says
-/// them when they change. Synchronous: it reads one registry value and two system settings.
+/// them when they change. What it reads is also what Rust goes by from then on, so that Rust and
+/// the UI agree after a reload. Synchronous: it reads one registry value and two system
+/// settings.
 #[tauri::command]
-pub fn system_appearance() -> SystemAppearance {
-    themes::read()
+pub fn system_appearance(app: AppHandle) -> SystemAppearance {
+    themes::current(&app)
 }
 
 /// Kaleido's own settings (settings.json). Reads the store only.

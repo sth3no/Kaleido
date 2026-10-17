@@ -211,6 +211,63 @@ describe('tokens', () => {
     expect(dark.glass.tint).not.toBe(light.glass.tint);
   });
 
+  test('in the light mode the default glass tint is white, and a tint the user chose stays (R35)', () => {
+    const light = tokensFromAppearance(DEFAULT_APPEARANCE, 'light');
+    const dark = tokensFromAppearance(DEFAULT_APPEARANCE, 'dark');
+    expect(light.glass.tint).toBe('#ffffff');
+    expect(dark.glass.tint).toBe(DEFAULT_APPEARANCE.glassTint);
+    // Text on the white glass is the other one than on the dark glass.
+    expect(light.color.onGlass).not.toBe(dark.color.onGlass);
+
+    // defaultTokens is the same rule, not another one.
+    expect(defaultTokens('light')).toEqual(light);
+    expect(defaultTokens('dark')).toEqual(dark);
+
+    // The same default as another spelling of it, or a tint that is no colour (the default then).
+    expect(tokensFromAppearance(appearance({ glassTint: '#16161C' }), 'light').glass.tint).toBe('#ffffff');
+    expect(tokensFromAppearance(appearance({ glassTint: 'red' }), 'light').glass.tint).toBe('#ffffff');
+
+    // A chosen tint applies in both modes.
+    for (const mode of MODES) {
+      for (const glassTint of ['#102030', '#c9b8ff', '#222222', '#FFFFFF']) {
+        const tint = tokensFromAppearance(appearance({ glassTint }), mode).glass.tint;
+        expect(tint, `${mode} ${glassTint}`).toBe(glassTint.toLowerCase());
+      }
+    }
+  });
+
+  test('the focus ring stands out from the page by 3:1 in both modes', () => {
+    // WCAG relative luminance and contrast ratio, written out here on their own.
+    const channel = (value: number) => {
+      const unit = value / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    };
+    const luminanceOf = (hex: string) => {
+      const rgb = Number.parseInt(hex.slice(1), 16);
+      return 0.2126 * channel((rgb >> 16) & 255) + 0.7152 * channel((rgb >> 8) & 255) + 0.0722 * channel(rgb & 255);
+    };
+    const ratio = (first: string, second: string) => {
+      const [a, b] = [luminanceOf(first), luminanceOf(second)];
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    };
+
+    const accents = ['kaleido', '#a98bff', '#ff8800', '#102030', '#ffffff', '#000000', '#f4f2fb', '#15122b'];
+    for (const mode of MODES) {
+      for (const accent of accents) {
+        const tokens = tokensFromAppearance(appearance({ accent }), mode);
+        const ring = /^2px solid (#[0-9a-f]{6})$/.exec(tokens.focus.ring)?.[1];
+        expect(ring, `${mode} ${accent}: ${tokens.focus.ring}`).toBeDefined();
+        expect(ratio(ring ?? '', tokens.color.bg), `${mode} ${accent}: ${tokens.focus.ring}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+
+    // On the dark page the kaleido violet is enough as it is; on the light page it is darker.
+    const dark = defaultTokens('dark');
+    const light = defaultTokens('light');
+    expect(dark.focus.ring).toBe(`2px solid ${dark.accent.solid}`);
+    expect(light.focus.ring).not.toBe(`2px solid ${light.accent.solid}`);
+  });
+
   test('the defaults here are the defaults of the settings in Rust', () => {
     // The first sample of settings:changed is `Settings::default()` as Rust serializes it.
     const [rustDefaults] = settingsChangedJson;
@@ -294,12 +351,31 @@ describe('the stylesheets', () => {
     expect(SCALES.test('.a { zoom: var(--k-ui-scale, 1); transform: translateX(2px); }')).toBe(false);
   });
 
-  test('no transform: scale in any stylesheet', () => {
+  /** The text of the stylesheet whose path ends with `suffix`; "" if there is none. */
+  const stylesheet = (suffix: string): string =>
+    Object.entries(stylesheets).find(([path]) => path.endsWith(suffix))?.[1] ?? '';
+
+  test('the stylesheets come as text (vite.config.ts lets ?raw CSS through vitest)', () => {
     const files = Object.entries(stylesheets);
-    // global.css, glass.module.css and App.module.css at least: the walk found the files.
+    // global.css, glass.module.css and App.module.css at least: the glob found the files.
     expect(files.length).toBeGreaterThanOrEqual(3);
+    // Vitest blanks CSS ("" for a stylesheet, a proxy of class names for a CSS module) unless
+    // test.css.include says otherwise; every other test of this file would then pass on nothing.
     for (const [path, css] of files) {
       expect(css, path).toBeTypeOf('string');
+      expect(css.length, `${path} is empty: vitest did not give its text`).toBeGreaterThan(0);
+    }
+    // Real text of the files, not just any text.
+    expect(stylesheet('/theme/global.css')).toContain(':focus-visible');
+    expect(stylesheet('/theme/glass.module.css')).toContain('.glass');
+    expect(stylesheet('/App.module.css')).toContain('.root');
+  });
+
+  test('no transform: scale in any stylesheet', () => {
+    const files = Object.entries(stylesheets);
+    expect(files.length).toBeGreaterThanOrEqual(3);
+    for (const [path, css] of files) {
+      expect(css.length, `${path} is empty`).toBeGreaterThan(0);
       // A transform: scale on an ancestor of an element with backdrop-filter breaks the blur in
       // WebView2 (spec 8.2): zoom is what the UI uses.
       expect(SCALES.test(code(css)), `${path} scales with a transform`).toBe(false);
@@ -315,6 +391,7 @@ describe('the stylesheets', () => {
     ]);
     const used = new Set<string>();
     for (const [path, css] of Object.entries(stylesheets)) {
+      expect(css.length, `${path} is empty`).toBeGreaterThan(0);
       for (const match of code(css).matchAll(/var\(\s*(--k-[a-z0-9-]+)/g)) {
         expect(tokenVariables.has(match[1] ?? ''), `${path} reads ${match[1]}`).toBe(true);
         used.add(match[1] ?? '');
@@ -330,7 +407,8 @@ describe('the stylesheets', () => {
   });
 
   test('global.css has the font, tabular numbers, reduced motion, forced colours and the focus', () => {
-    const globalCss = Object.entries(stylesheets).find(([path]) => path.endsWith('/theme/global.css'))?.[1] ?? '';
+    const globalCss = stylesheet('/theme/global.css');
+    expect(globalCss.length).toBeGreaterThan(0);
     expect(globalCss).toContain('Segoe UI Variable Text');
     expect(globalCss).toMatch(/\.tabular\s*\{[^}]*tabular-nums/);
     expect(globalCss).toContain('@media (prefers-reduced-motion: reduce)');
@@ -340,7 +418,8 @@ describe('the stylesheets', () => {
   });
 
   test('glass.module.css has the opaque variant for reduced transparency', () => {
-    const glassCss = Object.entries(stylesheets).find(([path]) => path.endsWith('/theme/glass.module.css'))?.[1] ?? '';
+    const glassCss = stylesheet('/theme/glass.module.css');
+    expect(glassCss.length).toBeGreaterThan(0);
     expect(glassCss).toMatch(/\.glass\s*\{[^}]*backdrop-filter:\s*blur\(/);
     expect(glassCss).toMatch(/:global\(\[data-reduce-transparency\]\)\s+\.glass\s*\{[^}]*backdrop-filter:\s*none/);
   });

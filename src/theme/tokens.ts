@@ -124,7 +124,10 @@ export interface Tokens {
     spring: string;
   };
   focus: {
-    /** An `outline` (it survives forced colours, a `box-shadow` does not). */
+    /**
+     * An `outline` (it survives forced colours, a `box-shadow` does not). Its colour stands out
+     * from the page background by at least 3:1.
+     */
     ring: string;
     /** px. */
     offset: number;
@@ -138,6 +141,10 @@ const KALEIDO_SOLID = '#a98bff';
 const KALEIDO_GRADIENT = 'linear-gradient(90deg, #7fd8ff, #a98bff, #ff8fd0)';
 /** The text of the mockups' white buttons: a dark violet. */
 const ON_ACCENT_DARK = '#2a1d4d';
+/** The glass tint of the light mode when the user has not chosen one (Ruling R35): white glass, as in the mockups. */
+const LIGHT_GLASS_TINT = '#ffffff';
+/** WCAG 2.2 non-text contrast: the focus ring against the page. */
+const FOCUS_RING_MIN_CONTRAST = 3;
 
 /** The colours that depend on the mode only. */
 const PALETTE: Record<ResolvedMode, Omit<Tokens['color'], 'onGlass' | 'onAccent'>> = {
@@ -198,6 +205,32 @@ function contrast(first: number, second: number): number {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
+/** `hex` moved `amount` (0 to 1) of the way to black (`target` 0) or white (255), as `#rrggbb`. */
+function toward(hex: string, target: 0 | 255, amount: number): string {
+  const rgb = Number.parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => {
+    const value = (rgb >> shift) & 255;
+    return Math.round(value + (target - value) * amount)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/**
+ * `color` itself if it stands out from `background` by `minimum` (the WCAG contrast ratio), else
+ * darker on a light background and lighter on a dark one, by the least 5 % steps that make it.
+ */
+function standOut(color: string, background: string, minimum: number): string {
+  const base = luminance(background);
+  const target = base > 0.5 ? 0 : 255;
+  for (let step = 0; step < 20; step += 1) {
+    const candidate = toward(color, target, step / 20);
+    if (contrast(luminance(candidate), base) >= minimum) return candidate;
+  }
+  return toward(color, target, 1);
+}
+
 /** `light` or `dark`, whichever reads better on `background`. */
 function readableOn(background: string, light: string, dark: string): string {
   const base = luminance(background);
@@ -239,11 +272,17 @@ function radiusTokens(large: number): Tokens['radius'] {
  * The tokens for the appearance settings in a mode. Values the settings should not have (out of
  * range, not a number, not a colour) are held to the same ranges Rust checks, so that a bad file
  * cannot make the UI unusable. The glass opacity never goes below `GLASS_TEXT_MIN_OPACITY`.
+ *
+ * The glass tint the settings start with (the default `#16161c`) is dark glass; in the light mode
+ * it becomes the light default, white (Ruling R35). A tint the user chose applies in both modes.
  */
 export function tokensFromAppearance(appearance: Appearance, mode: ResolvedMode): Tokens {
   const palette = PALETTE[mode];
   const defaults = DEFAULT_APPEARANCE;
-  const tint = isHex(appearance.glassTint) ? appearance.glassTint.toLowerCase() : defaults.glassTint;
+  const chosenTint = isHex(appearance.glassTint)
+    ? appearance.glassTint.toLowerCase()
+    : defaults.glassTint;
+  const tint = mode === 'light' && chosenTint === defaults.glassTint ? LIGHT_GLASS_TINT : chosenTint;
   const accent = accentTokens(appearance.accent);
   const onGlass = readableOn(tint, LIGHT_TEXT, DARK_TEXT);
   const lightText = onGlass === LIGHT_TEXT;
@@ -287,16 +326,18 @@ export function tokensFromAppearance(appearance: Appearance, mode: ResolvedMode)
       text: lightText ? '0 1px 2px rgba(0, 0, 0, 0.45)' : '0 1px 2px rgba(255, 255, 255, 0.5)',
     },
     motion: { fast: 150, base: 200, slow: 250, spring: 'cubic-bezier(0.34, 1.4, 0.64, 1)' },
-    focus: { ring: `2px solid ${accent.solid}`, offset: 2 },
+    // The accent, but one that stands out from the page by 3:1: the kaleido violet is too light for
+    // the light page, so it is darker there.
+    focus: {
+      ring: `2px solid ${standOut(accent.solid, palette.bg, FOCUS_RING_MIN_CONTRAST)}`,
+      offset: 2,
+    },
   };
 }
 
-/** The tokens of a fresh install in a mode: the defaults of the settings, with a glass that fits the mode. */
+/** The tokens of a fresh install in a mode: the defaults of the settings, by the same rule as any settings. */
 export function defaultTokens(mode: ResolvedMode): Tokens {
-  return tokensFromAppearance(
-    { ...DEFAULT_APPEARANCE, glassTint: mode === 'light' ? '#ffffff' : DEFAULT_APPEARANCE.glassTint },
-    mode,
-  );
+  return tokensFromAppearance(DEFAULT_APPEARANCE, mode);
 }
 
 // --- CSS variables -------------------------------------------------------------------------------

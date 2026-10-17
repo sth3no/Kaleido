@@ -18,7 +18,7 @@ use serde_json::Value;
 use tauri::utils::config::WindowEffectsConfig;
 use tauri::window::{Effect, EffectsBuilder};
 use tauri::{AppHandle, Emitter, Manager, Theme, WebviewWindow};
-use windows::Win32::Foundation::ERROR_SUCCESS;
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -149,10 +149,22 @@ fn transparency_value() -> Option<u32> {
             Some(&raw mut size),
         )
     };
-    (status == ERROR_SUCCESS).then_some(data)
+    if status == ERROR_SUCCESS {
+        return Some(data);
+    }
+    // Not there is the normal case on a Windows that never had the switch touched; anything
+    // else (no access, a value of another type) is a surprise, and the effects count as on.
+    if status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND {
+        tracing::warn!(
+            "cannot read EnableTransparency (status {}); the effects count as on",
+            status.0
+        );
+    }
+    None
 }
 
-/// Whether a high-contrast theme is on (`SPI_GETHIGHCONTRAST`). A call that fails reads as off.
+/// Whether a high-contrast theme is on (`SPI_GETHIGHCONTRAST`). A call that fails is logged and
+/// reads as off.
 fn high_contrast() -> bool {
     let mut info = HIGHCONTRASTW {
         cbSize: size_of::<HIGHCONTRASTW>() as u32,
@@ -160,7 +172,7 @@ fn high_contrast() -> bool {
     };
     // SAFETY: `info` is a HIGHCONTRASTW whose size field is set, which is what the call needs to
     // fill it in; the scheme name it may point to is not read.
-    let read = unsafe {
+    let result = unsafe {
         SystemParametersInfoW(
             SPI_GETHIGHCONTRAST,
             info.cbSize,
@@ -168,7 +180,13 @@ fn high_contrast() -> bool {
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
         )
     };
-    read.is_ok() && info.dwFlags.contains(HCF_HIGHCONTRASTON)
+    match result {
+        Ok(()) => info.dwFlags.contains(HCF_HIGHCONTRASTON),
+        Err(error) => {
+            tracing::warn!("cannot read the high-contrast setting ({error}); it counts as off");
+            false
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -233,26 +251,39 @@ pub fn start(app: &AppHandle) {
 /// flips, not when the transparency switch or high contrast does; changing those takes the user
 /// away from Kaleido, so the focus is the other moment to look.
 pub fn refresh(app: &AppHandle) {
-    let Some(state) = app.try_state::<ThemeState>() else {
-        return;
-    };
+    look(app, true);
+}
+
+/// Windows' appearance now, for `system_appearance`. It is also what Rust knows from here on: if
+/// it differs from the last known one (the UI asks when it starts or reloads, and the change may
+/// not have been looked at yet), the settings are applied again, so that Rust and the UI cannot
+/// disagree. The UI gets the value as the answer, so no event is sent.
+pub fn current(app: &AppHandle) -> SystemAppearance {
+    look(app, false)
+}
+
+/// Reads Windows' appearance. If it differs from the last known one, remembers it, tells the UI
+/// when `notify` and applies the settings again. Returns what it read.
+fn look(app: &AppHandle, notify: bool) -> SystemAppearance {
     let system = read();
+    let Some(state) = app.try_state::<ThemeState>() else {
+        return system;
+    };
     {
         let mut last = locked(&state.system);
-        // Not started: the setup is not done, and `start` reads it all anyway.
-        let Some(previous) = *last else {
-            return;
-        };
-        if previous == system {
-            return;
+        match *last {
+            // Not started: the setup is not done, and `start` reads it all anyway.
+            None => return system,
+            Some(previous) if previous == system => return system,
+            Some(_) => *last = Some(system),
         }
-        *last = Some(system);
     }
     tracing::info!("the system appearance changed: {system:?}");
-    if let Err(error) = app.emit(APPEARANCE_CHANGED_EVENT, system) {
+    if notify && let Err(error) = app.emit(APPEARANCE_CHANGED_EVENT, system) {
         tracing::warn!("cannot send {APPEARANCE_CHANGED_EVENT} to the UI: {error}");
     }
     apply(app, &current_appearance(app), &system);
+    system
 }
 
 /// The appearance settings changed (`settings_set`): applies them with Windows' appearance as it
@@ -288,6 +319,7 @@ fn apply(app: &AppHandle, appearance: &Appearance, system: &SystemAppearance) {
         }
     }
     match (app.try_state::<GlassController>(), plan.glass_off) {
+        // The reason is only for switching off: `set_enabled(true, _)` ignores it.
         (Some(glass), None) => glass.set_enabled(true, GlassReason::User),
         (Some(glass), Some(reason)) => glass.set_enabled(false, reason),
         // Before the setup has made it; `start` comes after.
