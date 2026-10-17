@@ -27,6 +27,12 @@ jobs:
         working-directory: prototype
     steps:
       - uses: actions/checkout@v5
+      # kaleido-proto tests drive the real libmpv: open_requests, and the mpv window class the
+      # surface relies on (vo=gpu-next/d3d11; runners without a GPU fall back to WARP).
+      - name: Fetch pinned libmpv
+        shell: pwsh
+        working-directory: .
+        run: ./scripts/fetch-libmpv.ps1
       - uses: actions/setup-node@v5
         with:
           node-version: 24

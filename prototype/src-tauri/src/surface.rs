@@ -154,41 +154,43 @@ pub mod win {
         (r.left, r.top, r.right - r.left, r.bottom - r.top)
     }
 
-    /// Hidden borderless top-level at (100, 100) with one child of class `child_class`.
     #[cfg(test)]
-    pub fn test_windows(child_class: &str) -> (isize, isize) {
+    fn register_test_class(name: &windows::core::HSTRING) {
         use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
         use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, RegisterClassW, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
-            WS_POPUP,
-        };
-        use windows::core::{HSTRING, PCWSTR};
+        use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, RegisterClassW, WNDCLASSW};
+        use windows::core::PCWSTR;
 
         unsafe extern "system" fn test_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             unsafe { DefWindowProcW(h, msg, wp, lp) }
         }
 
         unsafe {
-            let instance = GetModuleHandleW(None).expect("module");
-            let register = |name: &HSTRING| {
-                let wc = WNDCLASSW {
-                    lpfnWndProc: Some(test_proc),
-                    hInstance: instance.into(),
-                    lpszClassName: PCWSTR(name.as_ptr()),
-                    ..Default::default()
-                };
-                RegisterClassW(&wc);
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(test_proc),
+                hInstance: GetModuleHandleW(None).expect("module").into(),
+                lpszClassName: PCWSTR(name.as_ptr()),
+                ..Default::default()
             };
-            let (parent_class, child_class) = (
-                HSTRING::from("KaleidoTestParent"),
-                HSTRING::from(child_class),
-            );
-            register(&parent_class);
-            register(&child_class);
+            // Fails harmlessly when another test registered the class first.
+            RegisterClassW(&wc);
+        }
+    }
+
+    /// Hidden borderless top-level at (100, 100), client area 400×300, owned by this thread.
+    #[cfg(test)]
+    pub fn test_parent() -> isize {
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WINDOW_EX_STYLE, WS_POPUP};
+        use windows::core::HSTRING;
+
+        let class = HSTRING::from("KaleidoTestParent");
+        register_test_class(&class);
+        unsafe {
+            let instance = GetModuleHandleW(None).expect("module");
             let parent = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
-                &parent_class,
+                &class,
                 &HSTRING::new(),
                 WS_POPUP,
                 100,
@@ -201,23 +203,81 @@ pub mod win {
                 None,
             )
             .expect("parent");
+            parent.0 as isize
+        }
+    }
+
+    /// `test_parent()` with one child of class `child_class`.
+    #[cfg(test)]
+    pub fn test_windows(child_class: &str) -> (isize, isize) {
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WINDOW_EX_STYLE, WS_CHILD};
+        use windows::core::HSTRING;
+
+        let parent = test_parent();
+        let class = HSTRING::from(child_class);
+        register_test_class(&class);
+        unsafe {
             let child = CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
-                &child_class,
+                &class,
                 &HSTRING::new(),
                 WS_CHILD,
                 0,
                 0,
                 1,
                 1,
-                Some(parent),
+                Some(hwnd(parent)),
                 None,
-                Some(instance.into()),
+                Some(GetModuleHandleW(None).expect("module").into()),
                 None,
             )
             .expect("child");
-            (parent.0 as isize, child.0 as isize)
+            (parent, child.0 as isize)
         }
+    }
+
+    /// Dispatches this thread's window messages for `duration`. A child created by another
+    /// thread shares our input queue, so its messages can wait on us.
+    #[cfg(test)]
+    pub fn pump(duration: std::time::Duration) {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage,
+        };
+
+        let deadline = std::time::Instant::now() + duration;
+        while std::time::Instant::now() < deadline {
+            let mut msg = MSG::default();
+            unsafe {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// First direct child of `parent`, waiting up to `timeout` for one to appear.
+    #[cfg(test)]
+    pub fn wait_for_child(parent: isize, timeout: std::time::Duration) -> Option<isize> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Ok(child) = unsafe { GetWindow(hwnd(parent), GW_CHILD) } {
+                return Some(child.0 as isize);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            pump(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(test)]
+    pub fn class_name(window: isize) -> String {
+        let mut name = [0u16; 64];
+        let len = unsafe { GetClassNameW(hwnd(window), &mut name) };
+        String::from_utf16_lossy(&name[..len.max(0) as usize])
     }
 
     #[cfg(test)]
@@ -318,6 +378,53 @@ mod tests {
             }),
         );
         assert_eq!(win::window_rect(child), (110, 120, 30, 40));
+        win::destroy(parent);
+    }
+
+    /// Upstream detail the surface relies on (spec 5.1): with `wid` set, the real libmpv creates
+    /// its own window of class "mpv" as a direct child of `wid`, and the mini-player layout moves it.
+    /// Fails when a libmpv update renames that class or nests the window deeper.
+    #[test]
+    fn surface_moves_the_window_libmpv_creates_inside_wid() {
+        use std::time::Duration;
+
+        use mpv_ffi::{Mpv, load_api, locate_libmpv};
+
+        let parent = win::test_parent();
+        let mpv = Mpv::create(load_api(&locate_libmpv()).expect("load libmpv")).expect("create");
+        let wid = parent.to_string();
+        for (name, value) in [
+            ("wid", wid.as_str()),
+            // Video output of options::mpv_options. Without a GPU (CI) d3d11-warp=auto uses WARP.
+            ("vo", "gpu-next"),
+            ("gpu-api", "d3d11"),
+            ("idle", "yes"),
+            ("force-window", "yes"),
+            ("config", "no"),
+            ("terminal", "no"),
+        ] {
+            mpv.set_option(name, value).expect(name);
+        }
+        mpv.initialize().expect("initialize");
+
+        // Found without find_child: the parent's only child is whatever mpv created.
+        let video = win::wait_for_child(parent, Duration::from_secs(15))
+            .expect("libmpv created no direct child window inside wid");
+        assert_eq!(win::class_name(video), "mpv");
+
+        let surface = SurfaceState::new(parent);
+        surface.apply(400, 300, 1.0);
+        surface.set_layout(Layout::Rect {
+            x: 10.0,
+            y: 20.0,
+            w: 160.0,
+            h: 90.0,
+        });
+        // Give mpv time to fight the placement; it must not.
+        win::pump(Duration::from_millis(500));
+        assert_eq!(win::window_rect(video), (110, 120, 160, 90));
+
+        drop(mpv);
         win::destroy(parent);
     }
 }
