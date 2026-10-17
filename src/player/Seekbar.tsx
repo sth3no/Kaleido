@@ -4,7 +4,10 @@
  * - Hovering shows the bubble with the preview (`thumb_request`, at most one per 30 ms) and
  *   leaving clears it (`thumb_clear`).
  * - Dragging seeks to the nearest keyframe, at most once per 50 ms (`Seek` absolute, not exact), and
- *   the release seeks exactly, once, to where the pointer is.
+ *   the release seeks exactly, once, to where the pointer is. A drag that ends without a release
+ *   (the system cancels the pointer, the capture is lost, Esc is pressed, or a move says no button
+ *   is down any more) ends the same way at the last X the drag saw: the coordinates of such an
+ *   event say nothing (0 for a cancel), so they are never used.
  * - With the focus the bar handles the arrows (±5 s), Home and End itself and says so with
  *   `preventDefault`, so that the keys do not also go to mpv (input/forward.ts).
  *
@@ -80,6 +83,10 @@ export default function Seekbar() {
   /** Seconds the pointer holds while it drags; `null` when it does not. */
   const [dragTime, setDragTime] = useState<number | null>(null);
   const dragging = useRef(false);
+  /** The X (client px) the drag saw last, in the press and the moves; where it ends without a release. */
+  const lastX = useRef(0);
+  /** The pointer that holds the drag, for letting go of it. */
+  const capturedPointer = useRef<number | null>(null);
   const lastRequested = useRef<number | null>(null);
   const seekable = duration > 0;
 
@@ -119,7 +126,10 @@ export default function Seekbar() {
   };
 
   const showPreview = (place: ThumbHover) => {
-    setHover(place);
+    // A move that finds the same place (a sub-pixel jitter, a repeated event) changes nothing.
+    setHover((previous) =>
+      previous?.fraction === place.fraction && previous.seconds === place.seconds ? previous : place,
+    );
     if (lastRequested.current === place.seconds) return;
     lastRequested.current = place.seconds;
     requestPreview(place.seconds);
@@ -141,6 +151,8 @@ export default function Seekbar() {
       // The pointer is gone already (a touch that ended); the drag goes on while it is over the bar.
     }
     dragging.current = true;
+    capturedPointer.current = e.pointerId;
+    lastX.current = e.clientX;
     const place = placeAt(e.clientX);
     setDragTime(place.seconds);
     showPreview(place);
@@ -149,15 +161,19 @@ export default function Seekbar() {
 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!seekable) return;
+    // A drag with no button down: the release was never seen. It ends where the drag last was,
+    // and this move is only a hover.
+    if (dragging.current && e.buttons === 0) finishDrag(lastX.current);
     const place = placeAt(e.clientX);
     showPreview(place);
     if (dragging.current) {
+      lastX.current = e.clientX;
       setDragTime(place.seconds);
       seekToKeyframe(place.seconds);
     }
   };
 
-  /** The drag is over: one exact seek to where it ended. */
+  /** The drag is over: one exact seek to `clientX`. */
   const finishDrag = (clientX: number) => {
     if (!dragging.current) return;
     dragging.current = false;
@@ -169,8 +185,27 @@ export default function Seekbar() {
     );
   };
 
+  /** A drag that ends with no release to say where: the last place it saw. */
+  const abandonDrag = () => {
+    finishDrag(lastX.current);
+  };
+
+  /** Lets go of the pointer, which ends the capture. */
+  const releasePointer = () => {
+    const id = capturedPointer.current;
+    capturedPointer.current = null;
+    if (id === null) return;
+    try {
+      track.current?.releasePointerCapture(id);
+    } catch {
+      // Not held any more.
+    }
+  };
+
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // The only end whose coordinates are the pointer's: where it was let go.
     finishDrag(e.clientX);
+    capturedPointer.current = null;
     blurAfterPointer.onPointerUp(e);
   };
 
@@ -180,6 +215,13 @@ export default function Seekbar() {
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    // Esc in a drag ends it where it is (the seek is made); mpv does not get the key.
+    if (e.key === 'Escape' && dragging.current) {
+      e.preventDefault();
+      abandonDrag();
+      releasePointer();
+      return;
+    }
     if (!seekable) return;
     const command = seekKeyCommand(e.key, {
       ctrl: e.ctrlKey,
@@ -242,12 +284,9 @@ export default function Seekbar() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={(e) => {
-          finishDrag(e.clientX);
-        }}
-        onLostPointerCapture={(e) => {
-          finishDrag(e.clientX);
-        }}
+        // No release: the coordinates of these events are none (0 for a cancel), the drag's own are used.
+        onPointerCancel={abandonDrag}
+        onLostPointerCapture={abandonDrag}
         onPointerLeave={onPointerLeave}
         onKeyDown={onKeyDown}
       >

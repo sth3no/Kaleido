@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, expect, test, vi, type MockInstance }
 import { initI18n } from '../i18n';
 import type { CaptionButton } from '../ipc/types';
 import { usePlayerStore } from '../state/playerStore';
+import { useUiStore } from '../state/uiStore';
 import WindowIsland from './WindowIsland';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
@@ -45,6 +46,7 @@ beforeEach(() => {
   for (const action of Object.values(appWindow)) action.mockClear();
   appWindow.isMaximized.mockImplementation(() => Promise.resolve(false));
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
+  useUiStore.setState(useUiStore.getInitialState(), true);
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     frames.push(callback);
     return frames.length;
@@ -111,4 +113,24 @@ test('the maximise button is where Windows answers for it, but not in fullscreen
   expect(maximize.disabled).toBe(true);
   fireEvent.click(maximize);
   expect(appWindow.toggleMaximize).not.toHaveBeenCalled();
+});
+
+test('Windows does not answer for the maximise button while the islands are hidden', () => {
+  render(<WindowIsland overVideo />);
+  runFrame();
+  expect(captionButtons().at(-1)).toEqual([{ x: 1196, y: 16, w: 36, h: 32 }]);
+
+  // Nothing moved for 2.5 s (player/useAutohide.ts): the button is not seen, so Snap Layouts
+  // cannot open over it.
+  act(() => {
+    useUiStore.getState().setControlsHidden(true);
+  });
+  runFrame();
+  expect(captionButtons().at(-1)).toEqual([]);
+
+  act(() => {
+    useUiStore.getState().setControlsHidden(false);
+  });
+  runFrame();
+  expect(captionButtons().at(-1)).toEqual([{ x: 1196, y: 16, w: 36, h: 32 }]);
 });

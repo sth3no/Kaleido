@@ -101,7 +101,8 @@ describe('the picture', () => {
     expect(element.width).toBe(2);
     expect(element.height).toBe(1);
     const [image] = putImageData.mock.calls[0] as [{ data: Uint8ClampedArray; width: number; height: number }];
-    expect([...image.data]).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    // The pixels are drawn where they are, not copied first.
+    expect(image.data).toBe(rgba);
     expect([image.width, image.height]).toEqual([2, 1]);
 
     // No 2D context (a canvas that cannot draw): nothing is drawn, and it is said.
@@ -131,8 +132,11 @@ describe('the picture', () => {
     rerender(<ThumbBubble hover={null} />);
     expect(canvas().style.display).toBe('none');
 
-    // A preview that was on its way when the pointer left is not drawn.
+    // A preview that comes when nobody is looking is not fetched, let alone drawn.
+    const fetched = () => vi.mocked(invoke).mock.calls.filter(([name]) => name === 'thumb_get').length;
+    const before = fetched();
     await thumbReady({ width: 2, height: 1, seq: 2 });
+    expect(fetched()).toBe(before);
     expect(putImageData).toHaveBeenCalledTimes(1);
     expect(canvas().style.display).toBe('none');
 
@@ -168,6 +172,37 @@ describe('the picture', () => {
       await settle();
     });
     expect(putImageData).toHaveBeenCalledTimes(1);
+  });
+
+  test('the bubble is placed from the bar as it is measured through the UI scale', () => {
+    // An engine that reports rectangles in the zoomed root's own px, at a UI scale of 200 %: the
+    // root is half as wide as the 1024 px window, and every rectangle is half what it is in the window.
+    const real = window.getComputedStyle.bind(window);
+    const styles = vi.spyOn(window, 'getComputedStyle').mockImplementation((element: Element, pseudo?: string | null) =>
+      element === document.documentElement
+        ? ({ getPropertyValue: (name: string) => (name === 'zoom' ? '2' : '') } as CSSStyleDeclaration)
+        : real(element, pseudo),
+    );
+    const measured = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const own = (left: number, width: number) =>
+          ({ left, top: 0, width, height: 20, right: left + width, bottom: 20, x: left, y: 0 }) as DOMRect;
+        if (this === document.documentElement) return own(0, 512);
+        // The bubble: 100 px wide. The bar it sits on: from 10 to 410.
+        return this.hasAttribute('data-shown') ? own(0, 100) : own(10, 400);
+      });
+
+    try {
+      render(<ThumbBubble hover={{ fraction: 0.01, seconds: 10 }} />);
+      // In px of the window the bar is 20 to 820 and the bubble 200 wide: its middle may not go
+      // below 8 + 100 = 108, which is (108 - 20) / 800 = 11 % along the bar. Unscaled it is 12 %.
+      const bubble = document.querySelector('[data-shown]') as HTMLElement;
+      expect(Number.parseFloat(bubble.style.left)).toBeCloseTo(11, 6);
+    } finally {
+      measured.mockRestore();
+      styles.mockRestore();
+    }
   });
 
   test('the bubble is shown while the pointer is on the bar', () => {

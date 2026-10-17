@@ -146,7 +146,7 @@ export type GlassState = { enabled: boolean; reason: GlassReason | null };
 export type ThumbReady = { width: number; height: number; seq: number };
 
 /** What `thumbGet` decodes `thumb_get` into: the preview's RGBA pixels. */
-export type ThumbFrame = { width: number; height: number; rgba: Uint8ClampedArray };
+export type ThumbFrame = { width: number; height: number; rgba: Uint8ClampedArray<ArrayBuffer> };
 
 // ---------------------------------------------------------------------------------------------
 // Settings (src-tauri/src/settings)

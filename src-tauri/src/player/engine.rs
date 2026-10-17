@@ -4,7 +4,7 @@
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -16,6 +16,12 @@ use crate::paths::AppPaths;
 /// Observation reply ids from here up are the engine's own (the enforced options). An
 /// [`EventLoop`] observes with ids below it; the engine's property changes never reach it.
 pub const ENGINE_OBSERVE_BASE: u64 = 1_000_000;
+
+/// mpv's `sub-margin-y` property.
+const SUB_MARGIN_Y: &str = "sub-margin-y";
+
+/// mpv's own `sub-margin-y`, for when it cannot be read.
+const MPV_SUB_MARGIN: i64 = 22;
 
 /// What the core is started with.
 #[derive(Debug, Clone)]
@@ -56,6 +62,9 @@ pub struct Engine {
     status: Arc<Status>,
     request_thread: Option<JoinHandle<()>>,
     event_thread: Option<JoinHandle<()>>,
+    /// The `sub-margin-y` this core had before `set_sub_margin` first set it. It belongs to the
+    /// core and not to the process: every engine (every test has its own) reads its own mpv.conf.
+    sub_margin_base: Arc<OnceLock<i64>>,
 }
 
 #[derive(Default)]
@@ -107,6 +116,7 @@ impl Engine {
             status,
             request_thread: Some(request_thread),
             event_thread: Some(event_thread),
+            sub_margin_base: Arc::new(OnceLock::new()),
         })
     }
 
@@ -137,6 +147,28 @@ impl Engine {
             let _ = reply.send(f(mpv));
         })));
         result.recv().expect("the mpv call panicked")
+    }
+
+    /// Sets `sub-margin-y` to `margin`, but never below the margin this core had before the first
+    /// call (mpv's own 22, or the one in the user's mpv.conf): the UI asks for 0 while its controls
+    /// are hidden, which means "nothing of mine is in the way", not "subtitles on the bottom edge"
+    /// (Ruling R38). The first call reads the margin and writes in the same request, so nothing
+    /// queued by anyone else comes between; the margin is remembered for the life of the engine.
+    /// Queues and returns at once.
+    pub fn set_sub_margin(&self, margin: i64) {
+        let remembered = Arc::clone(&self.sub_margin_base);
+        self.request(Request::Call(Box::new(move |mpv| {
+            let own = remembered.get().copied().or_else(|| {
+                // Not remembered when it cannot be read: the next call tries again.
+                mpv.get_i64(SUB_MARGIN_Y)
+                    .ok()
+                    .map(|own| *remembered.get_or_init(|| own))
+            });
+            let value = margin.max(own.unwrap_or(MPV_SUB_MARGIN));
+            if let Err(error) = mpv.set_property(SUB_MARGIN_Y, &value.to_string()) {
+                tracing::warn!("mpv request failed: {error}");
+            }
+        })));
     }
 
     /// Queues `quit` (mpv saves the position with `save-position-on-quit`) and waits up to

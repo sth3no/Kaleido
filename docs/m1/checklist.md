@@ -110,6 +110,11 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   neskočí zpět; tažení pokračuje, i když myš vyjede z lišty. Prostý klik na lištu přeskočí na
   místo. Po kliku nebo tažení mezerník **pozastaví video** (fokus se vrátil do mpv a lišta se
   nepřepnula).
+- [ ] **Tažení, které skončí bez puštění:** za tažení stisknout Esc: video skočí přesně na místo,
+  kde myš byla, tažení skončí a Esc se do mpv nedostane (nezavře se panel ani fullscreen).
+  Totéž, když se tažení přeruší jinak (Win+D, Alt+Tab nebo zamknutí obrazovky za tažení; po
+  návratu se video nesmí přetočit na začátek ani na jiné místo, než kde tažení skončilo) a když
+  se tlačítko pustí mimo okno (myš zpět nad lištou už nepřetáčí).
 - [ ] **Klávesnice na liště:** Tab ji najde (viditelný fokus); šipky ←/→ posunou o 5 s (ne o 10: mpv
   je nedostane podruhé), Home na začátek, End na konec; Ctrl+←/→ a Shift+←/→ dělají to, co v mpv.
   Čtečka obrazovky čte „Časová osa“ a polohu jako „0:12 z 1:42:00“, jednou za sekundu.
@@ -122,8 +127,10 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
 - [ ] **Předchozí / další:** u jednoho videa jsou zašedlé, u složky s videi fungují a přepnou
   video (na prvním a posledním mpv nic neudělá).
 - [ ] **Titulky nad ostrůvkem:** u videa s titulky leží titulky nad spodním ostrůvkem a nedotýkají se
-  ho; po skrytí ostrůvku sjedou dolů a po jeho návratu zase nahoru; stejně po změně velikosti okna
-  a ve fullscreenu. (Tlačítka Titulky a Playlist zatím jen nastaví, který panel je otevřený:
+  ho; po skrytí ostrůvku sjedou dolů, ale **ne na spodní hranu**: na vlastní okraj mpv (výchozí
+  `sub-margin-y=22`, nebo hodnota z `mpv.conf`; zkusit `sub-margin-y=60` a ověřit, že skrytí
+  ostrůvku nechá titulky ve výšce 60, ne níž); po návratu ostrůvku zase nahoru; stejně po změně
+  velikosti okna a ve fullscreenu. (Tlačítka Titulky a Playlist zatím jen nastaví, který panel je otevřený:
   panely přijdou s Task 20; tlačítko Titulky má `aria-expanded`.)
 - [ ] **Autohide:** při přehrávání po 2,5 s bez pohybu myši zmizí spodní ostrůvek, oba horní ostrůvky
   a kurzor; pohyb myši i kterákoli klávesa (a kolečko, klik) je hned vrátí. V pauze, při načítání
@@ -132,6 +139,10 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   odjetí myši, nebo po odchodu fokusu, zmizí za dalších 2,5 s. Skrytý ostrůvek nepřetahuje okno
   (tažení za místo, kde byl horní ostrůvek, okno nepřesune) a klik na místo, kde byl, jde do
   videa (pozastaví ho).
+- [ ] **Tab ze skrytého stavu:** po zmizení ovládání stisknout Tab: ovládání se hned ukáže a fokus
+  skončí na prvním ovládacím prvku (viditelný fokus), ne na skrytém prvku ani nikde mimo. Pak 2,5 s
+  nic nedělat: ovládání zůstane, dokud má fokus; klik do videa fokus vrátí a po 2,5 s zmizí. Totéž
+  zkusit hned po zmizení a s ovládáním skrytým déle než vteřinu (to je už odebrané z okna).
 - [ ] **⬜ a autohide:** najet na ⬜ (maximalizovat), nehýbat 5 s a nabídka rozložení (Snap Layouts)
   zůstane, ostrůvky nezmizí. Odjet z ⬜ do videa: po 2,5 s zmizí. Zapsat sem, jak se chová odjetí z
   okna **přes** pravý horní ostrůvek ven: správně zmizí 2,5 s po opuštění okna; v nejhorším

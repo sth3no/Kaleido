@@ -18,6 +18,7 @@ import { listenTo } from '../ipc/listen';
 import type { ThumbFrame } from '../ipc/types';
 import { formatTime } from '../i18n/format';
 import glass from '../theme/glass.module.css';
+import { readZoomFrame, toWindowBox } from '../theme/zoom';
 import styles from './ThumbBubble.module.css';
 
 /** Air between the bubble and the edge of the window, px. */
@@ -41,13 +42,17 @@ export function clampCenter(center: number, width: number, min: number, max: num
   return Math.min(max - half, Math.max(min + half, center));
 }
 
-/** Draws a preview on the canvas, which takes its size. `false` when there is no 2D context. */
+/**
+ * Draws a preview on the canvas, which takes its size. `false` when there is no 2D context. The
+ * pixels are drawn where they are: the frame is a view of the bytes `thumb_get` returned, and
+ * nothing else holds them.
+ */
 export function drawFrame(canvas: HTMLCanvasElement, frame: ThumbFrame): boolean {
   const context = canvas.getContext('2d');
   if (!context) return false;
   canvas.width = frame.width;
   canvas.height = frame.height;
-  context.putImageData(new ImageData(new Uint8ClampedArray(frame.rgba), frame.width, frame.height), 0, 0);
+  context.putImageData(new ImageData(frame.rgba, frame.width, frame.height), 0, 0);
   return true;
 }
 
@@ -81,6 +86,8 @@ function ThumbBubble({ hover }: ThumbBubbleProps) {
       listenTo(
         onThumb,
         () => {
+          // Nobody is looking: the picture is not fetched, and the pointer asks again where it comes back.
+          if (!shownNow.current) return;
           fetchCount.current += 1;
           const mine = fetchCount.current;
           thumbGet().then(
@@ -107,8 +114,10 @@ function ThumbBubble({ hover }: ThumbBubbleProps) {
     const element = bubble.current;
     const bar = element?.parentElement;
     if (!hover || !element || !bar) return;
-    const track = bar.getBoundingClientRect();
-    const width = element.getBoundingClientRect().width;
+    // In px of the window at any UI scale, as the bar is read where it is dragged (Seekbar.tsx).
+    const frame = readZoomFrame();
+    const track = toWindowBox(bar.getBoundingClientRect(), frame);
+    const width = toWindowBox(element.getBoundingClientRect(), frame).width;
     const center = clampCenter(
       track.left + hover.fraction * track.width,
       width,

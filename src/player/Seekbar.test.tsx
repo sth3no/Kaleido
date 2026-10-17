@@ -22,6 +22,10 @@ beforeAll(() => {
   initI18n('en');
   // jsdom has no pointer capture.
   Object.defineProperty(Element.prototype, 'setPointerCapture', { configurable: true, value: vi.fn() });
+  Object.defineProperty(Element.prototype, 'releasePointerCapture', {
+    configurable: true,
+    value: vi.fn(),
+  });
 });
 
 beforeEach(() => {
@@ -78,10 +82,10 @@ test('seek drag sends throttled keyframe seeks and one exact seek at release', (
 
   expect(DRAG_THROTTLE_MS).toBe(50);
   // The press, then 20 moves within 200 ms, 10 ms apart: x = 110, 120, …, 300.
-  fireEvent.pointerDown(bar, { button: 0, pointerId: 1, clientX: 100 });
+  fireEvent.pointerDown(bar, { button: 0, buttons: 1, pointerId: 1, clientX: 100 });
   for (let move = 1; move <= 20; move += 1) {
     advance(10);
-    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 100 + move * 10 });
+    fireEvent.pointerMove(bar, { buttons: 1, pointerId: 1, clientX: 100 + move * 10 });
   }
   const keyframes = playerCommands('seek').filter((cmd) => cmd['exact'] === false);
   expect(keyframes.length).toBeGreaterThanOrEqual(2);
@@ -104,7 +108,7 @@ test('a quick click seeks to the keyframe and then exactly, once each', () => {
   open();
   render(<Seekbar />);
   const bar = seekbar();
-  fireEvent.pointerDown(bar, { button: 0, pointerId: 1, clientX: 400 });
+  fireEvent.pointerDown(bar, { button: 0, buttons: 1, pointerId: 1, clientX: 400 });
   advance(20);
   fireEvent.pointerUp(bar, { button: 0, pointerId: 1, clientX: 400 });
 
@@ -112,6 +116,104 @@ test('a quick click seeks to the keyframe and then exactly, once each', () => {
     { type: 'seek', target: 400, mode: 'absolute', exact: false },
     { type: 'seek', target: 400, mode: 'absolute', exact: true },
   ]);
+});
+
+describe('a drag that ends without a release', () => {
+  /** The exact seeks, each. */
+  const exactSeeks = () => playerCommands('seek').filter((cmd) => cmd['exact'] === true);
+  const exactAt = (target: number) => ({ type: 'seek', target, mode: 'absolute', exact: true });
+
+  /** A press at x = 100 and moves to 200 and 350, the button down all the while. */
+  function dragTo350() {
+    open();
+    render(<Seekbar />);
+    const bar = seekbar();
+    fireEvent.pointerDown(bar, { button: 0, buttons: 1, pointerId: 1, clientX: 100 });
+    advance(20);
+    fireEvent.pointerMove(bar, { buttons: 1, pointerId: 1, clientX: 200 });
+    advance(20);
+    fireEvent.pointerMove(bar, { buttons: 1, pointerId: 1, clientX: 350 });
+    expect(exactSeeks()).toEqual([]);
+    return bar;
+  }
+
+  beforeEach(() => {
+    vi.mocked(Element.prototype.releasePointerCapture).mockClear();
+  });
+
+  test('pointercancel seeks exactly once, to the last place the drag saw and not to the 0 of the event', () => {
+    const bar = dragTo350();
+    fireEvent.pointerCancel(bar, { pointerId: 1, clientX: 0 });
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+
+    // The seek that was held back is dropped, and nothing follows.
+    advance(500);
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+    expect(playerCommands('seek').at(-1)).toEqual(exactAt(350));
+  });
+
+  test('a lost pointer capture without a release does the same', () => {
+    const bar = dragTo350();
+    fireEvent.lostPointerCapture(bar, { pointerId: 1, clientX: 0 });
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+  });
+
+  test('Esc ends the drag there too, lets go of the pointer, and is not passed on to mpv', () => {
+    const bar = dragTo350();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    bar.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(shouldForward(event)).toBe(false);
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+    expect(vi.mocked(Element.prototype.releasePointerCapture)).toHaveBeenCalledWith(1);
+
+    // The capture is gone and the button may still be down: later events seek nothing more.
+    fireEvent.lostPointerCapture(bar, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerMove(bar, { buttons: 1, pointerId: 1, clientX: 600 });
+    fireEvent.pointerUp(bar, { button: 0, pointerId: 1, clientX: 600 });
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+    advance(500);
+    expect(playerCommands('seek').filter((cmd) => cmd['target'] === 600)).toEqual([]);
+  });
+
+  test('Esc without a drag is mpv’s', () => {
+    open();
+    render(<Seekbar />);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    seekbar().dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(shouldForward(event)).toBe(true);
+    expect(playerCommands('seek')).toEqual([]);
+  });
+
+  test('a release followed by the lost capture it brings seeks exactly once', () => {
+    const bar = dragTo350();
+    fireEvent.pointerUp(bar, { button: 0, pointerId: 1, clientX: 360 });
+    // The capture goes with the release, and says so.
+    fireEvent.lostPointerCapture(bar, { pointerId: 1, clientX: 0 });
+    expect(exactSeeks()).toEqual([exactAt(360)]);
+  });
+
+  test('a cancel followed by a late release seeks exactly once', () => {
+    const bar = dragTo350();
+    fireEvent.pointerCancel(bar, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerUp(bar, { button: 0, pointerId: 1, clientX: 0 });
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+  });
+
+  test('a move with no button down means the release was missed: the drag ends where it was last seen', () => {
+    const bar = dragTo350();
+    // The button is up (let go outside the window, say); the pointer is now at x = 800.
+    fireEvent.pointerMove(bar, { buttons: 0, pointerId: 1, clientX: 800 });
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+
+    // That move was a hover: it did not seek on, and later ones do not either.
+    fireEvent.pointerMove(bar, { buttons: 0, pointerId: 1, clientX: 810 });
+    advance(500);
+    expect(playerCommands('seek').filter((cmd) => cmd['target'] === 800 || cmd['target'] === 810)).toEqual([]);
+    expect(exactSeeks()).toEqual([exactAt(350)]);
+  });
 });
 
 test('the bar seeks only from the primary button, and only once the length is known', () => {
@@ -125,8 +227,8 @@ test('the bar seeks only from the primary button, and only once the length is kn
   // A stream that does not know its length.
   open({ duration: null });
   render(<Seekbar />);
-  fireEvent.pointerDown(seekbar(), { button: 0, pointerId: 1, clientX: 400 });
-  fireEvent.pointerMove(seekbar(), { pointerId: 1, clientX: 450 });
+  fireEvent.pointerDown(seekbar(), { button: 0, buttons: 1, pointerId: 1, clientX: 400 });
+  fireEvent.pointerMove(seekbar(), { buttons: 1, pointerId: 1, clientX: 450 });
   fireEvent.pointerUp(seekbar(), { button: 0, pointerId: 1, clientX: 450 });
   expect(playerCommands('seek')).toEqual([]);
   expect(previews()).toEqual([]);
@@ -313,7 +415,7 @@ describe('what it shows', () => {
     render(<Seekbar />);
     expect(screen.getByText('0:10')).toBeTruthy();
 
-    fireEvent.pointerDown(seekbar(), { button: 0, pointerId: 1, clientX: 600 });
+    fireEvent.pointerDown(seekbar(), { button: 0, buttons: 1, pointerId: 1, clientX: 600 });
     // 600 s of 1000 s: the time of the bar and the time in the bubble; the old time is gone.
     expect(screen.queryByText('0:10')).toBeNull();
     expect(screen.getAllByText('10:00').length).toBeGreaterThanOrEqual(1);

@@ -177,6 +177,9 @@ pub fn to_mpv(cmd: &PlayerCommand) -> Result<Vec<Vec<String>>, CommandError> {
         SetSubDelay { seconds } => set("sub-delay", &number("seconds", *seconds, DELAY)?),
         SetSubScale { scale } => set("sub-scale", &number("scale", *scale, SUB_SCALE)?),
         SetAudioDelay { seconds } => set("audio-delay", &number("seconds", *seconds, DELAY)?),
+        // The margin as the UI asked for it. `send` does not run this form: it has the engine keep
+        // mpv's own margin as the floor (`Engine::set_sub_margin`, Ruling R38). This arm is the
+        // check, and the plain mapping for the tests.
         SetSubMargin { margin } if SUB_MARGIN.contains(margin) => {
             set("sub-margin-y", &margin.to_string())
         }
@@ -201,8 +204,16 @@ pub fn to_mpv(cmd: &PlayerCommand) -> Result<Vec<Vec<String>>, CommandError> {
 
 /// Checks `cmd` and queues its mpv commands on the engine, which runs them in order. Nothing is
 /// queued for an invalid command, and nothing waits for mpv.
+///
+/// The subtitle margin is the one command not sent as `to_mpv` has it: the UI asks for 0 while its
+/// controls are hidden, and that has to leave mpv's own margin where it is, not replace it.
 pub fn send(engine: &Engine, cmd: &PlayerCommand) -> Result<(), CommandError> {
-    for args in to_mpv(cmd)? {
+    let commands = to_mpv(cmd)?;
+    if let PlayerCommand::SetSubMargin { margin } = cmd {
+        engine.set_sub_margin(*margin);
+        return Ok(());
+    }
+    for args in commands {
         engine.request(Request::Command(args));
     }
     Ok(())
@@ -235,6 +246,7 @@ fn number(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::Path;
 
     use serde_json::json;
@@ -311,6 +323,7 @@ mod tests {
             mpv(&PlayerCommand::SetAudioDelay { seconds: 0.25 }),
             one(&["set", "audio-delay", "0.25"])
         );
+        // The margin as asked for; `send` keeps mpv's own as the floor (the tests below).
         assert_eq!(
             mpv(&PlayerCommand::SetSubMargin { margin: 40 }),
             one(&["set", "sub-margin-y", "40"])
@@ -658,6 +671,62 @@ mod tests {
         eventually(&engine, "stopped", |mpv| {
             mpv.get_flag("idle-active").unwrap()
         });
+    }
+
+    /// The subtitle margin of the UI never goes below the one mpv had (Ruling R38): the 0 of
+    /// hidden controls gives back the user's own margin.
+    #[test]
+    fn sub_margin_never_goes_below_the_one_mpv_had() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(paths.config_dir.join("mpv.conf"), "sub-margin-y=40\n").unwrap();
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        let margin = || engine.call(|mpv| mpv.get_i64("sub-margin-y").unwrap());
+        let ask = |margin| send(&engine, &PlayerCommand::SetSubMargin { margin }).unwrap();
+        assert_eq!(margin(), 40, "the user's own");
+
+        ask(0);
+        assert_eq!(margin(), 40, "hidden controls leave the user's margin");
+        ask(80);
+        assert_eq!(margin(), 80, "above the controls");
+        ask(0);
+        assert_eq!(margin(), 40, "and back to the user's margin");
+        ask(30);
+        assert_eq!(margin(), 40, "below it never goes");
+    }
+
+    /// Without an mpv.conf the floor is mpv's own default.
+    #[test]
+    fn sub_margin_floor_is_mpvs_default_without_a_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engine = Engine::start(headless(temp_paths(tmp.path())), NoEvents).unwrap();
+        let margin = || engine.call(|mpv| mpv.get_i64("sub-margin-y").unwrap());
+        let own = margin();
+        assert_eq!(own, 22);
+
+        send(&engine, &PlayerCommand::SetSubMargin { margin: 0 }).unwrap();
+        assert_eq!(margin(), own);
+        send(&engine, &PlayerCommand::SetSubMargin { margin: 113 }).unwrap();
+        assert_eq!(margin(), 113);
+    }
+
+    /// Each engine reads its own mpv.conf: what one remembered is not another's floor.
+    #[test]
+    fn sub_margin_floor_belongs_to_the_engine() {
+        let floor_with = |conf_margin: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let paths = temp_paths(tmp.path());
+            fs::write(
+                paths.config_dir.join("mpv.conf"),
+                format!("sub-margin-y={conf_margin}\n"),
+            )
+            .unwrap();
+            let engine = Engine::start(headless(paths), NoEvents).unwrap();
+            send(&engine, &PlayerCommand::SetSubMargin { margin: 0 }).unwrap();
+            engine.call(|mpv| mpv.get_i64("sub-margin-y").unwrap())
+        };
+        assert_eq!(floor_with("55"), 55);
+        assert_eq!(floor_with("10"), 10);
     }
 
     /// A command that is refused leaves mpv alone.

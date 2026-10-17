@@ -1,7 +1,11 @@
 /**
  * Where the subtitles go while the controls are there (spec 5.3): above the bottom island. mpv
  * measures `sub-margin-y` in a window of 720 px height whatever the window really is, so the
- * island's height in window px is scaled to that. With the controls hidden the margin is 0.
+ * island's height in window px is scaled to that. With the controls hidden the UI asks for 0.
+ *
+ * Rust takes the larger of the margin asked for and the one mpv had before the first request (its
+ * own 22, or the one in the user's mpv.conf; `Engine::set_sub_margin`, Ruling R38): 0 means
+ * "nothing of mine is in the way", so the subtitles go back to where the user has them.
  */
 
 import { useCallback, useEffect, useRef, type RefObject } from 'react';

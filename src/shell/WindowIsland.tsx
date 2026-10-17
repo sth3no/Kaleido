@@ -15,6 +15,7 @@ import { useGlassRegion } from '../glass/useGlassRegion';
 import { blurAfterPointer } from '../input/forward';
 import { listenTo } from '../ipc/listen';
 import { usePlayerStore } from '../state/playerStore';
+import { useUiStore } from '../state/uiStore';
 import glass from '../theme/glass.module.css';
 import { SNAP_LAYOUTS, useCaptionButton } from './captionButtons';
 import Icon, { CLOSE, MAXIMIZE, MINIMIZE, RESTORE } from './Icon';
@@ -79,8 +80,11 @@ export default function WindowIsland({ overVideo }: WindowIslandProps) {
   // A fullscreen window has nothing to maximise or restore: the button is off, and Windows is not
   // told about it.
   const fullscreen = usePlayerStore((state) => state.props['fullscreen'] === true);
+  // The islands are hidden because nothing moved (player/useAutohide.ts): the button is not seen,
+  // so Windows must not answer for it either, or Snap Layouts would open over nothing.
+  const controlsHidden = useUiStore((state) => state.controlsHidden);
   useGlassRegion(island, undefined, overVideo);
-  useCaptionButton(maximizeButton, !fullscreen);
+  useCaptionButton(maximizeButton, !fullscreen && !controlsHidden);
 
   const look = overVideo ? `${glass.glass} ${styles.island}` : `${styles.island} ${styles.plain}`;
   const className = SNAP_LAYOUTS ? `${look} ${styles.caption}` : look;
