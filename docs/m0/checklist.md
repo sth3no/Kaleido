@@ -64,6 +64,9 @@ která píše zpětný apostrof).
 - [x] ▣ → video se zmenší do rohu, kolem neprůhledná „stránka“; ⤢ zpět.
 - [ ] Záznam 60 fps (Win+Alt+R): hrana videa zaostává za rámečkem nejvýš o 1 snímek?
 - [ ] V mini režimu funguje ▶/❚❚ a dvojklik.
+- [ ] V mini režimu přetáhnout okno a změnit jeho velikost → video zůstane v rámečku a nebliká
+  (oprava 2026-10-17; dřív se po přesunu okna vrátilo na celou plochu). Nainstalovaný build
+  z 2026-10-16 opravu nemá: zkoušet v `npm run tauri dev` nebo po nové instalaci.
 
 ## 7 · Náhledy
 - [ ] Najetí na časovou osu → do 300 ms náhled ve skleněné bublině, mění se s pohybem.

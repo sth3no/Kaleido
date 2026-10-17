@@ -37,6 +37,14 @@ libmpv: shinchiro `mpv-dev-x86_64-20261011-git-accb7b2821.7z` (mpv `accb7b2821`)
 - **Mini přehrávač:** místo vlastního podokna se přesouvá přímo okno `mpv` (`SetWindowPos`). mpv
   ho při testu po 1,5 s nevrátil na celou plochu. Při změně velikosti okna ho `SurfaceState`
   znovu umístí.
+- **Oprava 2026-10-17 (review):** při každém přesunu nebo změně velikosti hlavního okna libmpv
+  vrátí své okno na celou klientskou plochu (`SetWindowPos` se `SWP_NOSENDCHANGING`, ověřeno
+  testem se skutečnou libmpv). Prototyp reagoval jen na změnu velikosti, takže po přetažení okna
+  v mini režimu bylo za „stránkou“ video v plné velikosti. `SurfaceState` teď při obdélníku mini
+  přehrávače obalí proceduru okna `mpv` a změnu ve `WM_WINDOWPOSCHANGED` vrátí dřív, než ji mpv
+  uvidí (mpv nedostane `WM_SIZE` s plnou velikostí). Režim celého okna nechává chování mpv.
+  Hlídá to test `mini_player_survives_moving_and_resizing_the_window`. Vizuálně (bez bliknutí při
+  tažení okna v mini režimu) zbývá ověřit ručně.
 - GDI obsah podoken se v průhledném okně Tauri neskládá vůbec (alfa 0). Vidět je jen obsah
   DXGI/DirectComposition.
 - Riziko pro M1: spoléháme na název třídy okna `mpv`, což je interní detail upstreamu. Pokud se
@@ -221,7 +229,7 @@ instalace prošla a znovu byly porovnány všechny původní ProgID i hashe: bez
 | 3 | částečně | mezerník, šipka, seekbar, hlasitost, kolečko, `click-target`, dvojklik, konzole s diakritikou | podržená šipka, Ctrl puštěný dřív než šipka, `click-target` při 150 %, ▶ a mezerník přepnou pauzu jen jednou |
 | 4 | částečně | fullscreen tlačítkem i dvojklikem, Esc vrátí okno | přechod přes černou clonu bez bliknutí, 10 rychlých přepnutí, monitory s různým DPI |
 | 5 | částečně | rozmazání pod kapslemi, `g`, mizí s kapslemi při autohide; 20 + 6 + 24 µs (4K zdroj v okně 1280×720, RTX 5060 Ti) | tvar při 150 %, sedění nad pruhy letterboxu, bliknutí při autohide, ≤ 1 ms při 4K výstupu na RTX 5060 Ti i integrované AMD |
-| 6 | částečně | zmenšení do rohu, ▶/❚❚ a návrat tlačítkem | záznam 60 fps (hrana videa zaostává nejvýš o 1 snímek), dvojklik v mini režimu |
+| 6 | částečně | zmenšení do rohu, ▶/❚❚ a návrat tlačítkem; obdélník přežije přesun a změnu velikosti okna (test s libmpv) | záznam 60 fps (hrana videa zaostává nejvýš o 1 snímek), dvojklik v mini režimu, tažení okna v mini režimu bez bliknutí |
 | 7 | částečně | `kaleido-mpv.exe` jako `mpv_path`, náhled v bublině bez konzolového okna, syntetické HDR barvy | náhled do 300 ms, skutečný HDR materiál |
 | 8 | prošlo | `s` bez skla, `S` se sklem, složka Plochy z Tauri | — |
 
@@ -236,7 +244,9 @@ rozmazání ve sníženém rozlišení podle spec 13) a bod 6 (skok + prolnutí 
 8.6, 9.3 a 15):
 
 - `wid` = hlavní okno; mpv si vytvoří okno třídy `mpv` pod WebView2 a mini přehrávač ho přesouvá
-  přes `SetWindowPos`. Vlastní podokno jako `wid` je zamítnuté.
+  přes `SetWindowPos`. Vlastní podokno jako `wid` je zamítnuté. Proti tomu, že libmpv při přesunu
+  hlavního okna vrací své okno na celou plochu, se obdélník mini přehrávače drží obalením
+  procedury okna `mpv`.
 - `kaleido-mpv` přepisuje HDR filtr thumbfastu na jeden `lavfi` graf; upstream thumbfast se nemění.
 - `screenshot-dir` je cesta Plochy z Tauri, ne `~~desktop/`.
 - Jediná instance: požadavky čekají na připravené UI a otevřený soubor se vždy začne přehrávat.
