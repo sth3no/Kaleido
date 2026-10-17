@@ -1,0 +1,4 @@
+[
+  { "source": "ftp://example.com/video.mp4", "kind": "protocol" },
+  { "source": "not a link", "kind": "invalid" }
+]

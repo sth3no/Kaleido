@@ -1,0 +1,11 @@
+[
+  { "sources": ["C:\\Videa\\film.mkv"], "mode": "replace" },
+  {
+    "sources": [
+      "https://example.com/video.mp4",
+      "\\\\server\\share\\Videa čeština (2026)\\žluťoučký kůň.mkv"
+    ],
+    "mode": "append"
+  },
+  { "sources": [], "mode": "replace" }
+]

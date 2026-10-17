@@ -1,0 +1,7 @@
+[
+  { "reason": "eof", "error": null },
+  { "reason": "stop", "error": null },
+  { "reason": "quit", "error": null },
+  { "reason": "error", "error": "loading failed" },
+  { "reason": "redirect", "error": null }
+]

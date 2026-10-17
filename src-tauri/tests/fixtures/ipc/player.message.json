@@ -1,0 +1,5 @@
+[
+  { "args": ["osd", "volume"] },
+  { "args": ["osd", "seek"] },
+  { "args": ["osd", "speed"] }
+]

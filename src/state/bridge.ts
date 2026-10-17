@@ -1,0 +1,116 @@
+/**
+ * The way Rust's events reach the stores. It listens to every event first and only then calls
+ * `system_ui_ready`: that call plays what was opened before the UI was there (a file from the
+ * command line) and answers with the player's state, so anything Rust says meanwhile must find a
+ * listener. Events a feature handles itself (`player:message`, `player:thumb`,
+ * `system:paste-empty`, `settings:changed`) are not Rust's reply to `system_ui_ready`, so their
+ * components subscribe when they mount.
+ */
+
+import { useEffect } from 'react';
+
+import { glassState, systemUiReady } from '../ipc/commands';
+import {
+  onEndFile,
+  onFileLoaded,
+  onGlassState,
+  onLog,
+  onOpenRequest,
+  onPlayerState,
+} from '../ipc/events';
+import { usePlayerStore } from './playerStore';
+import { useUiStore } from './uiStore';
+
+const warn = (what: string) => (error: unknown) => {
+  console.warn(what, error);
+};
+
+/**
+ * Starts the bridge: subscribes to the events, then asks for the player's state and the glass
+ * state, and resolves with the function that stops listening. Aborting `signal` while it starts
+ * (React runs an effect twice in development) stops it before it asks for anything, or at the
+ * latest before it writes what it got; the function it resolves with is then a no-op.
+ */
+export async function startPlayerBridge(signal?: AbortSignal): Promise<() => void> {
+  const player = () => usePlayerStore.getState();
+  const ui = () => useUiStore.getState();
+  // A `glass:state` that arrives is newer than the answer to `glass_state`, which is asked for
+  // meanwhile.
+  let glassEvent = false;
+
+  const subscriptions = await Promise.allSettled([
+    onPlayerState(({ changes }) => {
+      player().applyChanges(changes);
+    }),
+    onFileLoaded(() => {
+      player().fileLoaded();
+    }),
+    onEndFile((end) => {
+      player().endFile(end);
+    }),
+    onLog((line) => {
+      player().addLog(line);
+    }),
+    onGlassState((state) => {
+      glassEvent = true;
+      ui().setGlass(state);
+    }),
+    // `system_ui_ready` plays what waited for the UI (the file of the command line) and Rust says
+    // so with this event while it answers, so it has to be handled here, not by a page that
+    // mounts later: the player is the page to show for it.
+    onOpenRequest(() => {
+      ui().setPage('player');
+    }),
+  ]);
+
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    for (const subscription of subscriptions) {
+      if (subscription.status === 'fulfilled') subscription.value();
+    }
+  };
+
+  const failed = subscriptions.find(
+    (subscription): subscription is PromiseRejectedResult => subscription.status === 'rejected',
+  );
+  if (failed) {
+    release();
+    throw failed.reason;
+  }
+  if (signal?.aborted) {
+    release();
+    return release;
+  }
+
+  await Promise.all([
+    systemUiReady().then((snapshot) => {
+      if (!signal?.aborted) player().applySnapshot(snapshot);
+    }, warn('system_ui_ready')),
+    glassState().then((state) => {
+      if (!signal?.aborted && !glassEvent) ui().setGlass(state);
+    }, warn('glass_state')),
+  ]);
+  if (signal?.aborted) release();
+  return release;
+}
+
+/**
+ * Runs the bridge for as long as the component is mounted. For the root of the app, once.
+ */
+export function usePlayerBridge(): void {
+  useEffect(() => {
+    const abort = new AbortController();
+    const started = startPlayerBridge(abort.signal).catch((error: unknown) => {
+      console.error('the player bridge did not start', error);
+      return () => undefined;
+    });
+    return () => {
+      abort.abort();
+      void started.then((stop) => {
+        stop();
+      });
+    };
+  }, []);
+}

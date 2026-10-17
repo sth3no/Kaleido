@@ -1,0 +1,6 @@
+[
+  { "layout": { "kind": "full" } },
+  { "layout": { "kind": "rect", "x": 12.5, "y": 40, "w": 640, "h": 360 } },
+  { "layout": { "kind": "mini", "w": 360, "h": 202.5, "right": 16, "bottom": 16 } },
+  { "layout": { "kind": "hidden" } }
+]

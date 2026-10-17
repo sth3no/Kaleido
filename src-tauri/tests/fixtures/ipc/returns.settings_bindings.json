@@ -1,0 +1,24 @@
+[
+  [
+    {
+      "key": "RIGHT",
+      "command": "no-osd seek 5; script-message kaleido osd seek",
+      "source": { "type": "kaleido" },
+      "comment": null
+    },
+    {
+      "key": "Ctrl+f",
+      "command": "cycle fullscreen",
+      "source": { "type": "user" },
+      "comment": "My fullscreen"
+    },
+    { "key": "i", "command": "script-binding stats/display-stats", "source": { "type": "mpv" }, "comment": null },
+    {
+      "key": "Ctrl+h",
+      "command": "script-binding thumbfast/toggle",
+      "source": { "type": "plugin", "name": "thumbfast" },
+      "comment": null
+    },
+    { "key": "q", "command": "ignore", "source": { "type": "user" }, "comment": null }
+  ]
+]

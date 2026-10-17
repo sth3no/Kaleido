@@ -1,0 +1,5 @@
+[
+  { "level": "warn", "prefix": "ffmpeg/video", "text": "Invalid NAL unit size\n" },
+  { "level": "error", "prefix": "vo/gpu-next", "text": "Failed to compile shader\n" },
+  { "level": "fatal", "prefix": "cplayer", "text": "Error initializing\n" }
+]

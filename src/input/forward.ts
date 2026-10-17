@@ -1,22 +1,15 @@
-import { invoke } from '@tauri-apps/api/core';
-
+import { playerInput } from '../ipc/commands';
+import type { InputEvent } from '../ipc/types';
 import { toMpvKey } from './keys';
-import { buttonName, toSurfacePoint, type Point, type WheelKey } from './mouse';
+import { buttonName, toSurfacePoint, type Point } from './mouse';
 import { createKeyTracker } from './tracker';
 import { WheelAccumulator } from './wheel';
 
-/** What `player_input` takes (src-tauri/src/input.rs). */
-export type InputEvent =
-  | { type: 'keyDown'; key: string }
-  | { type: 'keyUp'; key: string }
-  /** In physical pixels of mpv's window. */
-  | { type: 'mouseMove'; x: number; y: number }
-  | { type: 'buttonDown'; button: string }
-  | { type: 'buttonUp'; button: string }
-  | { type: 'wheel'; key: WheelKey; steps: number };
+/** What `player_input` takes (src-tauri/src/input.rs); the type is in the IPC contract. */
+export type { InputEvent };
 
 const send = (event: InputEvent) => {
-  invoke('player_input', { event }).catch((error: unknown) => {
+  playerInput(event).catch((error: unknown) => {
     console.warn('player_input', error);
   });
 };

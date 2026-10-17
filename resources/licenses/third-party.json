@@ -237,5 +237,6 @@
   {"name":"zerotrie","version":"0.2.5","license":"Unicode-3.0","url":"https://github.com/unicode-org/icu4x"},
   {"name":"zerovec","version":"0.11.8","license":"Unicode-3.0","url":"https://github.com/unicode-org/icu4x"},
   {"name":"zerovec-derive","version":"0.11.6","license":"Unicode-3.0","url":"https://github.com/unicode-org/icu4x"},
-  {"name":"zmij","version":"1.0.23","license":"MIT","url":"https://github.com/dtolnay/zmij"}
+  {"name":"zmij","version":"1.0.23","license":"MIT","url":"https://github.com/dtolnay/zmij"},
+  {"name":"zustand","version":"5.0.15","license":"MIT","url":"https://github.com/pmndrs/zustand"}
 ]

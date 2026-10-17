@@ -38,8 +38,8 @@ pub type Snapshot = BTreeMap<String, Value>;
 
 /// The payload of `system:open-request`: Rust has handed the player `count` sources.
 #[derive(Debug, Clone, Serialize)]
-struct OpenRequestEvent {
-    count: usize,
+pub(crate) struct OpenRequestEvent {
+    pub(crate) count: usize,
 }
 
 type Job<C> = Box<dyn FnOnce(&C) + Send>;

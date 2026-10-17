@@ -1,0 +1,36 @@
+[
+  {
+    "version": 1,
+    "language": "system",
+    "appearance": {
+      "mode": "system",
+      "accent": "kaleido",
+      "glassTint": "#16161c",
+      "glassOpacity": 0.55,
+      "blur": 24,
+      "saturation": 1.4,
+      "radius": 20,
+      "mica": true,
+      "reduceTransparency": "auto",
+      "uiScale": 1
+    },
+    "playback": { "openWhilePlaying": "replace" }
+  },
+  {
+    "version": 1,
+    "language": "cs",
+    "appearance": {
+      "mode": "dark",
+      "accent": "#ff8800",
+      "glassTint": "#101018",
+      "glassOpacity": 0.6,
+      "blur": 30,
+      "saturation": 1.2,
+      "radius": 16,
+      "mica": false,
+      "reduceTransparency": "on",
+      "uiScale": 1.25
+    },
+    "playback": { "openWhilePlaying": "append" }
+  }
+]

@@ -1,0 +1,6 @@
+[
+  { "enabled": true, "reason": null },
+  { "enabled": false, "reason": "user" },
+  { "enabled": false, "reason": "system" },
+  { "enabled": false, "reason": "gpuFailure" }
+]

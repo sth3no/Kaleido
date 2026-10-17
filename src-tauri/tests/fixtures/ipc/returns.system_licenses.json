@@ -1,0 +1,16 @@
+[
+  [
+    {
+      "name": "libmpv",
+      "version": "0.41.0",
+      "license": "GPL-3.0-or-later",
+      "url": "https://mpv.io"
+    },
+    {
+      "name": "zustand",
+      "version": "5.0.15",
+      "license": "MIT",
+      "url": "https://github.com/pmndrs/zustand"
+    }
+  ]
+]

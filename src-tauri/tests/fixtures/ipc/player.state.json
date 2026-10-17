@@ -1,0 +1,126 @@
+[
+  {
+    "changes": {
+      "pause": false,
+      "time-pos": 12.5,
+      "duration": 3600.25,
+      "volume": 100,
+      "volume-max": 130,
+      "mute": false,
+      "speed": 1,
+      "media-title": "Žluťoučký kůň",
+      "playlist-pos": 0,
+      "idle-active": false,
+      "fullscreen": false,
+      "ontop": false,
+      "eof-reached": false,
+      "paused-for-cache": false,
+      "seeking": false,
+      "sub-delay": 0,
+      "sub-scale": 1,
+      "audio-delay": 0,
+      "hwdec-current": "d3d11va",
+      "aid": 1,
+      "sid": null,
+      "vid": 1,
+      "chapter": 0,
+      "track-list": [
+        {
+          "id": 1,
+          "type": "video",
+          "src-id": 0,
+          "codec": "hevc",
+          "codec-desc": "H.265 / HEVC (High Efficiency Video Coding)",
+          "default": true,
+          "forced": false,
+          "selected": true,
+          "external": false,
+          "albumart": false,
+          "image": false,
+          "demux-w": 3840,
+          "demux-h": 2160,
+          "demux-fps": 23.976
+        },
+        {
+          "id": 1,
+          "type": "audio",
+          "codec": "aac",
+          "lang": "cs",
+          "title": "Stereo",
+          "default": true,
+          "forced": false,
+          "selected": true,
+          "external": false,
+          "demux-channel-count": 2,
+          "demux-samplerate": 48000
+        },
+        {
+          "id": 2,
+          "type": "audio",
+          "codec": "ac3",
+          "lang": "en",
+          "default": false,
+          "forced": false,
+          "selected": false,
+          "external": false,
+          "demux-channel-count": 6,
+          "demux-samplerate": 48000
+        },
+        {
+          "id": 1,
+          "type": "sub",
+          "codec": "subrip",
+          "lang": "en",
+          "title": "English",
+          "default": false,
+          "forced": false,
+          "selected": false,
+          "external": false
+        },
+        {
+          "id": 2,
+          "type": "sub",
+          "codec": "subrip",
+          "lang": "cs",
+          "default": false,
+          "forced": false,
+          "selected": false,
+          "external": true,
+          "external-filename": "\\\\?\\C:\\Videa\\film.cs.srt"
+        }
+      ],
+      "playlist": [
+        {
+          "id": 1,
+          "filename": "\\\\?\\C:\\Videa\\Žluťoučký kůň.mkv",
+          "current": true,
+          "playing": true
+        },
+        { "id": 2, "filename": "https://example.com/video/clip.mp4", "title": "Ukázka" },
+        { "id": 3, "filename": "\\\\?\\UNC\\server\\share\\Videa\\druhý díl.mkv" }
+      ],
+      "chapter-list": [
+        { "title": "Úvod", "time": 0 },
+        { "title": "Hlavní část", "time": 300.5 }
+      ],
+      "video-params": {
+        "pixelformat": "yuv420p10",
+        "w": 3840,
+        "h": 2160,
+        "dw": 3840,
+        "dh": 2160,
+        "aspect": 1.7778,
+        "par": 1,
+        "colormatrix": "bt.2020-ncl",
+        "colorlevels": "limited",
+        "primaries": "bt.2020",
+        "gamma": "pq",
+        "sig-peak": 4.9261,
+        "rotate": 0
+      },
+      "osd-dimensions": { "w": 1920, "h": 1080, "ml": 0, "mr": 0, "mt": 0, "mb": 0 }
+    }
+  },
+  { "changes": { "time-pos": 13 } },
+  { "changes": { "idle-active": true, "time-pos": null, "duration": null, "aid": null } }
+]

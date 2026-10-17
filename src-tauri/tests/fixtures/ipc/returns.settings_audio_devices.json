@@ -1,0 +1,6 @@
+[
+  [
+    { "name": "auto", "description": "Autoselect device" },
+    { "name": "wasapi/{0.0.0.00000000}.{a1b2c3d4}", "description": "Reproduktory (Realtek Audio)" }
+  ]
+]

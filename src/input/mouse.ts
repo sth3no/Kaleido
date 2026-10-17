@@ -1,6 +1,9 @@
+import type { WheelKey } from '../ipc/types';
+
 export type Point = { x: number; y: number };
 export type SurfaceRect = { left: number; top: number; width: number; height: number };
-export type WheelKey = 'WHEEL_UP' | 'WHEEL_DOWN' | 'WHEEL_LEFT' | 'WHEEL_RIGHT';
+/** The wheel keys `player_input` takes: part of the IPC contract. */
+export type { WheelKey };
 
 /** CSS client coordinates → mpv window pixels; null outside the video surface. */
 export function toSurfacePoint(clientX: number, clientY: number, surface: SurfaceRect, dpr: number): Point | null {

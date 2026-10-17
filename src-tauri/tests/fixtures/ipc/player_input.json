@@ -1,0 +1,8 @@
+[
+  { "event": { "type": "keyDown", "key": "Ctrl+a" } },
+  { "event": { "type": "keyUp", "key": "ě" } },
+  { "event": { "type": "mouseMove", "x": -3, "y": 480 } },
+  { "event": { "type": "buttonDown", "button": "MBTN_LEFT" } },
+  { "event": { "type": "buttonUp", "button": "MBTN_BACK" } },
+  { "event": { "type": "wheel", "key": "WHEEL_DOWN", "steps": 2 } }
+]

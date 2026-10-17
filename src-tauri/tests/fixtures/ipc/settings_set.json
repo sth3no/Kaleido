@@ -1,0 +1,21 @@
+[
+  { "patch": { "language": "cs" } },
+  {
+    "patch": {
+      "appearance": {
+        "mode": "dark",
+        "accent": "#ff8800",
+        "glassTint": "#101018",
+        "glassOpacity": 0.6,
+        "blur": 30,
+        "saturation": 1.2,
+        "radius": 16,
+        "mica": false,
+        "reduceTransparency": "off",
+        "uiScale": 1.25
+      }
+    }
+  },
+  { "patch": { "appearance": { "blur": null } } },
+  { "patch": { "playback": { "openWhilePlaying": "append" } } }
+]

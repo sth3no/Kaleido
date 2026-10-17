@@ -1,0 +1,7 @@
+[
+  [
+    { "source": "C:\\Videa\\chybí.mkv", "kind": "notFound" },
+    { "source": "file:///C:/Videa/film.mkv", "kind": "protocol" },
+    { "source": "", "kind": "invalid" }
+  ]
+]
