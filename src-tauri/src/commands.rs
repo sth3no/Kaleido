@@ -4,7 +4,7 @@
 
 use tauri::{AppHandle, State};
 
-use crate::glass::{GlassController, GlassRect};
+use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::surface::{Layout, Surface};
@@ -102,4 +102,12 @@ pub fn surface_set_layout(surface: State<'_, Surface>, layout: Layout) {
 #[tauri::command]
 pub fn glass_set_regions(glass: State<'_, GlassController>, rects: Vec<GlassRect>) {
     glass.set_regions(rects);
+}
+
+/// Whether the glass is on, as the `glass:state` event says it when the state changes. The UI
+/// asks when it starts and after a reload, because it may have missed the event (also the glass
+/// that could not start sent none). Reads the controller only.
+#[tauri::command]
+pub fn glass_state(glass: State<'_, GlassController>) -> GlassState {
+    glass.state()
 }

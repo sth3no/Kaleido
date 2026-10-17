@@ -61,6 +61,7 @@ pub fn run() {
             commands::system_open_roadmap,
             commands::surface_set_layout,
             commands::glass_set_regions,
+            commands::glass_state,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;

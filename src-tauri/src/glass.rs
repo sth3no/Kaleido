@@ -1,7 +1,8 @@
 //! Glass over the video (spec 8.2, 10.6). CSS `backdrop-filter` cannot see the video (mpv draws
 //! it in its own window under WebView2), so the blur is a GLSL shader in mpv. The UI measures
 //! its glass elements and Rust sends them to the shader as rounded rectangles through
-//! `glsl-shader-opts`, at run time.
+//! `glsl-shader-opts`, at run time. Only the shader's own keys are merged in and out of that
+//! option; the user's shader parameters in it stay.
 //!
 //! [`GlassController`] owns everything around the shader: it attaches it to `glsl-shaders`
 //! next to the user's own, keeps the regions up to date (scale, output origin), takes the glass
@@ -214,8 +215,27 @@ fn args<const N: usize>(args: [&str; N]) -> Vec<String> {
     args.iter().map(|&arg| arg.to_owned()).collect()
 }
 
-fn set_opts(value: &str) -> Vec<String> {
-    args(["set", OPTS, value])
+/// Puts our keys into `glsl-shader-opts` (`value` is a whole [`shader_opts`] string) and leaves
+/// the others, the user's own shader parameters, as they are.
+fn merge_opts(value: &str) -> Vec<String> {
+    args(["change-list", OPTS, "add", value])
+}
+
+/// The keys `shader_opts` sets, `kaleido-glass/count` first.
+fn opt_keys() -> Vec<String> {
+    zeroed_opts()
+        .split(',')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(key, _)| key.to_owned())
+        .collect()
+}
+
+/// Takes our keys out of `glsl-shader-opts` again, one command each; the user's stay.
+fn remove_opts() -> Vec<Vec<String>> {
+    opt_keys()
+        .iter()
+        .map(|key| args(["change-list", OPTS, "remove", key]))
+        .collect()
 }
 
 /// The mpv commands that take a screenshot without the glass: the regions go (`zeroed`), the
@@ -223,16 +243,16 @@ fn set_opts(value: &str) -> Vec<String> {
 /// shot: it starts with the regions gone and does not bring them back, because every frame
 /// that follows is a screenshot; [`each_frame_off_sequence`] ends it.
 pub fn screenshot_sequence(current: &str, zeroed: &str, mode: ScreenshotMode) -> Vec<Vec<String>> {
-    let mut sequence = vec![set_opts(zeroed), args(["screenshot", mode_name(mode)])];
+    let mut sequence = vec![merge_opts(zeroed), args(["screenshot", mode_name(mode)])];
     if mode != ScreenshotMode::EachFrame {
-        sequence.push(set_opts(current));
+        sequence.push(merge_opts(current));
     }
     sequence
 }
 
 /// Turning `each-frame` off: the screenshots stop, then the regions come back.
 fn each_frame_off_sequence(restored: &str) -> Vec<Vec<String>> {
-    vec![args(["screenshot", "each-frame"]), set_opts(restored)]
+    vec![args(["screenshot", "each-frame"]), merge_opts(restored)]
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -303,7 +323,8 @@ struct Shared {
     state: GlassState,
     /// `screenshot each-frame` is on: every frame is a screenshot, so there is no glass.
     each_frame: bool,
-    /// The last value written to `glsl-shader-opts`; a new value that equals it is not sent.
+    /// The last value of our keys in `glsl-shader-opts` (`None`: none there); a new value that
+    /// equals it is not sent.
     pushed: Option<String>,
 }
 
@@ -355,22 +376,14 @@ impl GlassController {
             }),
         };
         if written.is_ok() {
-            controller.host.request(Request::Call(Box::new(|mpv| {
-                // Setting the regions replaces the whole option.
-                if let Ok(existing) = mpv.get_string(OPTS)
-                    && !existing.is_empty()
-                {
-                    tracing::warn!(
-                        "{OPTS} from mpv.conf is replaced by Kaleido's glass regions: {existing}"
-                    );
-                }
-            })));
             controller.send([controller.attach()]);
         }
         controller
     }
 
-    /// What the UI is told by `glass:state`; for a UI that starts after the glass did.
+    /// What `glass:state` says now. The UI asks for it (`glass_state`) when it starts or
+    /// reloads: the event comes only when the state changes, and a glass that failed to start
+    /// never sent one.
     pub fn state(&self) -> GlassState {
         self.lock().state
     }
@@ -479,14 +492,15 @@ impl GlassController {
         args(["change-list", SHADERS, "remove", &self.shader])
     }
 
-    /// Writes `glsl-shader-opts` if the shader is attached and the value is not the one mpv has.
+    /// Merges our keys into `glsl-shader-opts` if the shader is attached and they are not what
+    /// mpv has.
     fn push(&self, shared: &mut Shared) {
         if !shared.attached {
             return;
         }
         let wanted = shared.wanted();
         if shared.pushed.as_deref() != Some(wanted.as_str()) {
-            self.send([set_opts(&wanted)]);
+            self.send([merge_opts(&wanted)]);
             shared.pushed = Some(wanted);
         }
     }
@@ -511,8 +525,11 @@ impl GlassController {
                 self.send([self.attach()]);
             } else if !on && shared.attached {
                 shared.attached = false;
-                shared.pushed = None;
                 self.send([self.detach()]);
+                // Our keys only, and only if there are any in mpv.
+                if shared.pushed.take().is_some() {
+                    self.send(remove_opts());
+                }
             }
             if shared.state == next {
                 return false;
@@ -669,10 +686,11 @@ mod tests {
 
     impl GlassHost for Recorder {
         fn request(&self, request: Request) {
-            // Closures (the start-up look at mpv.conf's options) need a core.
-            if let Request::Command(args) = request {
-                self.commands.lock().unwrap().push(args);
-            }
+            // The controller queues commands only.
+            let Request::Command(args) = request else {
+                panic!("the glass queued something other than a command");
+            };
+            self.commands.lock().unwrap().push(args);
         }
 
         fn state_changed(&self, state: &GlassState) {
@@ -709,8 +727,17 @@ mod tests {
         shader_opts(rects, scale, OutputOrigin::default())
     }
 
-    fn set(opts: &str) -> Vec<String> {
-        cmd(&["set", "glsl-shader-opts", opts])
+    /// Putting our keys into `glsl-shader-opts`.
+    fn merge(opts: &str) -> Vec<String> {
+        cmd(&["change-list", "glsl-shader-opts", "add", opts])
+    }
+
+    /// Taking all of our keys out of it.
+    fn remove_keys() -> Vec<Vec<String>> {
+        opt_keys()
+            .iter()
+            .map(|key| cmd(&["change-list", "glsl-shader-opts", "remove", key]))
+            .collect()
     }
 
     fn gpu_error(text: &str) -> LogLine {
@@ -758,6 +785,43 @@ mod tests {
         assert!(host.take().is_empty(), "no shader, nothing for mpv");
     }
 
+    /// The UI was not listening when the glass failed to start, and a reload loses the event
+    /// too: it asks (`glass_state`) and gets the payload `glass:state` has.
+    #[test]
+    fn glass_state_reports_a_start_up_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        // A folder cannot be made under a file.
+        let file = tmp.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        let host = Arc::new(Recorder::default());
+        let glass = GlassController::new(host.clone(), file.join("shaders").join("g.glsl"));
+
+        assert_eq!(
+            serde_json::to_value(glass.state()).unwrap(),
+            json!({ "enabled": false, "reason": "gpuFailure" })
+        );
+        assert!(host.states().is_empty(), "no event: nobody listened yet");
+
+        // And a glass that did start says so.
+        let (_, running, _) = started(tmp.path());
+        assert_eq!(
+            serde_json::to_value(running.state()).unwrap(),
+            json!({ "enabled": true, "reason": null })
+        );
+    }
+
+    #[test]
+    fn our_option_keys_are_the_ones_the_shader_declares() {
+        let keys = opt_keys();
+        assert_eq!(keys.len(), 1 + MAX_REGIONS * FIELDS.len());
+        assert_eq!(keys[0], "kaleido-glass/count");
+        let source = shader_source();
+        for key in &keys {
+            let param = key.strip_prefix("kaleido-glass/").unwrap();
+            assert!(source.contains(&format!("//!PARAM {param}\n")), "{key}");
+        }
+    }
+
     #[test]
     fn regions_are_sent_only_when_they_change() {
         let tmp = tempfile::tempdir().unwrap();
@@ -765,11 +829,11 @@ mod tests {
         let panel = rect(10.0, 20.0, 100.0, 40.0, 8.0);
 
         glass.set_regions(vec![panel]);
-        assert_eq!(host.take(), [set(&regions(&[panel], 1.0))]);
+        assert_eq!(host.take(), [merge(&regions(&[panel], 1.0))]);
         glass.set_regions(vec![panel]);
         assert!(host.take().is_empty(), "the same regions again");
         glass.set_regions(Vec::new());
-        assert_eq!(host.take(), [set(&regions(&[], 1.0))]);
+        assert_eq!(host.take(), [merge(&regions(&[], 1.0))]);
     }
 
     /// Moving the window to a monitor with another DPI keeps the CSS rects, so the UI pushes
@@ -784,12 +848,12 @@ mod tests {
 
         glass.set_scale(1.5);
         let sent = host.take();
-        assert_eq!(sent, [set(&regions(&[panel], 1.5))]);
+        assert_eq!(sent, [merge(&regions(&[panel], 1.5))]);
         for expected in ["r0x=15.0", "r0y=30.0", "r0w=150.0", "r0h=60.0", "r0r=12.0"] {
             assert!(
-                sent[0][2].contains(&format!("kaleido-glass/{expected}")),
+                sent[0][3].contains(&format!("kaleido-glass/{expected}")),
                 "{expected} missing in {}",
-                sent[0][2]
+                sent[0][3]
             );
         }
 
@@ -811,7 +875,7 @@ mod tests {
         // Letterbox bars of 30 px above and below.
         glass.set_origin(&json!({ "w": 1280, "h": 720, "ml": 0, "mt": 30, "mr": 0, "mb": 30 }));
         let origin = OutputOrigin { x: 0.0, y: 30.0 };
-        assert_eq!(host.take(), [set(&shader_opts(&[panel], 1.0, origin))]);
+        assert_eq!(host.take(), [merge(&shader_opts(&[panel], 1.0, origin))]);
         assert!(shader_opts(&[panel], 1.0, origin).contains("kaleido-glass/r0y=-10.0"));
 
         glass.set_origin(&json!({ "w": 1280, "h": 720, "ml": 0, "mt": 30 }));
@@ -834,11 +898,15 @@ mod tests {
         assert_ne!(current, zeroed);
         assert_eq!(
             host.take(),
-            [set(&zeroed), cmd(&["screenshot", "video"]), set(&current)]
+            [
+                merge(&zeroed),
+                cmd(&["screenshot", "video"]),
+                merge(&current)
+            ]
         );
         // Back to normal: a region change is still sent.
         glass.set_regions(Vec::new());
-        assert_eq!(host.take(), [set(&zeroed)]);
+        assert_eq!(host.take(), [merge(&zeroed)]);
 
         // The same as a pure function, for every one-shot mode.
         for (mode, flag) in [
@@ -848,7 +916,7 @@ mod tests {
         ] {
             assert_eq!(
                 screenshot_sequence("regions", "none", mode),
-                [set("none"), cmd(&["screenshot", flag]), set("regions")]
+                [merge("none"), cmd(&["screenshot", flag]), merge("regions")]
             );
         }
     }
@@ -867,11 +935,11 @@ mod tests {
         glass.screenshot(ScreenshotMode::EachFrame);
         assert_eq!(
             host.take(),
-            [set(&zeroed), cmd(&["screenshot", "each-frame"])]
+            [merge(&zeroed), cmd(&["screenshot", "each-frame"])]
         );
         assert_eq!(
             screenshot_sequence("regions", &zeroed, ScreenshotMode::EachFrame),
-            [set(&zeroed), cmd(&["screenshot", "each-frame"])]
+            [merge(&zeroed), cmd(&["screenshot", "each-frame"])]
         );
 
         // New regions and a new scale are remembered and not shown.
@@ -882,7 +950,11 @@ mod tests {
         glass.screenshot(ScreenshotMode::Video);
         assert_eq!(
             host.take(),
-            [set(&zeroed), cmd(&["screenshot", "video"]), set(&zeroed)]
+            [
+                merge(&zeroed),
+                cmd(&["screenshot", "video"]),
+                merge(&zeroed)
+            ]
         );
 
         // Off: the screenshots stop and the latest regions come back.
@@ -891,11 +963,11 @@ mod tests {
             host.take(),
             [
                 cmd(&["screenshot", "each-frame"]),
-                set(&regions(&[second], 2.0))
+                merge(&regions(&[second], 2.0))
             ]
         );
         glass.set_regions(vec![first]);
-        assert_eq!(host.take(), [set(&regions(&[first], 2.0))]);
+        assert_eq!(host.take(), [merge(&regions(&[first], 2.0))]);
     }
 
     #[test]
@@ -903,13 +975,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (host, glass, path) = started(tmp.path());
         let panel = rect(10.0, 20.0, 100.0, 40.0, 8.0);
-
-        glass.set_enabled(false, GlassReason::User);
-        assert_eq!(
-            host.take(),
-            [cmd(&["change-list", "glsl-shaders", "remove", &path])]
-        );
+        let other = rect(30.0, 40.0, 50.0, 50.0, 4.0);
         glass.set_regions(vec![panel]);
+        host.take();
+
+        // Off: the shader goes, and our keys with it; the user's keys stay.
+        glass.set_enabled(false, GlassReason::User);
+        let mut removed = vec![cmd(&["change-list", "glsl-shaders", "remove", &path])];
+        removed.extend(remove_keys());
+        assert_eq!(host.take(), removed);
+        glass.set_regions(vec![other]);
         glass.screenshot(ScreenshotMode::Video);
         assert_eq!(host.take(), [cmd(&["screenshot", "video"])]);
 
@@ -918,7 +993,7 @@ mod tests {
         assert_eq!(
             host.take(),
             [
-                set(&regions(&[panel], 1.0)),
+                merge(&regions(&[other], 1.0)),
                 cmd(&["change-list", "glsl-shaders", "append", &path])
             ]
         );
@@ -958,6 +1033,8 @@ mod tests {
     fn shader_errors_switch_glass_off_once() {
         let tmp = tempfile::tempdir().unwrap();
         let (host, glass, path) = started(tmp.path());
+        glass.set_regions(vec![rect(10.0, 20.0, 100.0, 40.0, 8.0)]);
+        host.take();
 
         assert!(glass.on_log(&gpu_error("Failed compiling pass 'kaleido-glass blur H'")));
         assert!(!glass.on_log(&gpu_error(
@@ -969,10 +1046,11 @@ mod tests {
             serde_json::to_value(host.states()[0]).unwrap(),
             json!({ "enabled": false, "reason": "gpuFailure" })
         );
-        assert_eq!(
-            host.take(),
-            [cmd(&["change-list", "glsl-shaders", "remove", &path])]
-        );
+        assert_eq!(glass.state(), host.states()[0], "what the UI asks for");
+        // The shader and our keys go once, not for each line.
+        let mut removed = vec![cmd(&["change-list", "glsl-shaders", "remove", &path])];
+        removed.extend(remove_keys());
+        assert_eq!(host.take(), removed);
     }
 
     #[test]
@@ -1133,7 +1211,41 @@ mod tests {
                 "{expected} missing in {opts}"
             );
         }
+        // The new value replaces the old one key by key.
         glass.set_regions(Vec::new());
-        assert!(property(&engine, "glsl-shader-opts").contains("kaleido-glass/count=0"));
+        let opts = property(&engine, "glsl-shader-opts");
+        assert!(opts.contains("kaleido-glass/count=0"), "{opts}");
+        assert!(!opts.contains("kaleido-glass/count=1"), "{opts}");
+    }
+
+    /// The user's own shader parameters share the option with ours (spec 8.2).
+    #[test]
+    fn user_shader_opts_survive_glass_pushes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, glass) = real(tmp.path(), "glsl-shader-opts=user/x=1\n");
+
+        glass.set_regions(vec![rect(10.0, 20.0, 100.0, 40.0, 8.0)]);
+        let opts = property(&engine, "glsl-shader-opts");
+        assert!(opts.contains("user/x=1"), "{opts}");
+        for ours in ["count=1", "r0x=10.0", "r0y=20.0", "r0w=100.0"] {
+            assert!(opts.contains(&format!("kaleido-glass/{ours}")), "{opts}");
+        }
+
+        // Another push replaces our keys; it does not pile up new ones next to them.
+        glass.set_regions(vec![
+            rect(30.0, 40.0, 50.0, 50.0, 4.0),
+            rect(0.0, 0.0, 20.0, 20.0, 2.0),
+        ]);
+        let opts = property(&engine, "glsl-shader-opts");
+        assert!(opts.contains("user/x=1"), "{opts}");
+        assert!(opts.contains("kaleido-glass/count=2"), "{opts}");
+        assert_eq!(opts.matches("kaleido-glass/count=").count(), 1, "{opts}");
+        assert_eq!(opts.matches("user/x=").count(), 1, "{opts}");
+
+        // Switched off, the glass takes its keys with it and leaves the user's.
+        glass.set_enabled(false, GlassReason::User);
+        let opts = property(&engine, "glsl-shader-opts");
+        assert!(opts.contains("user/x=1"), "{opts}");
+        assert!(!opts.contains("kaleido-glass/"), "{opts}");
     }
 }
