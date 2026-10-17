@@ -11,7 +11,8 @@ export function MiniPlayer({ rect, pause, onTogglePause, onExpand }: Props) {
     [rect],
   );
   return (
-    <div className="mini-frame" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }} {...pointer}>
+    <div className="mini-frame" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
+      <div className="mini-video-catcher" {...pointer} />
       <div className="mini-bar">
         <button className="icon-btn" aria-label={pause ? 'Přehrát' : 'Pozastavit'} onClick={onTogglePause} {...blurAfterPointer}>
           {pause ? '▶' : '❚❚'}

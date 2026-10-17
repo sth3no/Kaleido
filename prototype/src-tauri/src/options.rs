@@ -8,6 +8,7 @@ use crate::glass;
 /// Files the prototype hands to mpv.
 pub struct Paths {
     pub data_dir: PathBuf,
+    pub screenshot_dir: PathBuf,
     pub click_target: PathBuf,
     pub shader: PathBuf,
     pub thumbfast: PathBuf,
@@ -33,6 +34,7 @@ impl Paths {
         let helper_exe = std::env::current_exe()?.with_file_name("kaleido-mpv.exe");
         Ok(Paths {
             data_dir,
+            screenshot_dir: app.path().desktop_dir()?,
             click_target,
             shader,
             thumbfast,
@@ -77,6 +79,6 @@ pub fn mpv_options(paths: &Paths) -> Vec<(&'static str, String)> {
             ),
         ),
         ("glsl-shaders", paths.shader.display().to_string()),
-        ("screenshot-dir", "~~desktop/".into()),
+        ("screenshot-dir", paths.screenshot_dir.display().to_string()),
     ]
 }
