@@ -15,8 +15,9 @@ pub const DEFAULT_MPV_CONF: &str = include_str!("../../../resources/defaults/mpv
 /// Kaleido's default `input.conf`, the one source of its shortcuts too (spec 5.3).
 pub const DEFAULT_INPUT_CONF: &str = include_str!("../../../resources/defaults/input.conf");
 
-/// Enforced options the user's mpv.conf can override during `initialize`, in the order
-/// `reassert` puts them back: `gpu-api` before `vo`, so the recreated video output uses it.
+/// Enforced options that mpv.conf (directly, through a profile or a conditional profile) or a
+/// script can change after they were set, in the order `reassert` puts them back: `gpu-api`
+/// before `vo`, so the recreated video output uses it.
 const REASSERTED: &[&str] = &[
     "osc",
     "input-default-bindings",
@@ -25,6 +26,7 @@ const REASSERTED: &[&str] = &[
     "vo",
     "watch-later-dir",
     "screenshot-dir",
+    "log-file",
 ];
 
 /// Set before `initialize`: the options the UI stands on.
@@ -56,17 +58,23 @@ pub fn enforced(cfg: &EngineConfig) -> Vec<(&'static str, String)> {
     options
 }
 
-/// After `initialize`, which loads the user's mpv.conf: sets back each `REASSERTED` option
-/// whose value mpv.conf changed. The user's other options stay.
-pub fn reassert(mpv: &Mpv, cfg: &EngineConfig) -> mpv_ffi::Result<()> {
+/// The `REASSERTED` options with their enforced values, in reassert order. The engine watches
+/// them for as long as it runs.
+pub fn reasserted(cfg: &EngineConfig) -> Vec<(&'static str, String)> {
     let enforced = enforced(cfg);
-    for &name in REASSERTED {
-        let Some((_, wanted)) = enforced.iter().find(|(option, _)| *option == name) else {
-            continue;
-        };
+    REASSERTED
+        .iter()
+        .filter_map(|&name| enforced.iter().find(|(option, _)| *option == name).cloned())
+        .collect()
+}
+
+/// After `initialize`, which loads the user's mpv.conf, and whenever a watched option changes:
+/// sets back each `REASSERTED` option whose value differs. The user's other options stay.
+pub fn reassert(mpv: &Mpv, cfg: &EngineConfig) -> mpv_ffi::Result<()> {
+    for (name, wanted) in reasserted(cfg) {
         // Only on a difference: setting `vo` recreates the video output.
-        if mpv.get_string(name).ok().as_ref() != Some(wanted) {
-            mpv.set_property(name, wanted)?;
+        if mpv.get_string(name).ok().as_deref() != Some(wanted.as_str()) {
+            mpv.set_property(name, &wanted)?;
         }
     }
     Ok(())
@@ -108,9 +116,11 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
 
+    use mpv_ffi::{Mpv, load_api, locate_libmpv};
+
     use super::{DEFAULT_INPUT_CONF, DEFAULT_MPV_CONF, ensure_defaults};
     use crate::player::Engine;
-    use crate::player::testing::{NoEvents, headless, temp_paths};
+    use crate::player::testing::{NoEvents, clip, eventually, headless, temp_paths};
 
     #[test]
     fn defaults_are_copied_once_and_never_overwritten() {
@@ -192,25 +202,132 @@ mod tests {
     fn user_config_cannot_turn_off_kaleido_essentials() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = temp_paths(tmp.path());
+        let other_log = tmp.path().join("other.log");
         fs::write(
             paths.config_dir.join("mpv.conf"),
-            "osc=yes\ninput-default-bindings=no\ninput-vo-keyboard=yes\nwatch-later-dir=C:/x\n",
+            format!(
+                "osc=yes\ninput-default-bindings=no\ninput-vo-keyboard=yes\nwatch-later-dir=C:/x\n\
+                 log-file={}\n",
+                other_log.display()
+            ),
         )
         .unwrap();
 
         let engine = Engine::start(headless(paths.clone()), NoEvents).unwrap();
-        let (osc, default_bindings, vo_keyboard, watch_later) = engine.call(|mpv| {
+        let (osc, default_bindings, vo_keyboard, watch_later, log_file) = engine.call(|mpv| {
             (
                 mpv.get_flag("osc").unwrap(),
                 mpv.get_flag("input-default-bindings").unwrap(),
                 mpv.get_flag("input-vo-keyboard").unwrap(),
                 mpv.get_string("watch-later-dir").unwrap(),
+                mpv.get_string("log-file").unwrap(),
             )
         });
         assert!(!osc);
         assert!(default_bindings);
         assert!(!vo_keyboard);
         assert_eq!(watch_later, paths.watch_later_dir.to_string_lossy());
+        assert_eq!(log_file, paths.logs_dir.join("mpv.log").to_string_lossy());
+    }
+
+    #[test]
+    fn user_config_cannot_change_the_video_output_or_the_screenshot_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(
+            paths.config_dir.join("mpv.conf"),
+            "vo=gpu\ngpu-api=opengl\nscreenshot-dir=C:/y\n",
+        )
+        .unwrap();
+
+        let engine = Engine::start(headless(paths.clone()), NoEvents).unwrap();
+        let (vo, gpu_api, screenshot_dir) = engine.call(|mpv| {
+            (
+                mpv.get_string("vo").unwrap(),
+                mpv.get_string("gpu-api").unwrap(),
+                mpv.get_string("screenshot-dir").unwrap(),
+            )
+        });
+        assert_eq!(vo, "null");
+        assert_eq!(gpu_api, "d3d11");
+        assert_eq!(screenshot_dir, paths.desktop_dir.to_string_lossy());
+    }
+
+    /// mpv's own OSC would draw over Kaleido's controls (spec 5.2).
+    #[test]
+    fn user_osc_yes_leaves_no_osc_script_running() {
+        // The probe sees an OSC that runs: a core where nothing turns it off.
+        let control = Mpv::create(load_api(&locate_libmpv()).unwrap()).unwrap();
+        for (name, value) in [
+            ("vo", "null"),
+            ("ao", "null"),
+            ("terminal", "no"),
+            ("osc", "yes"),
+        ] {
+            control.set_option(name, value).unwrap();
+        }
+        control.initialize().unwrap();
+        assert!(osc_script_runs(&control));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(paths.config_dir.join("mpv.conf"), "osc=yes\n").unwrap();
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        eventually(&engine, "osc.lua has quit", |mpv| !osc_script_runs(mpv));
+    }
+
+    /// `script-message-to` fails when no client of that name exists.
+    fn osc_script_runs(mpv: &Mpv) -> bool {
+        mpv.command(&["script-message-to", "osc", "kaleido-probe"])
+            .is_ok()
+    }
+
+    #[test]
+    fn static_profile_options_are_reasserted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(
+            paths.config_dir.join("mpv.conf"),
+            "[k]\nosc=yes\nspeed=1.25\n[default]\nprofile=k\n",
+        )
+        .unwrap();
+
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        let (speed, osc) =
+            engine.call(|mpv| (mpv.get_f64("speed").unwrap(), mpv.get_flag("osc").unwrap()));
+        assert_eq!(speed, 1.25, "profile k was not applied");
+        assert!(!osc);
+    }
+
+    /// auto_profiles.lua applies conditional profiles on its own thread, at startup and whenever
+    /// a condition changes, e.g. on every file load.
+    #[test]
+    fn conditional_profile_cannot_turn_osc_back_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(
+            paths.config_dir.join("mpv.conf"),
+            "[k]\nprofile-cond=true\nosc=yes\nspeed=1.25\n\
+             [f]\nprofile-cond=filename ~= nil\nosc=yes\nvolume=37\n",
+        )
+        .unwrap();
+        let clip = clip(tmp.path(), 2);
+
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        eventually(&engine, "profile k is applied", |mpv| {
+            mpv.get_f64("speed").unwrap() == 1.25
+        });
+        eventually(&engine, "osc is off after start", |mpv| {
+            !mpv.get_flag("osc").unwrap()
+        });
+
+        engine.command(&["loadfile", &clip.to_string_lossy()]);
+        eventually(&engine, "profile f is applied", |mpv| {
+            mpv.get_f64("volume").unwrap() == 37.0
+        });
+        eventually(&engine, "osc is off after the file load", |mpv| {
+            !mpv.get_flag("osc").unwrap()
+        });
     }
 
     #[test]

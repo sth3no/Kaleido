@@ -4,16 +4,18 @@
 pub mod engine;
 pub mod options;
 
-pub use engine::{Engine, EngineConfig, EventLoop, Request};
+pub use engine::{ENGINE_OBSERVE_BASE, Engine, EngineConfig, EventLoop, Request};
 
 #[cfg(test)]
 pub(crate) mod testing {
-    use std::path::Path;
-    use std::time::Duration;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use mpv_ffi::{Event, Mpv};
 
-    use super::{EngineConfig, EventLoop};
+    use super::{Engine, EngineConfig, EventLoop};
     use crate::paths::AppPaths;
 
     /// Kaleido's folders under `root`, created as at startup.
@@ -37,6 +39,31 @@ pub(crate) mod testing {
             wid: None,
             vo: "null".into(),
             ao: Some("null".into()),
+        }
+    }
+
+    /// `seconds` of 64×36 uncompressed video in `dir`.
+    pub fn clip(dir: &Path, seconds: usize) -> PathBuf {
+        let path = dir.join("clip.y4m");
+        mpv_ffi::testing::write_y4m(&path, 64, 36, seconds * 30).unwrap();
+        path
+    }
+
+    /// Asks the engine until `check` holds; panics after 5 s.
+    pub fn eventually(
+        engine: &Engine,
+        what: &str,
+        check: impl Fn(&Mpv) -> bool + Send + Sync + 'static,
+    ) {
+        let check = Arc::new(check);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let check = Arc::clone(&check);
+            if engine.call(move |mpv| check(mpv)) {
+                return;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting until {what}");
+            thread::sleep(Duration::from_millis(10));
         }
     }
 

@@ -8,10 +8,14 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use mpv_ffi::{Event, Mpv, load_api, locate_libmpv};
+use mpv_ffi::{Event, Mpv, PropertyKind, PropertyValue, load_api, locate_libmpv};
 
 use super::options;
 use crate::paths::AppPaths;
+
+/// Observation reply ids from here up are the engine's own (the enforced options). An
+/// [`EventLoop`] observes with ids below it; the engine's property changes never reach it.
+pub const ENGINE_OBSERVE_BASE: u64 = 1_000_000;
 
 /// What the core is started with.
 #[derive(Debug, Clone)]
@@ -25,9 +29,11 @@ pub struct EngineConfig {
     pub ao: Option<String>,
 }
 
-/// Receives mpv's events on the event thread.
+/// Receives mpv's events on the event thread. Implementations observe properties with reply
+/// ids below [`ENGINE_OBSERVE_BASE`].
 pub trait EventLoop: Send + 'static {
-    /// Every event in order; `Event::Shutdown` is the last one.
+    /// Every event in order, except the engine's own property changes; `Event::Shutdown` is
+    /// the last one.
     fn on_event(&mut self, mpv: &Mpv, event: Event);
 
     /// Called when no event is pending: once at the start and after every burst of events.
@@ -64,7 +70,8 @@ struct Status {
 impl Engine {
     /// Creates the core with Kaleido's options (`options::enforced`), initializes it (that
     /// loads the user's mpv.conf) and starts the threads. The first request puts back the
-    /// options mpv.conf overrode (`options::reassert`).
+    /// options mpv.conf overrode (`options::reassert`); from then on the event thread watches
+    /// them and queues the same whenever one changes.
     pub fn start(cfg: EngineConfig, events: impl EventLoop) -> mpv_ffi::Result<Engine> {
         let mpv = Mpv::create(load_api(&locate_libmpv())?)?;
         for (name, value) in options::enforced(&cfg) {
@@ -72,9 +79,19 @@ impl Engine {
         }
         mpv.initialize()?;
 
+        let (requests, queue) = mpsc::channel();
+        let enforcer = Enforcer {
+            watched: options::reasserted(&cfg),
+            cfg: Arc::new(cfg),
+            requests: requests.clone(),
+        };
+        enforcer.observe(&mpv)?;
+        // Not on the caller's (main) thread: setting `vo` back recreates mpv's window, a child
+        // of the main window, and that must not wait for a main thread blocked in mpv.
+        enforcer.queue_reassert();
+
         let mpv = Arc::new(mpv);
         let status = Arc::new(Status::default());
-        let (requests, queue) = mpsc::channel();
         let request_thread = spawn("mpv-requests", {
             let mpv = Arc::clone(&mpv);
             move || run_requests(&mpv, queue)
@@ -82,23 +99,15 @@ impl Engine {
         let event_thread = spawn("mpv-events", {
             let mpv = Arc::clone(&mpv);
             let status = Arc::clone(&status);
-            move || run_events(&mpv, events, &status)
+            move || run_events(&mpv, events, &enforcer, &status)
         });
-        let engine = Engine {
+        Ok(Engine {
             mpv,
             requests: Some(requests),
             status,
             request_thread: Some(request_thread),
             event_thread: Some(event_thread),
-        };
-        // Not on the caller's (main) thread: setting `vo` back recreates mpv's window, a child
-        // of the main window, and that must not wait for a main thread blocked in mpv.
-        engine.request(Request::Call(Box::new(move |mpv| {
-            if let Err(error) = options::reassert(mpv, &cfg) {
-                tracing::error!("cannot restore Kaleido's mpv options: {error}");
-            }
-        })));
-        Ok(engine)
+        })
     }
 
     /// Queues `request` and returns at once.
@@ -150,14 +159,56 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        // The request thread finishes what is queued, then sees the closed channel.
-        self.requests = None;
-        join(self.request_thread.take());
-        // The event thread has returned after `Shutdown` already, or returns at this wakeup.
+        // The event thread first: it holds a sender, so the queue closes only after it ends.
+        // It has returned after `Shutdown` already, or returns at this wakeup.
         self.status.stop.store(true, Ordering::SeqCst);
         self.mpv.wakeup();
         join(self.event_thread.take());
+        // The request thread finishes what is queued, then sees the closed channel.
+        self.requests = None;
+        join(self.request_thread.take());
         // The last `Arc<Mpv>` goes with `self`: mpv_terminate_destroy.
+    }
+}
+
+/// Keeps the `options::REASSERTED` options enforced while the core runs. Besides mpv.conf at
+/// `initialize`, conditional profiles (applied by auto_profiles.lua at startup and whenever a
+/// condition changes, e.g. on every file load) and scripts can set them at any time.
+struct Enforcer {
+    cfg: Arc<EngineConfig>,
+    /// Enforced values, observed under `ENGINE_OBSERVE_BASE + index`.
+    watched: Vec<(&'static str, String)>,
+    requests: mpsc::Sender<Request>,
+}
+
+impl Enforcer {
+    fn observe(&self, mpv: &Mpv) -> mpv_ffi::Result<()> {
+        for (id, (name, _)) in (ENGINE_OBSERVE_BASE..).zip(&self.watched) {
+            mpv.observe(id, name, PropertyKind::String)?;
+        }
+        Ok(())
+    }
+
+    /// Whether the observed value under `id` differs from the enforced one. Only then is a
+    /// reassert queued: setting an unchanged `vo` would recreate the video output for nothing.
+    fn drifted(&self, id: u64, value: &PropertyValue) -> bool {
+        let watched = usize::try_from(id - ENGINE_OBSERVE_BASE)
+            .ok()
+            .and_then(|index| self.watched.get(index));
+        watched.is_some_and(
+            |(_, wanted)| !matches!(value, PropertyValue::String(value) if value == wanted),
+        )
+    }
+
+    /// Nobody waits for the result, so a failure is logged.
+    fn queue_reassert(&self) {
+        let cfg = Arc::clone(&self.cfg);
+        // Sending fails only once the request thread is gone, i.e. while dropping the engine.
+        let _ = self.requests.send(Request::Call(Box::new(move |mpv| {
+            if let Err(error) = options::reassert(mpv, &cfg) {
+                tracing::error!("cannot restore Kaleido's mpv options: {error}");
+            }
+        })));
     }
 }
 
@@ -196,24 +247,34 @@ fn run_requests(mpv: &Mpv, queue: mpsc::Receiver<Request>) {
     }
 }
 
-fn run_events(mpv: &Mpv, mut events: impl EventLoop, status: &Status) {
+fn run_events(mpv: &Mpv, mut events: impl EventLoop, enforcer: &Enforcer, status: &Status) {
     loop {
         let timeout = events
             .on_idle(mpv)
             .map_or(-1.0, |timeout| timeout.as_secs_f64());
         let mut event = mpv.wait_event(timeout);
+        let mut drifted = false;
         while !matches!(event, Event::None) {
-            let shutdown = matches!(event, Event::Shutdown);
-            events.on_event(mpv, event);
-            if shutdown {
-                *status
-                    .shut_down
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner) = true;
-                status.changed.notify_all();
-                return;
+            match event {
+                Event::PropertyChange { id, ref value, .. } if id >= ENGINE_OBSERVE_BASE => {
+                    drifted |= enforcer.drifted(id, value);
+                }
+                Event::Shutdown => {
+                    events.on_event(mpv, Event::Shutdown);
+                    *status
+                        .shut_down
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner) = true;
+                    status.changed.notify_all();
+                    return;
+                }
+                event => events.on_event(mpv, event),
             }
             event = mpv.wait_event(0.0);
+        }
+        // Once per burst: `reassert` puts back everything that differs.
+        if drifted {
+            enforcer.queue_reassert();
         }
         if status.stop.load(Ordering::SeqCst) {
             return;
@@ -230,8 +291,8 @@ mod tests {
 
     use mpv_ffi::{Event, Mpv};
 
-    use super::{Engine, EventLoop, Request};
-    use crate::player::testing::{NoEvents, headless, temp_paths};
+    use super::{ENGINE_OBSERVE_BASE, Engine, EventLoop, Request};
+    use crate::player::testing::{NoEvents, clip, eventually, headless, temp_paths};
 
     /// A held key or a spun wheel: requests in a row, each building on the one before.
     #[test]
@@ -288,6 +349,64 @@ mod tests {
         });
         done.recv_timeout(Duration::from_secs(2))
             .expect("dropping the engine hung");
+    }
+
+    #[test]
+    fn quit_during_playback_shuts_down_within_2_s() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        // As in Kaleido's default mpv.conf: quitting writes the position.
+        std::fs::write(
+            paths.config_dir.join("mpv.conf"),
+            "save-position-on-quit=yes\n",
+        )
+        .unwrap();
+        let clip = clip(tmp.path(), 10);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::start(headless(paths.clone()), Recorder(Arc::clone(&seen))).unwrap();
+
+        engine.command(&["loadfile", &clip.to_string_lossy()]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !seen.lock().unwrap().contains(&Event::PlaybackRestart) {
+            assert!(Instant::now() < deadline, "playback never started");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(engine.quit(Duration::from_secs(2)));
+        assert!(seen.lock().unwrap().contains(&Event::Shutdown));
+        // One entry with the position; the others redirect the clip's parent folders to it.
+        let saved = std::fs::read_dir(&paths.watch_later_dir)
+            .unwrap()
+            .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
+            .any(|entry| entry.lines().any(|line| line.starts_with("start=")));
+        assert!(saved, "no position in the watch-later folder");
+    }
+
+    /// A script or plugin that sets an enforced option gets it put back, and the engine's own
+    /// observations never reach the event loop.
+    #[test]
+    fn enforced_options_changed_at_runtime_are_put_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::start(
+            headless(temp_paths(tmp.path())),
+            Recorder(Arc::clone(&seen)),
+        )
+        .unwrap();
+
+        engine.command(&["set", "osc", "yes"]);
+        eventually(&engine, "osc is off again", |mpv| {
+            !mpv.get_flag("osc").unwrap()
+        });
+        assert!(engine.quit(Duration::from_secs(2)));
+        let seen = seen.lock().unwrap();
+        assert!(
+            !seen.iter().any(|event| matches!(
+                event,
+                Event::PropertyChange { id, .. } if *id >= ENGINE_OBSERVE_BASE
+            )),
+            "{seen:#?}"
+        );
     }
 
     /// Asks to be woken every 20 ms and counts the wakeups.
