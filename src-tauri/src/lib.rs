@@ -8,6 +8,7 @@ pub mod paths;
 pub mod player;
 pub mod surface;
 pub mod system;
+pub mod thumbs;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -50,6 +51,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(OpenQueue::new(system::JOIN_WINDOW))
         .manage(opens)
+        // Before the engine: a preview may arrive as soon as thumbfast has started.
+        .manage(thumbs::ThumbStore::default())
         .invoke_handler(tauri::generate_handler![
             commands::player_command,
             commands::player_input,
@@ -62,6 +65,9 @@ pub fn run() {
             commands::surface_set_layout,
             commands::glass_set_regions,
             commands::glass_state,
+            commands::thumb_request,
+            commands::thumb_clear,
+            commands::thumb_get,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
@@ -96,6 +102,8 @@ pub fn run() {
                     tracing::error!("cannot observe the player state: {error}");
                 }
             })));
+            // Queued behind the observations, before anything the UI asks of thumbfast.
+            player::options::load_thumbfast(&engine, &paths);
             let shader = glass::shader_path(&paths.cache_dir);
             app.manage(paths);
             app.manage(engine);
@@ -184,6 +192,11 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
         // mpv's own `quit` (the `q` key) ends the app (spec 5.1).
         PlayerEvent::Shutdown => {
             app.exit(0);
+            true
+        }
+        // thumbfast finished a timeline preview: Rust checks and stores it, the UI is told.
+        PlayerEvent::ThumbRendered(json) => {
+            thumbs::rendered(app, json);
             true
         }
         // Ctrl+V and Ctrl+O in input.conf.

@@ -9,6 +9,7 @@ use crate::input::{self, InputEvent};
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
+use crate::thumbs::{self, ThumbStore};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
 /// A screenshot goes to the glass, which takes the glass out of the picture first (spec 8.2).
@@ -110,4 +111,26 @@ pub fn glass_set_regions(glass: State<'_, GlassController>, rects: Vec<GlassRect
 #[tauri::command]
 pub fn glass_state(glass: State<'_, GlassController>) -> GlassState {
     glass.state()
+}
+
+/// Asks thumbfast for the timeline preview at `seconds`; it arrives as `player:thumb` and is
+/// fetched with `thumb_get`. Synchronous: it only queues the request on the engine.
+#[tauri::command]
+pub fn thumb_request(engine: State<'_, Engine>, seconds: f64) {
+    thumbs::request(&engine, seconds);
+}
+
+/// The pointer left the seekbar: thumbfast stops rendering. Synchronous: it only queues the
+/// request on the engine.
+#[tauri::command]
+pub fn thumb_clear(engine: State<'_, Engine>) {
+    thumbs::clear(&engine);
+}
+
+/// The latest preview as binary data: the width and the height as little-endian `u32`, then the
+/// RGBA pixels (empty before the first preview). Reads the stored preview only, so the main
+/// thread does not wait for anything.
+#[tauri::command]
+pub fn thumb_get(store: State<'_, ThumbStore>) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(store.latest())
 }
