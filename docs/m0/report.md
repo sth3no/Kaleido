@@ -263,16 +263,32 @@ Podklad: výzkum „Kaleido — Open with, asociace souborů a výchozí přehr�
 odlišuje doložené chování (dokumentace, zdrojový kód) od hypotéz; tady je jen to, co se změřilo
 na tomto PC (Windows 11 Pro 25H2, build 26200.9457). Nástroj: `scripts/diagnose-associations.ps1`.
 
-### Hypotéza cache pickeru: na tomto PC vyvrácená
+### Hypotéza cache pickeru: neověřená, rozhodne nové přihlášení
 
-- PC naběhlo 2026-10-17 v 11:07, `explorer.exe` v 11:08. Registrace Kaleida jsou z 14.–16. 10.,
-  a dialog „Vybrat aplikaci“ přesto ve 12:46–13:20 (předchozí session) Kaleido nenabízel.
-  Vysvětlení „registrováno až po přihlášení“ tedy neplatí.
+Hypotéza „dialog bere aplikace ze stavu zachyceného při přihlášení“ stále platí. Dřívější verze
+této sekce ji označila za vyvrácenou, ale vycházela z chybného předpokladu, že registrace Kaleida
+pochází ze 14.–16. 10.:
+
+- Přihlášení proběhlo 2026-10-17 v 11:07. Session „Fix Kaleido missing from Windows ‚Open with‘“
+  Kaleido ve 12:46 odregistrovala a ve 12:52 znovu zapsala. Testy instalace a odinstalace ho
+  zapsaly naposledy v 15:00:35 (čas zápisu klíčů `Kaleido.M0.Video`, `Applications\Kaleido.exe`,
+  `Capabilities`). Žádná dnešní kontrola dialogu tedy neviděla registraci starší než přihlášení.
+- Zjištění té session z dialogu (otevřen z Files, přečten přes Computer Use, nic nevybráno):
+  - Dialog nenabízí žádnou registraci zapsanou po přihlášení: Kaleido, podepsaný i nepodepsaný exe,
+    nový ProgID starých podepsaných aplikací (Zed, Nilesoft), `Applications\<exe>` bez
+    `SupportedTypes` ani výchozí hodnotu testovací přípony. Viditelné jsou jen starší registrace
+    (VLC 02/2026, Canva 04/2026, WMP).
+  - Vyloučeno: podpis exe, tvar ProgID (přesná kopie Canvy), zpětně nastavený čas zápisu klíče,
+    zápis do `Explorer\FileExts`, cache volajícího procesu (nový proces Files), restart
+    `explorer.exe` (v 15:04, po posledním zápisu, nic nezměnil), AppContainer a úroveň integrity.
+  - Claude (`claude-desktop.exe` z `WindowsApps`) chybí také, nejspíš z jiného důvodu (alias
+    balíčkové aplikace).
+- Rozhodující test: odhlásit se a přihlásit (nebo restart) **bez další změny registrace** a znovu
+  otevřít dialog. Ruční krok v checklistu.
 - Podnabídka „Otevřít v programu ›“ (objekt `OpenWithMenu`, ze kterého ji staví Průzkumník
-  i panel Files) čte registrace živě. Ukázala Kaleido i testovací ProgID zapsané dnes po přihlášení.
-- Samotný dialog (`OpenWith.exe -Embedding`) se z procesu bez okna v popředí zobrazit nepodařilo;
-  vznikne jen dočasné okno „Pick an app“. Proč jeho seznam vynechává právě Kaleido a Claude,
-  zůstává neznámé (ruční kontrola v checklistu). Ukončen byl zaseknutý `OpenWith.exe -Embedding`
+  i panel Files) čte registrace živě: Kaleido v ní je i bez nového přihlášení.
+- Dialog (`OpenWith.exe -Embedding`) se z procesu bez okna v popředí programově zobrazit nepodařilo;
+  vznikne jen dočasné okno „Pick an app“. Ukončen byl zaseknutý `OpenWith.exe -Embedding`
   z předchozích testů (54 vláken, žádné okno), který nové požadavky polykal.
 - Odstraněny testovací registrace předchozí session (`KalTest.*`, `KalShape.*`, `.kaltest`,
   `GhValid`, `KalSigned`/`KalUnsigned`), které se objevovaly jako aplikace pro `.mkv`. Záloha
@@ -328,8 +344,9 @@ se po příponách.
 ### Zbývající nejistoty
 
 - Proč dialog „Vybrat aplikaci“ (OpenWith.exe) vynechává Kaleido a Claude, zatímco
-  `SHAssocEnumHandlers` i podnabídka je nabízejí. Nevyřešeno; čistý profil nebo VM a Procmon
-  podle sekce 5 reportu.
+  `SHAssocEnumHandlers` i podnabídka je nabízejí. Nejpravděpodobněji stav zachycený při
+  přihlášení; potvrdí ho odhlášení a nové přihlášení, jinak čistý profil nebo VM a Procmon podle
+  sekce 5 reportu.
 - `QueryCurrentDefault` hlásí pro `.mkv` „effective“ `Kaleido.M0.Video`, ačkoli `UserChoice`
   ukazuje na odinstalovanou AppX aplikaci a `AssocQueryString` žádnou asociaci nenajde (dvojklik
   se zeptá). `AllowSilentDefaultTakeOver` odpověď tohoto API nezměnil.

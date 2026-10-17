@@ -12,8 +12,16 @@ Podklad: výzkum „Kaleido — Open with, asociace souborů a výchozí přehr�
 | Klasické menu → **Přehrát v Kaleidu** | funguje pro všechny přípony | menu sestavené samotným Windows (`scripts/diagnose-associations.ps1`, sekce 7) pro `.mkv`, `.mp4`, `.y4m` |
 | Podnabídka **Otevřít v programu ›** (Průzkumník, panel Files) | Kaleido v ní je | objekt `OpenWithMenu`, který používá Průzkumník i Files (sekce 5) |
 | **Odeslat / Send to → Kaleido** | funguje | 2026-10-16 proklikáno v Průzkumníku i ve Files |
-| Dialog **Vybrat aplikaci** (OpenWith.exe) | neověřeno | programově ho nešlo zobrazit; dopoledne 2026-10-17 v něm Kaleido chybělo |
-| Výchozí přehrávač | volí uživatel v Nastavení | `-ChooseDefault`, výsledek přečte diagnostika (sekce 3) |
+| Dialog **Vybrat aplikaci** (OpenWith.exe) | Kaleido chybí, zřejmě do nového přihlášení | celý den 2026-10-17 nenabízel nic, co se zapsalo po přihlášení (report.md, sekce Open with) |
+| Výchozí přehrávač | volí uživatel ve Windows | po novém přihlášení v dialogu nebo přes `-ChooseDefault`; výsledek přečte diagnostika (sekce 3) |
+
+### Jak to zprovoznit (jednou, u počítače)
+
+1. Odhlásit se a znovu přihlásit (nebo restartovat). Registraci už neměnit.
+2. Pravé tlačítko na video → **Otevřít v programu → Vybrat jinou aplikaci** → **Kaleido** →
+   **Vždy**. Nebo `scripts/install-local-prototype.ps1 -ChooseDefault` a vybrat Kaleido v Nastavení.
+3. Kontrola: `scripts/diagnose-associations.ps1` (sekce 3) ukáže `Kaleido.M0.Video` a dvojklik
+   otevře Kaleido.
 
 Otevírání souborů z registrovaného příkazu (`"Kaleido.exe" -- "%1"`) i ze Send to prošlo
 za studena i do běžící instance: diakritika, mezery, `%`, `&`, `#`, emoji, název začínající

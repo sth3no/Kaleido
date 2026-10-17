@@ -90,8 +90,9 @@ která píše zpětný apostrof).
 - [x] Klasické menu „Přehrát v Kaleidu“, podnabídka „Otevřít v programu ›“, Send to a otevření
   za studena i do běžící instance (skripty, 2026-10-17; výsledky v report.md, sekce Open with).
 - [x] Odebrání a opakovaná instalace nemění `UserChoice` ani hodnoty jiných programů (snímky registru).
-- [ ] Pravé tlačítko na `.mkv` → Otevřít v programu → **Vybrat jinou aplikaci**: je v seznamu Kaleido?
-  Nic nevybírat, jen zavřít. Totéž z aplikace Files.
+- [ ] **Po odhlášení a novém přihlášení** (registraci mezitím neměnit): pravé tlačítko na `.mkv` →
+  Otevřít v programu → **Vybrat jinou aplikaci**: je v seznamu Kaleido? Ano = hypotéza stavu
+  z přihlášení potvrzená; ne = čistý profil nebo VM a Procmon (report.md, sekce Open with).
 - [ ] `scripts/install-local-prototype.ps1 -ChooseDefault` → v Nastavení vybrat Kaleido pro `.mkv`
   → `scripts/diagnose-associations.ps1` (sekce 3) ukáže `Kaleido.M0.Video` a dvojklik otevře Kaleido.
 
