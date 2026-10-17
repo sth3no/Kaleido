@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kaleido</title>
+    <style>
+      /* The window is transparent and the video is not loaded yet (spec 5.1): paint an opaque
+         background before any script runs, or the desktop shows through. */
+      html,
+      body {
+        margin: 0;
+        background: #0e0e12;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

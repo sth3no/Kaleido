@@ -1,0 +1,7 @@
+/* Opaque until the video is loaded (spec 5.1): the window is transparent, so without a
+   background the desktop shows through. index.html paints the same colour before the bundle
+   has loaded. */
+.root {
+  min-height: 100vh;
+  background: #0e0e12;
+}

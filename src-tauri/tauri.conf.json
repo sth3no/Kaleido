@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kaleido",
+  "mainBinaryName": "Kaleido",
+  "version": "0.1.0",
+  "identifier": "com.sth3no.kaleido",
+  "build": {
+    "beforeDevCommand": "cargo build -p kaleido-mpv && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Kaleido",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 640,
+        "minHeight": 360,
+        "decorations": false,
+        "transparent": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"],
+    "resources": {
+      "../vendor/thumbfast/thumbfast.lua": "essentials/thumbfast.lua"
+    }
+  }
+}

@@ -1866,6 +1866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kaleido"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tauri",
+ "tauri-build",
+ "tempfile",
+ "windows",
+]
+
+[[package]]
 name = "kaleido-mpv"
 version = "0.1.0"
 dependencies = [

@@ -20,6 +20,34 @@ jobs:
       - run: cargo clippy -p mpv-ffi -p kaleido-mpv --all-targets -- -D warnings
       - run: cargo test -p mpv-ffi -p kaleido-mpv
 
+  ui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      # tauri-build needs the bundled thumbfast.lua; the libmpv tests of later tasks need the DLL.
+      - name: Fetch pinned libmpv and thumbfast
+        shell: pwsh
+        run: |
+          ./scripts/fetch-libmpv.ps1
+          ./scripts/fetch-thumbfast.ps1
+      - run: rustup component add clippy
+      - run: cargo clippy -p kaleido --all-targets -- -D warnings
+      - run: cargo test -p kaleido
+
+  # Goes away with the prototype (Task 24).
   prototype:
     runs-on: windows-latest
     defaults:
