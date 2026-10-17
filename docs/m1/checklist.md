@@ -29,6 +29,9 @@ Kontroly, které úkoly M1 připravily, ale v tichém režimu je nikdo nespustil
 - [ ] ☰ (myší i Enter) otevře lištu nad videem; najetí k levému okraji okna ji ukáže a odjetí
   doprava ji zase schová; Esc ji zavře a video přitom **neopustí** fullscreen; šipky nahoru a dolů
   přecházejí mezi Přehrávačem a Nastavením; klik vedle lišty ji zavře a video se nepozastaví.
+- [ ] Otevřená lišta nad videem začíná pod horním levým ostrůvkem (☰ je vidět); tažení za ostrůvky
+  ani za horní okraj lišty okno nepřesune, klik na ně lištu jen zavře.
+- [ ] Ve fullscreenu je ⬜ zašedlé a nic nedělá.
 - [ ] Bez videa (úvodní obrazovka, Nastavení) je lišta vidět stále, vlevo vedle stránky.
 - [ ] Klik myší na tlačítko (☰, ⬜, položku lišty) a pak mezerník → pauza videa. Tab na tlačítko
   a mezerník → stiskne tlačítko, video se nepozastaví.

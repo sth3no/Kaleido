@@ -7,6 +7,9 @@
   position: absolute;
   top: var(--k-space-l);
   right: var(--k-space-l);
+  /* The same height as the title island (AppShell.module.css). */
+  height: var(--shell-island-height);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: var(--k-space-xs);
@@ -43,9 +46,14 @@
     color var(--k-motion-fast) ease;
 }
 
-.button:hover {
+.button:hover:not(:disabled) {
   background: var(--k-color-hover);
   color: var(--k-color-text);
+}
+
+/* Maximise in fullscreen: nothing to do. */
+.button:disabled {
+  opacity: 0.4;
 }
 
 .island:not(.plain) .button:hover {

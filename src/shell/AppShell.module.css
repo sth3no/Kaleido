@@ -9,6 +9,11 @@
   --shell-sidebar-width: 200px;
   /* The strip at the top of a docked page that moves the window. */
   --shell-titlebar-height: 48px;
+  /*
+   * The top islands' height (TitleIsland, WindowIsland: a 32 px button, padding and border), which
+   * the sidebar over the video starts below.
+   */
+  --shell-island-height: 42px;
   --shell-page-left: calc(var(--shell-sidebar-width) + 2 * var(--k-space-l));
 
   position: absolute;

@@ -76,7 +76,8 @@ export default function WindowIsland({ overVideo }: WindowIslandProps) {
   const island = useRef<HTMLDivElement>(null);
   const maximizeButton = useRef<HTMLButtonElement>(null);
   const maximized = useMaximized();
-  // A fullscreen window has nothing to maximise: Windows is not told about the button then.
+  // A fullscreen window has nothing to maximise or restore: the button is off, and Windows is not
+  // told about it.
   const fullscreen = usePlayerStore((state) => state.props['fullscreen'] === true);
   useGlassRegion(island, undefined, overVideo);
   useCaptionButton(maximizeButton, !fullscreen);
@@ -103,6 +104,7 @@ export default function WindowIsland({ overVideo }: WindowIslandProps) {
         className={styles.button}
         aria-label={maximizeLabel}
         title={maximizeLabel}
+        disabled={fullscreen}
         onClick={toggleMaximize}
         {...blurAfterPointer}
       >

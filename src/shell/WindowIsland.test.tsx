@@ -97,12 +97,18 @@ test('a maximised window offers to restore it, and follows the window after a re
 
 test('the maximise button is where Windows answers for it, but not in fullscreen', () => {
   render(<WindowIsland overVideo />);
+  const maximize = screen.getByRole('button', { name: 'Maximize' }) as HTMLButtonElement;
   runFrame();
   expect(captionButtons().at(-1)).toEqual([{ x: 1196, y: 16, w: 36, h: 32 }]);
+  expect(maximize.disabled).toBe(false);
 
+  // Fullscreen: nothing to maximise. The button is off and Windows no longer answers for it.
   act(() => {
     usePlayerStore.setState({ props: { fullscreen: true } });
   });
   runFrame();
   expect(captionButtons().at(-1)).toEqual([]);
+  expect(maximize.disabled).toBe(true);
+  fireEvent.click(maximize);
+  expect(appWindow.toggleMaximize).not.toHaveBeenCalled();
 });

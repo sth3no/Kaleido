@@ -126,6 +126,30 @@ test('no glass regions are sent while the glass is off, and they come back with 
   expect(sent().at(-1)).toEqual([{ x: 10, y: 20, w: 40, h: 30, r: 12, a: 1 }]);
 });
 
+test('a list Rust did not get is sent again at the next frame', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.mocked(invoke).mockImplementationOnce(() => Promise.reject(new Error('the IPC failed')));
+  render(<Panel index={0} />);
+  runFrame();
+  expect(sent()).toHaveLength(1);
+
+  // The failure comes back: one more frame is asked for, and it sends the same list again.
+  await vi.waitFor(() => {
+    expect(frames).toHaveLength(1);
+  });
+  expect(warn).toHaveBeenCalledWith('glass_set_regions', expect.any(Error));
+  runFrame();
+  expect(sent()).toHaveLength(2);
+  expect(sent()[1]).toEqual(sent()[0]);
+
+  // Delivered this time: measured again with nothing moved, nothing more is sent.
+  await Promise.resolve();
+  resize();
+  runFrame();
+  expect(sent()).toHaveLength(2);
+  warn.mockRestore();
+});
+
 test('an element that goes away takes its region with it', () => {
   const { rerender } = render(
     <>

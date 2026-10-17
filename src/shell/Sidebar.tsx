@@ -160,6 +160,7 @@ export default function Sidebar({ id, mode, openedBy, onOpenAtEdge, onReturnFocu
         id={id}
         className={`${glass.glass} ${styles.panel}`}
         aria-label={t('shell.sidebar.label')}
+        data-mode={mode}
         data-state={state}
         inert={!shown}
         aria-hidden={shown ? undefined : true}

@@ -86,6 +86,8 @@ test('sidebar is hidden while playing and opens from the hamburger', () => {
   const items = within(nav as HTMLElement);
   expect(items.getByRole('button', { name: 'Player' }).getAttribute('aria-current')).toBe('page');
   expect(items.getByRole('button', { name: 'Settings' }).getAttribute('aria-current')).toBeNull();
+  // Over the video it sits below the title island (Sidebar.module.css), so ☰ stays in sight.
+  expect(nav?.getAttribute('data-mode')).toBe('overlay');
 
   // ☰ again closes it.
   fireEvent.click(screen.getByRole('button', { name: 'Menu' }), { detail: 1 });
@@ -98,6 +100,7 @@ test('sidebar is shown beside the page without video', () => {
   expect(screen.getByText('Start')).toBeTruthy();
   const nav = sidebar();
   expect(nav).not.toBeNull();
+  expect(nav?.getAttribute('data-mode')).toBe('docked');
   expect(useUiStore.getState().sidebarOpen).toBe(false);
   // Nothing to open: there is no ☰.
   expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();

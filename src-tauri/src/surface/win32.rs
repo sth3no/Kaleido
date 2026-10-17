@@ -6,14 +6,18 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Mutex, Once, PoisonError};
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, CreateWindowExW, DefWindowProcW, GA_ROOT, GW_CHILD, GW_HWNDNEXT,
     GWLP_HINSTANCE, GWLP_WNDPROC, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW,
     HTMAXBUTTON, HWND_BOTTOM, HWND_TOP, IsZoomed, MA_NOACTIVATE, PostMessageW, RegisterClassW,
     SC_MAXIMIZE, SC_RESTORE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_MOUSEACTIVATE, WM_NCDESTROY,
-    WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_SYSCOMMAND,
-    WM_WINDOWPOSCHANGED, WNDCLASSW, WNDPROC, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_NOPARENTNOTIFY,
+    SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_CAPTURECHANGED,
+    WM_MOUSEACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
+    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGED, WNDCLASSW,
+    WNDPROC, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_NOPARENTNOTIFY,
 };
 use windows::core::{PCWSTR, w};
 
@@ -271,12 +275,41 @@ unsafe extern "system" fn caption_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             }
             LRESULT(0)
         }
+        // Over the button: ask to hear when the pointer leaves it (WM_NCMOUSELEAVE). Only the leave
+        // is asked for, so Windows' own hover tracking (for Snap Layouts) is left as it is; the
+        // move itself still goes to Windows below.
+        WM_NCMOUSEMOVE => {
+            track_leave(h);
+            // SAFETY: the default procedure for this window's own message.
+            unsafe { DefWindowProcW(h, msg, wp, lp) }
+        }
+        // The pointer left the button, or the mouse went to someone else: a press that began here
+        // is over, and a release that comes later is no click.
+        WM_NCMOUSELEAVE | WM_CAPTURECHANGED => {
+            let _ = PRESSED.compare_exchange(h.0 as isize, 0, Ordering::Relaxed, Ordering::Relaxed);
+            // SAFETY: the default procedure for this window's own message.
+            unsafe { DefWindowProcW(h, msg, wp, lp) }
+        }
         // The click must not take the focus from WebView2.
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-        // Hovering (WM_NCMOUSEMOVE, WM_NCMOUSEHOVER) goes to Windows, which shows Snap Layouts.
+        // Hovering (WM_NCMOUSEHOVER) goes to Windows, which shows Snap Layouts.
         // SAFETY: the default procedure for this window's own messages.
         _ => unsafe { DefWindowProcW(h, msg, wp, lp) },
     }
+}
+
+/// Asks Windows for a `WM_NCMOUSELEAVE` when the pointer leaves `window`. Asked again on every
+/// move: Windows forgets it once it has sent one.
+fn track_leave(window: HWND) {
+    let mut track = TRACKMOUSEEVENT {
+        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+        dwFlags: TME_LEAVE | TME_NONCLIENT,
+        hwndTrack: window,
+        dwHoverTime: 0,
+    };
+    // SAFETY: `track` is a valid TRACKMOUSEEVENT for a window of this thread. A failure only
+    // means no leave message: a stale press then ends at the next press anyway.
+    let _ = unsafe { TrackMouseEvent(&mut track) };
 }
 
 /// What Windows' maximise button does: maximise, or restore a maximised window. Posted to the
@@ -451,10 +484,12 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GW_CHILD, GWL_STYLE, GetWindow, GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetWindowPos, WM_NCHITTEST, WS_VISIBLE,
+        GW_CHILD, GWL_STYLE, GetWindow, GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, MSG, PM_REMOVE,
+        PeekMessageW, SC_MAXIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW,
+        SetWindowPos, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
+        WM_SYSCOMMAND, WS_VISIBLE,
     };
 
     use super::testing::{destroy, test_windows, window_rect};
@@ -527,6 +562,66 @@ mod tests {
         // No buttons shown: nothing answers for them.
         windows.place(parent, &[]);
         assert!(!has_visible_style(button));
+        destroy(parent);
+    }
+
+    /// Sends the window over the button what the pointer does there, as Windows would.
+    fn send(window: isize, msg: u32) {
+        let lp = screen_point(410, 120);
+        unsafe {
+            SendMessageW(
+                hwnd(window),
+                msg,
+                Some(WPARAM(HTMAXBUTTON as usize)),
+                Some(lp),
+            )
+        };
+    }
+
+    /// The system command posted to `parent` since the last call, taken out of the queue before
+    /// anything handles it (so the hidden test window is never maximised and shown).
+    fn posted_command(parent: isize) -> Option<usize> {
+        let mut msg = MSG::default();
+        let found = unsafe {
+            PeekMessageW(
+                &mut msg,
+                Some(hwnd(parent)),
+                WM_SYSCOMMAND,
+                WM_SYSCOMMAND,
+                PM_REMOVE,
+            )
+        };
+        found.as_bool().then_some(msg.wParam.0)
+    }
+
+    /// A press and a release on the button are a click; a press that left the button (the pointer
+    /// went away, WM_NCMOUSELEAVE) is over, and a release later over the button does nothing.
+    #[test]
+    fn a_click_on_the_button_maximises_but_a_press_that_left_it_does_not() {
+        let (parent, _webview) = test_windows("KaleidoTestWebView");
+        let mut windows = CaptionWindows::default();
+        windows.place(
+            parent,
+            &[PxRect {
+                x: 300,
+                y: 10,
+                w: 40,
+                h: 30,
+            }],
+        );
+        let button = find_child(parent, CAPTION_WINDOW_CLASS).expect("a window over the button");
+
+        // Pressed, the pointer leaves, comes back and is released: no click.
+        send(button, WM_NCLBUTTONDOWN);
+        send(button, WM_NCMOUSELEAVE);
+        send(button, WM_NCLBUTTONUP);
+        assert_eq!(posted_command(parent), None);
+
+        // Pressed and released over it: the window is asked to maximise, once.
+        send(button, WM_NCLBUTTONDOWN);
+        send(button, WM_NCLBUTTONUP);
+        assert_eq!(posted_command(parent), Some(SC_MAXIMIZE as usize));
+        assert_eq!(posted_command(parent), None);
         destroy(parent);
     }
 

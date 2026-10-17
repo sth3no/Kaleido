@@ -26,6 +26,9 @@ import { MAX_REGIONS, measure, opacityOf, sameRects, type GlassRect } from './re
 /** A transition that never ends (its element went away half-way) is given up on after this. */
 const STUCK_TRANSITION_MS = 1000;
 
+/** A send that failed is tried again at the next frame this many times in a row. */
+const RETRIES = 3;
+
 /** An element whose rectangle is in the list. */
 export interface RectSource {
   element: HTMLElement;
@@ -82,8 +85,10 @@ export function createRectSet(options: RectSetOptions): RectSet {
   /** When a transition last started or ended. */
   let lastTransition = 0;
   let frame: number | null = null;
-  /** What Rust has; `null` before the first send. */
+  /** What Rust has (or is being sent); `null` before the first send and after a failed one. */
   let last: GlassRect[] | null = null;
+  /** Sends that failed in a row. */
+  let failures = 0;
   let stopListening: (() => void) | null = null;
 
   const collect = (): GlassRect[] => {
@@ -114,9 +119,20 @@ export function createRectSet(options: RectSetOptions): RectSet {
     const rects = collect();
     if (last === null || !sameRects(rects, last)) {
       last = rects;
-      send(rects).catch((error: unknown) => {
-        console.warn(what, error);
-      });
+      send(rects).then(
+        () => {
+          failures = 0;
+        },
+        (error: unknown) => {
+          console.warn(what, error);
+          // Rust does not have it: measured again, the list is sent again. At the next frames a
+          // few times; after that at the next change, so that a send that keeps failing does not
+          // run every frame.
+          if (last === rects) last = null;
+          failures += 1;
+          if (failures <= RETRIES) schedule();
+        },
+      );
     }
     if (sources.length === 0) {
       stopListening?.();
