@@ -4,6 +4,7 @@
 
 use tauri::{AppHandle, State};
 
+use crate::input::{self, InputEvent};
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
@@ -12,6 +13,16 @@ use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog
 #[tauri::command]
 pub fn player_command(engine: State<'_, Engine>, cmd: PlayerCommand) -> Result<(), String> {
     player::command::send(&engine, &cmd).map_err(|error| error.to_string())
+}
+
+/// Input the UI did not handle (keys, the mouse, the wheel) for mpv. It is queued on the engine,
+/// like every command, so that the events stay in the order they came in (a key's down before
+/// its up); nothing waits for mpv.
+#[tauri::command]
+pub fn player_input(engine: State<'_, Engine>, event: InputEvent) {
+    if !input::send(&engine, &event) {
+        tracing::warn!("input refused: {event:?}");
+    }
 }
 
 /// Opens files and links. A source that cannot be opened is reported and the others open.

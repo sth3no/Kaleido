@@ -1,6 +1,7 @@
 //! Kaleido: the Tauri shell around libmpv.
 
 pub mod commands;
+pub mod input;
 pub mod job;
 pub mod paths;
 pub mod player;
@@ -47,6 +48,7 @@ pub fn run() {
         .manage(opens)
         .invoke_handler(tauri::generate_handler![
             commands::player_command,
+            commands::player_input,
             commands::player_load,
             commands::system_ui_ready,
             commands::system_open_dialog,
