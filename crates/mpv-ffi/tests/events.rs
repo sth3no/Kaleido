@@ -114,3 +114,34 @@ fn wakeup_interrupts_an_infinite_wait() {
     rx.recv_timeout(Duration::from_secs(5))
         .expect("wait_event(-1) was not interrupted by wakeup");
 }
+
+/// mpv_wait_event frees the previous event's data on the next call, so two threads inside it
+/// at once would read freed memory. `Mpv` is Sync, so a second waiter must wait its turn.
+#[test]
+fn a_second_waiter_waits_for_the_first() {
+    let mpv = Arc::new(common::headless());
+    let first = Arc::clone(&mpv);
+    let (first_done, first_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while first.wait_event(-1.0) != Event::None {}
+        first_done.send(()).unwrap();
+    });
+    std::thread::sleep(Duration::from_millis(200));
+
+    let second = Arc::clone(&mpv);
+    let (second_done, second_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        second.wait_event(0.0);
+        second_done.send(()).unwrap();
+    });
+    assert!(
+        second_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+        "wait_event ran while another thread was inside it"
+    );
+
+    mpv.wakeup();
+    first_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    second_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the second waiter never got its turn");
+}

@@ -1,5 +1,5 @@
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::error::{Error, Result};
 use crate::event::{self, Event, PropertyKind};
@@ -11,10 +11,12 @@ const MPV_ERROR_PROPERTY_UNAVAILABLE: i32 = -10;
 pub struct Mpv {
     pub(crate) api: Arc<Api>,
     pub(crate) ctx: *mut sys::mpv_handle,
+    /// Held across mpv_wait_event and the conversion of the event it returns.
+    events: Mutex<()>,
 }
 
 // SAFETY: the libmpv client API is thread-safe. Its one restriction (mpv_wait_event
-// must not run on two threads at once) is documented on `Mpv::wait_event`.
+// must not run on two threads at once) is enforced by `Mpv::events`.
 unsafe impl Send for Mpv {}
 unsafe impl Sync for Mpv {}
 
@@ -30,7 +32,11 @@ impl Mpv {
         if ctx.is_null() {
             return Err(Error::Create);
         }
-        Ok(Mpv { api, ctx })
+        Ok(Mpv {
+            api,
+            ctx,
+            events: Mutex::new(()),
+        })
     }
 
     /// Only meaningful before `initialize` for most options.
@@ -128,9 +134,12 @@ impl Mpv {
         self.check(code, || format!("request_log_messages {min_level}"))
     }
 
-    /// Blocks up to `timeout_secs` (negative = forever). Call from a single thread only.
+    /// Blocks up to `timeout_secs` (negative = forever). Concurrent callers take turns: a
+    /// second caller waits until the first returns. `wakeup` interrupts the current wait.
     pub fn wait_event(&self, timeout_secs: f64) -> Event {
-        // SAFETY: the returned event is converted before any further libmpv call on this thread.
+        let _turn = self.events.lock().unwrap_or_else(PoisonError::into_inner);
+        // SAFETY: the next mpv_wait_event frees the returned event's data; the lock keeps it
+        // from running until the event has been converted into owned Rust values.
         unsafe {
             let raw = (self.api.wait_event)(self.ctx, timeout_secs);
             event::from_raw(&self.api, raw)
