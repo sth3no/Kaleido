@@ -101,6 +101,30 @@ impl Engine {
         self.thumb.lock().unwrap().clone()
     }
 
+    /// Recover properties emitted before React mounted (also handles a dev-page reload).
+    pub fn sync_state(&self, app: &AppHandle) {
+        for (name, kind) in OBSERVED {
+            let value = match kind {
+                PropertyKind::Flag => self.mpv.get_flag(name).map(|v| json!(v)),
+                PropertyKind::Int64 => self.mpv.get_i64(name).map(|v| json!(v)),
+                PropertyKind::Double => self.mpv.get_f64(name).map(|v| json!(v)),
+                PropertyKind::String => self.mpv.get_string(name).map(|v| json!(v)),
+            };
+            if let Ok(value) = value {
+                let _ = app.emit(
+                    "player:prop",
+                    Prop {
+                        name: (*name).into(),
+                        value,
+                    },
+                );
+            }
+        }
+        if self.mpv.get_flag("idle-active").is_ok_and(|idle| !idle) {
+            let _ = app.emit("player:file-loaded", ());
+        }
+    }
+
     fn on_thumbfast_render(&self, app: &AppHandle, json: &str) {
         match thumbs::load(json, &std::env::temp_dir()) {
             Ok(thumb) => {

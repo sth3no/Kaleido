@@ -4,6 +4,7 @@ mod commands;
 mod engine;
 mod glass;
 mod input;
+mod open_requests;
 mod options;
 mod surface;
 mod thumbs;
@@ -11,13 +12,41 @@ mod thumbs;
 use std::sync::Arc;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use engine::Engine;
+use open_requests::{OpenRequests, files_from_args, open_files};
 use surface::SurfaceState;
 
 fn main() {
+    let requests = OpenRequests::default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let mut files = files_from_args(std::env::args_os().skip(1), &cwd);
+    if files.is_empty()
+        && let Some(path) = std::env::var_os("KALEIDO_M0_OPEN")
+    {
+        files = files_from_args([path], &cwd);
+    }
+    requests.submit(files);
     tauri::Builder::default()
+        .manage(requests)
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let files = files_from_args(
+                args.into_iter().skip(1).map(Into::into),
+                std::path::Path::new(&cwd),
+            );
+            let batches = app.state::<OpenRequests>().submit(files);
+            if let Some(engine) = app.try_state::<Arc<Engine>>()
+                && let Err(error) = open_files(&engine.mpv, batches)
+            {
+                let _ = app.emit("player:log", error.to_string());
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let window = app
@@ -34,16 +63,6 @@ fn main() {
             let surface = SurfaceState::new(parent);
             let size = window.inner_size()?;
             surface.apply(size.width, size.height, window.scale_factor()?);
-            // M0 dev hook: open a file without the dialog, once the UI listens for events.
-            if let Some(path) = std::env::var_os("KALEIDO_M0_OPEN") {
-                let engine = Arc::clone(&engine);
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    let _ = engine
-                        .mpv
-                        .command(&["loadfile", &path.to_string_lossy(), "replace"]);
-                });
-            }
             app.manage(surface);
             app.manage(engine);
             Ok(())
@@ -69,6 +88,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_file,
+            commands::player_ready,
             commands::player_command,
             commands::surface_set_layout,
             commands::player_input,

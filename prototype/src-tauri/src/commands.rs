@@ -13,11 +13,18 @@ fn err(e: mpv_ffi::Error) -> String {
 }
 
 #[tauri::command]
+pub fn player_ready(
+    app: tauri::AppHandle,
+    engine: State<'_, Arc<Engine>>,
+    requests: State<'_, crate::open_requests::OpenRequests>,
+) -> CmdResult {
+    engine.sync_state(&app);
+    crate::open_requests::open_files(&engine.mpv, requests.ready()).map_err(err)
+}
+
+#[tauri::command]
 pub fn open_file(engine: State<'_, Arc<Engine>>, path: String) -> CmdResult {
-    engine
-        .mpv
-        .command(&["loadfile", &path, "replace"])
-        .map_err(err)
+    crate::open_requests::open_files(&engine.mpv, vec![vec![path]]).map_err(err)
 }
 
 /// Typed player commands; the UI cannot send arbitrary mpv commands (spec 4.4).
