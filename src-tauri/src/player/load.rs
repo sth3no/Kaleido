@@ -1,9 +1,11 @@
 //! Opening files and links (spec 4.4, 9.3). What the UI, the command line or a paste hands in
 //! is checked here first: only local paths and http(s) links reach mpv's `loadfile`.
 
+use std::ffi::OsStr;
 use std::ops::RangeInclusive;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf, Prefix};
 
+use mpv_ffi::Mpv;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -24,8 +26,8 @@ pub enum SourceError {
     NotFound,
     /// A scheme other than http and https (`file://`, `edl://`, `lavfi://`, ...).
     Protocol,
-    /// Not usable at all: empty, with control characters, a link that does not parse, or an
-    /// option value outside what is allowed.
+    /// Not usable at all: empty, with control characters, a link that does not parse, a device
+    /// path (named pipes), or an option value outside what is allowed.
     Invalid,
 }
 
@@ -154,6 +156,30 @@ fn http_url(text: &str) -> Option<Url> {
         .filter(|url| matches!(url.scheme(), "http" | "https") && url.has_host())
 }
 
+/// Whether `path` is a place on a disk: a drive path (also as `\\?\C:\`), or a share of a
+/// server (also as `\\?\UNC\`). A path with no prefix is one only once joined to a `cwd`.
+/// The rest is not: `\\.\` is the device namespace and `\\?\` reaches any object (`pipe`,
+/// `GLOBALROOT`), and the `pipe` and `mailslot` shares of a server are its pipes. Named pipes
+/// pass `is_file`, and opening one connects to whichever process serves it. `Path` reads the
+/// prefix the way Windows does, so `//./pipe/x` is no different from `\\.\pipe\x`.
+fn is_disk_path(path: &Path) -> bool {
+    let Some(Component::Prefix(prefix)) = path.components().next() else {
+        return true;
+    };
+    let ordinary_share = |server: &OsStr, share: &OsStr| {
+        let is = |name: &str| share.eq_ignore_ascii_case(name);
+        // `//?/C:/x` is a verbatim path to Windows, and Rust sees a server named `?` in it.
+        server != "?" && server != "." && !is("pipe") && !is("mailslot")
+    };
+    match prefix.kind() {
+        Prefix::Disk(_) | Prefix::VerbatimDisk(_) => true,
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+            ordinary_share(server, share)
+        }
+        Prefix::DeviceNS(_) | Prefix::Verbatim(_) => false,
+    }
+}
+
 /// A local path (absolute, relative to `cwd`, UNC or `\\?\`) that exists as a file or folder,
 /// or an http(s) link. Any other scheme (`file://`, `edl://`, `lavfi://`, ...) is refused: it
 /// would make mpv open something that is not a file.
@@ -170,6 +196,9 @@ pub fn parse_source(raw: &str, cwd: &Path) -> Result<Source, SourceError> {
     }
     // Always absolute: a name that starts with `-` is not mistaken for an option later.
     let path = cwd.join(text);
+    if !is_disk_path(&path) {
+        return Err(SourceError::Invalid);
+    }
     if path.is_file() || path.is_dir() {
         Ok(Source::File(path))
     } else {
@@ -238,13 +267,39 @@ pub fn open_sources(
             }),
         }
     }
-    for args in load_commands(&sources, mode, &LoadOptions::default()) {
-        engine.request(Request::Command(args));
+    let commands = load_commands(&sources, mode, &LoadOptions::default());
+    match mode {
+        LoadMode::Replace => {
+            for args in commands {
+                engine.request(Request::Command(args));
+            }
+        }
+        LoadMode::Append if !commands.is_empty() => {
+            engine.request(Request::Call(Box::new(move |mpv| append(mpv, &commands))));
+        }
+        LoadMode::Append => {}
     }
     if issues.is_empty() {
         Ok(())
     } else {
         Err(issues)
+    }
+}
+
+/// Runs the commands of an append, on the request thread (the engine's queue keeps it in order
+/// with everything sent before). Added to a player that plays, the files only join the
+/// playlist and `pause` stays as it is. An idle player starts the first one, and that has to
+/// play (spec 9.3) even if `pause` was left on by a file that ended or was stopped. Only
+/// there can it be known whether the player is idle.
+fn append(mpv: &Mpv, commands: &[Vec<String>]) {
+    let idle = mpv.get_flag("idle-active").unwrap_or(false);
+    let resume = [vec!["set".to_owned(), "pause".to_owned(), "no".to_owned()]];
+    let resume = if idle { &resume[..] } else { &[] };
+    for args in commands.iter().chain(resume) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let Err(error) = mpv.command(&args) {
+            tracing::warn!("mpv request failed: {error}");
+        }
     }
 }
 
@@ -258,7 +313,7 @@ mod tests {
 
     use super::*;
     use crate::player::Request;
-    use crate::player::testing::{Recorded, clip, headless, temp_paths};
+    use crate::player::testing::{Recorded, clip, eventually, headless, temp_paths};
 
     fn url(text: &str) -> Url {
         Url::parse(text).unwrap()
@@ -329,6 +384,32 @@ mod tests {
         );
         assert_eq!(parse("--no-config"), Err(SourceError::NotFound));
 
+        // Device paths are no files, though some exist and pass `is_file`: opening a named pipe
+        // would connect to another process. `Invalid` even for a pipe that is not there, so that
+        // the answer does not depend on what is running.
+        for raw in [
+            r"\\.\pipe\InitShutdown",
+            r"\\.\pipe\no-such-pipe",
+            r"\\.\PIPE\anything",
+            "//./pipe/anything",
+            r"\/.\pipe\anything",
+            r"\\.\C:",
+            r"\\.\PhysicalDrive0",
+            r"\\.\GLOBALROOT\Device\NamedPipe\anything",
+            r"\\.\UNC\localhost\pipe\anything",
+            r"\\?\pipe\anything",
+            r"\\?\GLOBALROOT\Device\NamedPipe\anything",
+            "//?/pipe/anything",
+            "//?/C:/Windows/notepad.exe",
+            // The pipe service of a (the local) server, by name.
+            r"\\localhost\pipe\srvsvc",
+            r"\\localhost\PIPE\srvsvc",
+            r"\\localhost\mailslot\anything",
+            r"\\?\UNC\localhost\pipe\srvsvc",
+        ] {
+            assert_eq!(parse(raw), Err(SourceError::Invalid), "{raw}");
+        }
+
         // Nothing to open.
         for raw in [
             "",
@@ -365,6 +446,33 @@ mod tests {
                     Ok(Source::File(PathBuf::from(unc)))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn only_drive_and_share_paths_are_disk_paths() {
+        for path in [
+            r"C:\Videa čeština (2026)\a.mkv",
+            "C:/Videa/a.mkv",
+            r"\\server\share\Videa čeština (2026)\žluťoučký kůň.mkv",
+            "//server/share/a.mkv",
+            r"\\server\pipelines\a.mkv",
+            r"\\?\C:\Videa\a.mkv",
+            r"\\?\UNC\server\share\a.mkv",
+            r"relative\a.mkv",
+            r"\rooted\a.mkv",
+        ] {
+            assert!(is_disk_path(Path::new(path)), "{path}");
+        }
+        for path in [
+            r"\\.\pipe\x",
+            "//./pipe/x",
+            r"\\?\pipe\x",
+            r"\\server\pipe\x",
+            r"\\server\MAILSLOT\x",
+            r"\\?\UNC\server\pipe\x",
+        ] {
+            assert!(!is_disk_path(Path::new(path)), "{path}");
         }
     }
 
@@ -639,6 +747,101 @@ mod tests {
             !engine.call(|mpv| mpv.get_flag("pause").unwrap()),
             "a new file must start playing"
         );
+    }
+
+    /// As in Kaleido's default mpv.conf.
+    fn keep_open_engine(root: &Path, events: Recorded) -> Engine {
+        let paths = temp_paths(root);
+        fs::write(paths.config_dir.join("mpv.conf"), "keep-open=yes\n").unwrap();
+        Engine::start(headless(paths), events).unwrap()
+    }
+
+    fn loaded(events: &Recorded) -> usize {
+        events
+            .events()
+            .iter()
+            .filter(|event| **event == Event::FileLoaded)
+            .count()
+    }
+
+    /// Spec 9.3: a file that is opened plays, also when the last one ended with keep-open,
+    /// which leaves the player paused at the end.
+    #[test]
+    fn opening_a_file_after_the_previous_one_ended_plays_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first.y4m");
+        mpv_ffi::testing::write_y4m(&first, 64, 36, 15).unwrap();
+        let second = tmp.path().join("second.y4m");
+        mpv_ffi::testing::write_y4m(&second, 64, 36, 300).unwrap();
+        let events = Recorded::default();
+        let engine = keep_open_engine(tmp.path(), events.clone());
+
+        let raw = [first.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Replace, tmp.path()).unwrap();
+        eventually(&engine, "the first file ended, paused", |mpv| {
+            mpv.get_flag("eof-reached").unwrap_or(false) && mpv.get_flag("pause").unwrap()
+        });
+        let loaded_before = loaded(&events);
+
+        let raw = [second.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Replace, tmp.path()).unwrap();
+        events.wait_until("the second file loaded", LOAD_TIMEOUT, |_| {
+            loaded(&events) > loaded_before
+        });
+
+        let second = second.to_string_lossy().into_owned();
+        eventually(&engine, "the second file is playing", move |mpv| {
+            mpv.get_string("path").is_ok_and(|path| path == second)
+                && !mpv.get_flag("pause").unwrap()
+                && !mpv.get_flag("eof-reached").unwrap_or(false)
+                && mpv.get_f64("time-pos").is_ok_and(|time| time > 0.1)
+        });
+    }
+
+    /// R14, spec 9.3: nothing is playing, `pause` was left on, and the appended file plays.
+    #[test]
+    fn appending_to_an_idle_paused_player_plays() {
+        let tmp = tempfile::tempdir().unwrap();
+        let clip = clip(tmp.path(), 10);
+        let events = Recorded::default();
+        let engine = keep_open_engine(tmp.path(), events.clone());
+        engine.command(&["set", "pause", "yes"]);
+        eventually(&engine, "idle and paused", |mpv| {
+            mpv.get_flag("idle-active").unwrap() && mpv.get_flag("pause").unwrap()
+        });
+
+        let raw = [clip.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Append, tmp.path()).unwrap();
+        events.wait_until("the file loaded", LOAD_TIMEOUT, is_file_loaded);
+
+        eventually(&engine, "the appended file is playing", |mpv| {
+            !mpv.get_flag("pause").unwrap() && mpv.get_f64("time-pos").is_ok_and(|time| time > 0.1)
+        });
+    }
+
+    /// The other half of the same rule: while something plays, an append changes nothing about it.
+    #[test]
+    fn appending_to_a_playing_player_leaves_pause_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first.y4m");
+        mpv_ffi::testing::write_y4m(&first, 64, 36, 300).unwrap();
+        let second = tmp.path().join("second.y4m");
+        mpv_ffi::testing::write_y4m(&second, 64, 36, 300).unwrap();
+        let events = Recorded::default();
+        let engine = keep_open_engine(tmp.path(), events.clone());
+
+        let raw = [first.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Replace, tmp.path()).unwrap();
+        events.wait_until("the file loaded", LOAD_TIMEOUT, is_file_loaded);
+        engine.command(&["set", "pause", "yes"]);
+
+        let raw = [second.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Append, tmp.path()).unwrap();
+
+        // The call is queued behind the pause; once it has run, the playlist holds both.
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-count").unwrap()), 2);
+        assert!(engine.call(|mpv| mpv.get_flag("pause").unwrap()));
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-pos").unwrap()), 0);
     }
 
     #[test]
