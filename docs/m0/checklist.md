@@ -2,7 +2,15 @@
 
 Výsledky zapisuj do `docs/m0/report.md` (řádky 1–8), nebo je pošli Claudovi v chatu.
 
+Průchody Computer Use z 2026-10-15 a 2026-10-16 a nalezené chyby jsou v [report.md](report.md).
+Zaškrtnuté jsou pouze dokončené kontroly; složené body s neověřeným DPI, rychlostí či opakováním
+zůstávají otevřené, i když základní funkce prošla.
+
 ## Spuštění
+
+Pro otevírání videí z Průzkumníku a aplikace Files je k dispozici
+[místní instalace s ověřenou nabídkou **Send to → Kaleido**](local-install.md).
+Moderní „Open with“ na tomto PC Kaleido stále nenabízí; stav registrace je v uvedeném postupu.
 
 ```bash
 cd C:/Users/PC/Projects/Apps/Kaleido/app/.claude/worktrees/m0-prototype/prototype
@@ -18,9 +26,9 @@ Zkratky v prototypu: `g` zapne/vypne sklo, `s` snímek bez skla, `S` výchozí s
 která píše zpětný apostrof).
 
 ## 1 · Video pod průhledným UI
-- [ ] Otevřít `sdr-1080p.mkv` → video je vidět pod poloprůhlednými kapslemi.
+- [x] Otevřít `sdr-1080p.mkv` → video je vidět pod poloprůhlednými kapslemi.
 - [ ] 10 s rychle měnit velikost okna a přesouvat ho: bliká něco? Zůstávají černé/bílé okraje?
-- [ ] `Žluťoučký kůň (zkouška).mkv` se otevře.
+- [x] `Žluťoučký kůň (zkouška).mkv` se otevře.
 - [ ] ✕ během přehrávání → aplikace skončí do 2 s, `tasklist | findstr /i kaleido` nic nevypíše.
 
 ## 2 · HDR
@@ -30,10 +38,10 @@ která píše zpětný apostrof).
 ## 3 · Vstup
 - [ ] Mezerník = pauza; šipky přetáčí; podržená šipka přetáčí plynule a po puštění přestane.
 - [ ] Pustit Ctrl dřív než šipku → nic se nezasekne.
-- [ ] Konzole: napsat `show-text ahoj ěščř` + Enter → text s diakritikou; Esc ji zavře.
+- [x] Konzole: napsat `show-text "ahoj ěščř" 5000` + Enter → text s diakritikou; Esc ji zavře.
 - [ ] Klik do modrého rámečku `click-target` → počítadlo +1 (i při měřítku Windows 150 %).
-- [ ] Kolečko myši něco udělá (výchozí vazba mpv).
-- [ ] Dvojklik do videa → fullscreen se přepne právě jednou; Esc ho ukončí.
+- [x] Kolečko myši něco udělá (výchozí vazba mpv).
+- [x] Dvojklik do videa → fullscreen se přepne právě jednou; Esc ho ukončí.
   Když nic: `SEND_EXPLICIT_DOUBLE_CLICK = true` v `prototype/src/input/forward.ts`.
 - [ ] Klik na ▶ a pak mezerník → pauza se přepne jen jednou.
 
@@ -46,23 +54,25 @@ která píše zpětný apostrof).
 - [ ] Pod kapslemi je video rozmazané, tvar sedí (zaoblené konce, žádný posun ani převrácení), i při 150 %.
 - [ ] `letterbox-239.mkv`: rozmazání sedí i nad pruhy. Když je posunuté o výšku pruhu →
   `OUTPUT_EXCLUDES_MARGINS = false` v `prototype/src-tauri/src/glass.rs`.
-- [ ] 2,5 s bez pohybu myši → kapsle zmizí a rozmazání mizí s nimi bez bliknutí.
+- [x] 2,5 s bez pohybu myši → kapsle zmizí a rozmazání mizí s nimi (UI snímky; krátké bliknutí nezměřeno).
 - [ ] `uhd-2160p.mkv` na celé obrazovce, `I` → `2`: součet časů `kaleido-glass blur H/V/composite`
   (cíl ≤ 1 ms) na RTX 5060 Ti a na integrované AMD (Nastavení → Grafika → Úspora energie).
 
 ## 6 · Mini přehrávač
-- [ ] ▣ → video se zmenší do rohu, kolem neprůhledná „stránka“; ⤢ zpět.
+- [x] ▣ → video se zmenší do rohu, kolem neprůhledná „stránka“; ⤢ zpět.
 - [ ] Záznam 60 fps (Win+Alt+R): hrana videa zaostává za rámečkem nejvýš o 1 snímek?
 - [ ] V mini režimu funguje ▶/❚❚ a dvojklik.
 
 ## 7 · Náhledy
 - [ ] Najetí na časovou osu → do 300 ms náhled ve skleněné bublině, mění se s pohybem.
-- [ ] Žádné konzolové okno; ve Správci úloh běží `kaleido-mpv.exe`.
+- [x] Žádné konzolové okno; běží `kaleido-mpv.exe` (UI a doplňková kontrola procesů).
 - [ ] HDR video → náhledy nejsou šedé ani přepálené.
-- [ ] Po zavření aplikace nezůstane `kaleido-mpv.exe`.
+- [x] Syntetické HDR10 pruhy → po opravě náhledu zůstává červená červená a modrá modrá,
+  náhled není vybledlý (nainstalovaný build, Computer Use 2026-10-16).
+- [x] Po zavření aplikace nezůstane `kaleido-mpv.exe`.
 
 ## 8 · Snímek obrazovky
-- [ ] S viditelným ovládáním `s` a `S` → soubory na ploše. Ve snímku z `s` nesmí být rozmazané
+- [x] S viditelným ovládáním `s` a `S` → soubory na ploše. Ve snímku z `s` nesmí být rozmazané
   obdélníky. Obsahuje je snímek z `S`?
 
 ## Měření pro Task 13 (lze až po ruční kontrole)
