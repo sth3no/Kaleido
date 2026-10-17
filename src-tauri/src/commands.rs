@@ -11,7 +11,7 @@ use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
-use crate::settings::{self, AudioDevice, Settings, SettingsError, SharedSettings};
+use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 use crate::thumbs::{self, ThumbStore};
@@ -226,6 +226,54 @@ pub async fn settings_audio_devices(app: AppHandle) -> Vec<AudioDevice> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// Every key that is bound, with what it does and where that comes from: Kaleido, the user,
+/// mpv or a plugin (spec 8.10). Waits for mpv, hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_bindings(app: AppHandle) -> Vec<Binding> {
+    on_blocking_thread(move || {
+        app.try_state::<Engine>()
+            .map(|engine| settings::bindings(&engine))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Moves the binding of `key` to `new_key` and silences `key`, in input.conf and in the player.
+/// The UI sends keys only; the command is the one the key has. Waits for mpv, hence
+/// asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_rebind(
+    app: AppHandle,
+    key: String,
+    new_key: String,
+) -> Result<(), SettingsError> {
+    on_blocking_thread(move || {
+        let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
+        else {
+            return Err(SettingsError::Unavailable);
+        };
+        settings::rebind(&engine, &paths.config_dir, &key, &new_key)
+    })
+    .await
+    .unwrap_or(Err(SettingsError::Unavailable))
+}
+
+/// Puts `key` back to Kaleido's default for it, or to the one of mpv or a plugin. Waits for mpv,
+/// hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_reset_binding(app: AppHandle, key: String) -> Result<(), SettingsError> {
+    on_blocking_thread(move || {
+        let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
+        else {
+            return Err(SettingsError::Unavailable);
+        };
+        settings::reset_binding(&engine, &paths.config_dir, &key)
+    })
+    .await
+    .unwrap_or(Err(SettingsError::Unavailable))
 }
 
 /// The files in the shaders folder that `glsl-shaders` may name. Lists one local folder.

@@ -74,6 +74,9 @@ pub fn run() {
             commands::settings_get_mpv,
             commands::settings_set_mpv,
             commands::settings_audio_devices,
+            commands::settings_bindings,
+            commands::settings_rebind,
+            commands::settings_reset_binding,
             commands::settings_list_shaders,
             commands::system_fonts,
         ])

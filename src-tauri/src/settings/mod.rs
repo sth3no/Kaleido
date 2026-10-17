@@ -1,15 +1,17 @@
-//! Settings (spec 8.10): Kaleido's own in `settings.json` ([`store`]) and the mpv options the
-//! settings pages manage in mpv.conf ([`mpv_keys`], written gently by [`mpv_conf`]). This module
-//! wires them up for the commands: reading mpv options and setting them in mpv.conf and live,
-//! the lists the values are checked against (audio devices, fonts, shaders), and the atomic
-//! write both files go through.
+//! Settings (spec 8.10): Kaleido's own in `settings.json` ([`store`]), the mpv options the
+//! settings pages manage in mpv.conf ([`mpv_keys`], written gently by [`mpv_conf`]) and the
+//! shortcuts in input.conf ([`input_conf`]). This module wires them up for the commands: reading
+//! mpv options and setting them in mpv.conf and live, listing and changing the key bindings, the
+//! lists the values are checked against (audio devices, fonts, shaders), and the atomic write
+//! the files go through.
 
 pub mod fonts;
+pub mod input_conf;
 pub mod mpv_conf;
 pub mod mpv_keys;
 pub mod store;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -21,8 +23,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::glass::GlassController;
+use crate::player::options::DEFAULT_INPUT_CONF;
 use crate::player::{Engine, LoadMode, Request};
 pub use fonts::system_fonts;
+pub use input_conf::{Binding, BindingSource, InputConf};
 pub use mpv_conf::MpvConf;
 pub use mpv_keys::{MPV_SETTINGS, MpvSetting, ValidationCtx, ValueKind, validate_mpv};
 pub use store::{
@@ -33,6 +37,8 @@ pub use store::{
 pub const SETTINGS_FILE: &str = "settings.json";
 /// mpv's config file in `config_dir`.
 pub const MPV_CONF: &str = "mpv.conf";
+/// mpv's key bindings in `config_dir`, Kaleido's shortcuts too (spec 5.3).
+pub const INPUT_CONF: &str = "input.conf";
 /// The user's shaders in `config_dir` (`~~/shaders/` to mpv).
 const SHADERS_DIR: &str = "shaders";
 
@@ -386,6 +392,128 @@ pub fn list_shaders(config_dir: &Path) -> Vec<String> {
     names
 }
 
+// ---------------------------------------------------------------------------------------------
+// Shortcuts
+
+/// One change of input.conf (and of the player's bindings with it) at a time, for the reasons
+/// of [`MPV_CONF_WRITES`].
+static INPUT_CONF_WRITES: Mutex<()> = Mutex::new(());
+
+fn input_conf_turn() -> MutexGuard<'static, ()> {
+    INPUT_CONF_WRITES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Applies `edit` to `config_dir/input.conf`, gently ([`InputConf`]) and atomically, and gives
+/// back what it returns. Nothing is written if `edit` fails or changes nothing. A missing file
+/// counts as Kaleido's default one, which is what the start puts there: a file of a line or two
+/// would take the other shortcuts away. A file that is not UTF-8 is left alone.
+fn rewrite_input_conf<T>(
+    config_dir: &Path,
+    edit: impl FnOnce(&mut InputConf) -> Result<T, SettingsError>,
+) -> Result<T, SettingsError> {
+    let path = config_dir.join(INPUT_CONF);
+    let text = match fs::read(&path) {
+        Ok(bytes) => String::from_utf8(bytes).map_err(|_| {
+            SettingsError::io("input.conf is not UTF-8 text; Kaleido leaves it alone")
+        })?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => DEFAULT_INPUT_CONF.to_owned(),
+        Err(error) => return Err(SettingsError::io(error)),
+    };
+    let mut conf = InputConf::parse(&text);
+    let result = edit(&mut conf)?;
+    let changed = conf.render();
+    if changed != text {
+        write_atomic(&path, changed.as_bytes()).map_err(SettingsError::io)?;
+    }
+    Ok(result)
+}
+
+/// mpv's `input-bindings`, all of them. Waits for mpv, so not on the main thread.
+fn raw_bindings(engine: &Engine) -> Result<Vec<input_conf::RawBinding>, SettingsError> {
+    // A node property: mpv gives it as JSON text.
+    let listed = engine
+        .call(|mpv| {
+            mpv.get_string("input-bindings")
+                .map_err(|error| error.to_string())
+        })
+        .and_then(|json| input_conf::parse_raw(&json).map_err(|error| error.to_string()));
+    listed.map_err(|error| {
+        tracing::warn!("cannot read mpv's input-bindings: {error}");
+        SettingsError::Unavailable
+    })
+}
+
+/// The commands of Kaleido's own input.conf, by key.
+fn kaleido_commands() -> HashMap<String, String> {
+    InputConf::parse(DEFAULT_INPUT_CONF).commands()
+}
+
+/// The bindings that are active, one for each key, with where each comes from (spec 8.10): the
+/// player's, so scripts' too. A key the user silenced is listed with the command `ignore`. Waits
+/// for mpv, so not on the main thread.
+pub fn bindings(engine: &Engine) -> Vec<Binding> {
+    raw_bindings(engine)
+        .map(|raw| input_conf::derive(&raw, &kaleido_commands()))
+        .unwrap_or_default()
+}
+
+/// Moves the command of the binding that is active for `key` to `new_key` and silences `key`:
+/// `new_key <command>` and `key ignore` go to input.conf (gently, atomically) and are bound in
+/// the running player. The command comes from the binding itself (see
+/// [`input_conf::move_binding`]); the UI never sends one. A `new_key` that is bound already
+/// is overridden: input.conf's last line of a key wins in mpv, and what it had before is then
+/// only shadowed (a default of mpv comes back if the line is taken away). On an error nothing
+/// changed. Waits for mpv, so not on the main thread.
+pub fn rebind(
+    engine: &Engine,
+    config_dir: &Path,
+    key: &str,
+    new_key: &str,
+) -> Result<(), SettingsError> {
+    input_conf::check_key("key", key)?;
+    input_conf::check_key("newKey", new_key)?;
+    // The player is asked inside the turn: a change made just before is queued ahead of the
+    // question, so the command moved is the one the key has now.
+    let _turn = input_conf_turn();
+    let current = input_conf::derive(&raw_bindings(engine)?, &kaleido_commands());
+    let moved = rewrite_input_conf(config_dir, |conf| {
+        input_conf::move_binding(conf, &current, key, new_key)
+    })?;
+    if let Some(command) = moved {
+        engine.command(&["keybind", new_key, &command]);
+        engine.command(&["keybind", key, "ignore"]);
+    }
+    Ok(())
+}
+
+/// Puts a key back to what it is without the user: with a line in Kaleido's default input.conf,
+/// that line (in input.conf and bound in the running player); without, the key's lines go from
+/// input.conf, so that the default of mpv or of a script under it is the key's again.
+///
+/// mpv cannot unbind a key at run time. The player is given the command of the default under the
+/// user's binding (it is listed as that default again). A key that has none, a binding the user
+/// made up, keeps it in the running player until the next start; input.conf is already right.
+/// Waits for mpv, so not on the main thread.
+pub fn reset_binding(engine: &Engine, config_dir: &Path, key: &str) -> Result<(), SettingsError> {
+    input_conf::check_key("key", key)?;
+    let default = input_conf::kaleido_default(key);
+    let _turn = input_conf_turn();
+    let fallback = match default {
+        Some(_) => None,
+        // Read before the file changes. Without it the key is left bound until the next start.
+        None => raw_bindings(engine)
+            .ok()
+            .and_then(|raw| input_conf::fallback_command(&raw, key)),
+    };
+    rewrite_input_conf(config_dir, |conf| conf.reset(key, default.as_deref()))?;
+    if let Some(command) = default.or(fallback) {
+        engine.command(&["keybind", key, &command]);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -452,6 +580,46 @@ mod tests {
         ));
         assert_eq!(fs::read(&path).unwrap(), latin1);
         assert_eq!(files(tmp.path()), [MPV_CONF]);
+    }
+
+    #[test]
+    fn input_conf_is_written_gently_or_not_at_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(INPUT_CONF);
+        let parsed = || InputConf::parse(&fs::read_to_string(&path).unwrap());
+
+        // Nothing to take away from a missing file: no file appears.
+        rewrite_input_conf(tmp.path(), |conf| conf.reset("Ctrl+F11", None)).unwrap();
+        assert!(!path.exists());
+
+        // A missing file is Kaleido's default one, so that the other shortcuts stay.
+        rewrite_input_conf(tmp.path(), |conf| conf.bind("Ctrl+F11", "show-text hi")).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .starts_with(DEFAULT_INPUT_CONF)
+        );
+        assert_eq!(parsed().get("Ctrl+F11").as_deref(), Some("show-text hi"));
+        assert_eq!(parsed().get("s"), input_conf::kaleido_default("s"));
+
+        // A refused edit and one that changes nothing leave the file as it was.
+        let before = fs::read(&path).unwrap();
+        assert!(matches!(
+            rewrite_input_conf(tmp.path(), |conf| conf.bind("a b", "x")),
+            Err(SettingsError::Invalid { .. })
+        ));
+        rewrite_input_conf(tmp.path(), |conf| conf.bind("Ctrl+F11", "show-text hi")).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before);
+
+        // Not UTF-8: refused, and the file stays as it was.
+        let latin1 = b"# m\xe9n\ns shot\n".to_vec();
+        fs::write(&path, &latin1).unwrap();
+        assert!(matches!(
+            rewrite_input_conf(tmp.path(), |conf| conf.bind("n", "x")),
+            Err(SettingsError::Io { .. })
+        ));
+        assert_eq!(fs::read(&path).unwrap(), latin1);
+        assert_eq!(files(tmp.path()), [INPUT_CONF]);
     }
 
     #[test]
