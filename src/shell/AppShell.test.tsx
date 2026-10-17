@@ -118,3 +118,33 @@ test('unmounting the shell leaves the page opaque again', () => {
   unmount();
   expect(document.documentElement.hasAttribute('data-video')).toBe(false);
 });
+
+test('the islands of the shell fade and are out of reach while the player hides its controls', () => {
+  usePlayerStore.setState({ loaded: true, props: PLAYING });
+  shell();
+  const islands = screen.getByRole('button', { name: 'Close' }).closest('[data-hidden]');
+  expect(islands?.getAttribute('data-hidden')).toBe('false');
+  expect(islands?.hasAttribute('inert')).toBe(false);
+
+  // The player's autohide (player/useAutohide.ts) tells the shell through the store.
+  act(() => {
+    useUiStore.getState().setControlsHidden(true);
+  });
+  expect(islands?.getAttribute('data-hidden')).toBe('true');
+  expect(islands?.hasAttribute('inert')).toBe(true);
+
+  act(() => {
+    useUiStore.getState().setControlsHidden(false);
+  });
+  expect(islands?.getAttribute('data-hidden')).toBe('false');
+  expect(islands?.hasAttribute('inert')).toBe(false);
+});
+
+test('the islands of the shell are marked, so that the autohide knows the pointer is on one', () => {
+  usePlayerStore.setState({ loaded: true, props: PLAYING });
+  shell();
+  const marked = (name: string) =>
+    screen.getByRole('button', { name }).closest('[data-island]') !== null;
+  expect(marked('Menu')).toBe(true);
+  expect(marked('Close')).toBe(true);
+});

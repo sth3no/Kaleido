@@ -1,0 +1,56 @@
+/* A round icon button on the glass of the controls (ControlButton.tsx). */
+.button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--k-color-hover);
+}
+
+/* A panel that the button opened, or a switch that is on. */
+.button[aria-expanded='true'],
+.button[aria-pressed='true'] {
+  background: var(--k-color-selected);
+}
+
+.button:disabled {
+  opacity: 0.4;
+}
+
+.large {
+  width: 42px;
+  height: 42px;
+}
+
+.large svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* High contrast: no tint to show it by, so an edge. */
+@media (forced-colors: active) {
+  .button[aria-expanded='true'],
+  .button[aria-pressed='true'] {
+    border: 1px solid Highlight;
+  }
+
+  .button:disabled {
+    opacity: 1;
+    color: GrayText;
+  }
+}

@@ -87,3 +87,68 @@ s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten hraje jen s 
   nízkém okně (640×360) se obsah dá posunout a nahoře se nic neořízne.
 - [ ] Známé omezení M1: Ctrl+V bez odkazu ve schránce **při přehrávání** pole neukáže (pole je jen na
   úvodní obrazovce). Zapsat sem, jestli to vadí.
+
+### Spodní ostrůvek, časová osa, autohide a fullscreen (Task 18)
+
+Potřeba: krátký 1080p klip, film delší než hodina (nebo klip, který hlásí délku přes hodinu), video
+s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm run tauri dev`.
+
+- [ ] **1080p klip:** spodní ostrůvek je dole uprostřed (nejvýš 960 px široký), nahoře čas, lišta
+  a délka, dole hlasitost, předchozí / přehrát / další a vpravo Titulky, Playlist, Celá obrazovka.
+  Čas a délka mají číslice stejné šířky (neskáčou), u filmu přes hodinu jsou oba s hodinami
+  (`0:05:12` a `1:42:00`). Při objevení se ostrůvek vysune zdola a prolne (s vypnutými animacemi
+  ve Windows se jen prolne). Rozmazání pod ním sedí přesně na jeho tvar, i při měřítku UI 90 % a
+  150 % a v okně 640×360 (nic se nepřekrývá ani neřeže).
+- [ ] **Náhled na časové ose:** najetí na lištu ukáže nad ní bublinu s náhledem snímku a časem pod
+  ukazatelem; náhled jde za myší plynule a bez zpoždění, před prvním náhledem je v bublině jen
+  čas. U levého i pravého okraje okna bublina okno nepřesáhne. Rozmazání pod bublinou sleduje
+  bublinu (nezůstane na starém místě). Odjetí bublinu schová a po novém najetí se neukáže starý
+  snímek; po přepnutí na další video v playlistu také ne. Rychlé jezdění myší po liště UI ani mpv
+  nezahltí (požadavky na náhled jdou nejvýš asi 33× za sekundu).
+- [ ] **Tažení za lištu:** video se při tažení přetáčí (rychle, po klíčových snímcích) a po
+  puštění skočí přesně na místo; čas a lišta při tažení ukazují polohu myši a po puštění
+  neskočí zpět; tažení pokračuje, i když myš vyjede z lišty. Prostý klik na lištu přeskočí na
+  místo. Po kliku nebo tažení mezerník **pozastaví video** (fokus se vrátil do mpv a lišta se
+  nepřepnula).
+- [ ] **Klávesnice na liště:** Tab ji najde (viditelný fokus); šipky ←/→ posunou o 5 s (ne o 10: mpv
+  je nedostane podruhé), Home na začátek, End na konec; Ctrl+←/→ a Shift+←/→ dělají to, co v mpv.
+  Čtečka obrazovky čte „Časová osa“ a polohu jako „0:12 z 1:42:00“, jednou za sekundu.
+- [ ] **Kapitoly:** ve videu s kapitolami jsou na liště značky v místech kapitol; u videa bez nich
+  nejsou žádné.
+- [ ] **Hlasitost:** tlačítko ztlumí a zase vrátí zvuk; posuvník jde od 0 do 130 (nebo do
+  `volume-max` z `mpv.conf`) a má značku na 100 %; při tažení se palec nevrací zpět a hlasitost
+  zní průběžně; šipky na posuvníku mění hlasitost a mpv je nedostane (video se nepřetáčí);
+  kolečko na videu hlasitost změní a posuvník ji ukáže.
+- [ ] **Předchozí / další:** u jednoho videa jsou zašedlé, u složky s videi fungují a přepnou
+  video (na prvním a posledním mpv nic neudělá).
+- [ ] **Titulky nad ostrůvkem:** u videa s titulky leží titulky nad spodním ostrůvkem a nedotýkají se
+  ho; po skrytí ostrůvku sjedou dolů a po jeho návratu zase nahoru; stejně po změně velikosti okna
+  a ve fullscreenu. (Tlačítka Titulky a Playlist zatím jen nastaví, který panel je otevřený:
+  panely přijdou s Task 20; tlačítko Titulky má `aria-expanded`.)
+- [ ] **Autohide:** při přehrávání po 2,5 s bez pohybu myši zmizí spodní ostrůvek, oba horní ostrůvky
+  a kurzor; pohyb myši i kterákoli klávesa (a kolečko, klik) je hned vrátí. V pauze, při načítání
+  a při otevřené postranní liště ☰ zůstávají. Zůstávají i tehdy, když myš v klidu leží nad
+  ostrůvkem (třeba nad tlačítkem pauzy) a když je v ostrůvku fokus z klávesnice (Tab); po
+  odjetí myši, nebo po odchodu fokusu, zmizí za dalších 2,5 s. Skrytý ostrůvek nepřetahuje okno
+  (tažení za místo, kde byl horní ostrůvek, okno nepřesune) a klik na místo, kde byl, jde do
+  videa (pozastaví ho).
+- [ ] **⬜ a autohide:** najet na ⬜ (maximalizovat), nehýbat 5 s a nabídka rozložení (Snap Layouts)
+  zůstane, ostrůvky nezmizí. Odjet z ⬜ do videa: po 2,5 s zmizí. Zapsat sem, jak se chová odjetí z
+  okna **přes** pravý horní ostrůvek ven: správně zmizí 2,5 s po opuštění okna; v nejhorším
+  zůstanou, dokud se myš nevrátí (WebView2 hlásí odchod myši se souřadnicí, podle které stránka
+  pozná, jestli myš opustila okno nebo je nad oknem Windows; kdyby to nebylo spolehlivé, je to
+  jediné místo k úpravě: `leftWindow` v `src/player/useAutohide.ts`).
+- [ ] **Spotřeba se skrytým ovládáním:** v DevTools (F12 → Rendering → Paint flashing) nic nebliká a
+  procesy WebView2 ve Správci úloh mají kolem 0 % CPU, jakmile ostrůvky zmizí (spec 13);
+  v konzoli nejsou chyby.
+- [ ] **Fullscreen tlačítkem:** okno přejde na celou obrazovku, během přepnutí kryje okno černá
+  clona (žádný roztažený ani napůl vykreslený snímek) a do půl vteřiny zmizí; ikona i popisek
+  tlačítka se změní („Zrušit celou obrazovku“); druhý klik vrátí okno. Totéž dvojklikem na video
+  a klávesou `f`. Při rychlém dvojitém přepnutí nezůstane clona ani nesprávný stav. Okno se
+  nepřepíná dvakrát (UI nevolá okno Tauri, přepíná ho Rust podle mpv). Zapsat sem, jestli je při
+  přepnutí vidět záblesk dřív, než se clona objeví (UI se o změně dozví až od mpv, Rust okno
+  přepíná o chvilku dřív).
+- [ ] **Fullscreen z maximalizovaného okna** (a jinak velikostně shodný přechod): clona skončí
+  nejpozději za 0,5 s a obraz je v pořádku.
+- [ ] **Snížit průhlednost** a **vysoký kontrast** (Windows): ostrůvek je neprůhledný / v systémových
+  barvách, lišta, posuvník a značky jsou vidět, tlačítka mají viditelný fokus.

@@ -42,7 +42,7 @@ export default function TitleIsland({ menuRef, sidebarId, sidebarOpen, onMenu }:
   const className = SNAP_LAYOUTS ? `${look} ${styles.caption}` : look;
 
   return (
-    <div ref={island} className={className} data-tauri-drag-region>
+    <div ref={island} className={className} data-tauri-drag-region data-island>
       <button
         ref={menuRef}
         type="button"

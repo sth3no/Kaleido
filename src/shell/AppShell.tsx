@@ -7,7 +7,9 @@
  *    through to the video: the player page gives its controls `pointer-events: auto`.
  * 3. On a page (no video): a strip along the top that moves the window, as a title bar would.
  *    The top `--shell-titlebar-height` of a docked page is that strip's: no controls there.
- * 4. The islands: the title capsule (over the video only) and the window buttons.
+ * 4. The islands: the title capsule (over the video only) and the window buttons. They fade with
+ *    the player's own islands when the video has played 2.5 s without movement
+ *    (`uiStore.controlsHidden`, set by `useAutohide`).
  * 5. The sidebar, docked beside the page or over the video.
  *
  * Which page: the settings while the user is there; the player while a file is loaded or loading
@@ -72,6 +74,7 @@ export default function AppShell({ home, player, settings }: AppShellProps) {
   const view = usePlayerStore((state) => selectView(page, state));
   const loaded = usePlayerStore((state) => state.loaded);
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
+  const controlsHidden = useUiStore((state) => state.controlsHidden);
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
   const [openedBy, setOpenedBy] = useState<SidebarOpener>('pointer');
   const sidebarId = useId();
@@ -117,7 +120,8 @@ export default function AppShell({ home, player, settings }: AppShellProps) {
         {content}
       </main>
       {!overVideo && <div className={dragStrip} data-tauri-drag-region />}
-      <div className={styles.islands}>
+      {/* Hidden, they are out of the tab order and of the screen reader's reach as well. */}
+      <div className={styles.islands} data-hidden={controlsHidden} inert={controlsHidden}>
         {overVideo && (
           <TitleIsland
             menuRef={menuButton}

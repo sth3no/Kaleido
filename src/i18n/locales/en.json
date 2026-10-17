@@ -39,7 +39,20 @@
   },
   "player": {
     "play": "Play",
-    "pause": "Pause"
+    "pause": "Pause",
+    "controls": "Playback controls",
+    "previous": "Previous",
+    "next": "Next",
+    "mute": "Mute",
+    "volume": "Volume",
+    "volumeValue": "{{percent}}%",
+    "subtitles": "Subtitles",
+    "fullscreen": "Fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "seek": {
+      "label": "Seek",
+      "value": "{{position}} of {{duration}}"
+    }
   },
   "panels": {
     "playlist": "Playlist",

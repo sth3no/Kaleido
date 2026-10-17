@@ -39,7 +39,20 @@
   },
   "player": {
     "play": "Přehrát",
-    "pause": "Pozastavit"
+    "pause": "Pozastavit",
+    "controls": "Ovládání přehrávání",
+    "previous": "Předchozí",
+    "next": "Další",
+    "mute": "Ztlumit",
+    "volume": "Hlasitost",
+    "volumeValue": "{{percent}}\u00a0%",
+    "subtitles": "Titulky",
+    "fullscreen": "Celá obrazovka",
+    "exitFullscreen": "Zrušit celou obrazovku",
+    "seek": {
+      "label": "Časová osa",
+      "value": "{{position}} z {{duration}}"
+    }
   },
   "panels": {
     "playlist": "Seznam k přehrání",

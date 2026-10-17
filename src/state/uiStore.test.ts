@@ -14,6 +14,7 @@ test('starts on the player with the sidebar and the panels closed, and the glass
     sidebarOpen: false,
     panel: null,
     quickTab: 'subtitles',
+    controlsHidden: false,
     glass: { enabled: true, reason: null },
   });
 });
@@ -23,12 +24,14 @@ test('the setters change one thing each', () => {
   store.getState().setSidebarOpen(true);
   store.getState().setPanel('quick-settings');
   store.getState().setQuickTab('audio');
+  store.getState().setControlsHidden(true);
   store.getState().setGlass({ enabled: false, reason: 'gpuFailure' });
   expect(store.getState()).toMatchObject({
     page: 'settings',
     sidebarOpen: true,
     panel: 'quick-settings',
     quickTab: 'audio',
+    controlsHidden: true,
     glass: { enabled: false, reason: 'gpuFailure' },
   });
   store.getState().setPanel(null);

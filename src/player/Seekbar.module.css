@@ -1,0 +1,105 @@
+/*
+ * The timeline (Seekbar.tsx; key-screens-v2.html, screen 2): time, bar, length. The bar is taller
+ * than what is drawn, so that it is easy to hit; `--progress` (0 to 1) is set by script.
+ */
+.seekbar {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-m);
+}
+
+.time {
+  flex: none;
+  min-width: 4ch;
+  font-size: var(--k-font-size-s);
+  white-space: nowrap;
+  opacity: 0.9;
+}
+
+.length {
+  text-align: end;
+}
+
+/* What the pointer finds: 20 px high; the rail is drawn in the middle of it. */
+.track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.track[aria-disabled='true'] {
+  cursor: default;
+}
+
+.rail {
+  position: relative;
+  width: 100%;
+  height: 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--k-color-on-glass) 25%, transparent);
+}
+
+.fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--progress, 0) * 100%);
+  border-radius: inherit;
+  background: var(--k-accent-gradient);
+}
+
+/* A chapter starts here: a small step in the rail. */
+.mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--k-color-on-glass);
+  opacity: 0.7;
+}
+
+.knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--progress, 0) * 100%);
+  width: 14px;
+  height: 14px;
+  margin: -7px;
+  border-radius: 50%;
+  background: var(--k-color-on-glass);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--k-accent-solid) 35%, transparent);
+  pointer-events: none;
+}
+
+.track[aria-disabled='true'] .knob {
+  display: none;
+}
+
+/* High contrast: the system's colours, and an edge on what has none of its own. */
+@media (forced-colors: active) {
+  .rail {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .fill {
+    background: Highlight;
+  }
+
+  .mark {
+    background: CanvasText;
+    opacity: 1;
+  }
+
+  .knob {
+    box-shadow: none;
+    background: ButtonText;
+    forced-color-adjust: none;
+  }
+}

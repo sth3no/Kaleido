@@ -1,0 +1,63 @@
+/*
+ * The island at the bottom (ControlsIsland.tsx; key-screens-v2.html, screen 2). It comes after
+ * theme/glass.module.css, so its radius and padding win over the glass' own. It is at most 960 px
+ * wide and in the middle of the window.
+ *
+ * It slides up and fades in when it appears, and slides down and fades out when it is hidden
+ * (spec 8.6); with reduced motion only the fade is left (theme/global.css). Hidden, it takes no
+ * pointer. Its glass is out of the shader's list at no opacity (glass/regions.ts), and the
+ * element itself goes after the fade (PlayerPage.tsx).
+ */
+.island {
+  position: absolute;
+  bottom: var(--k-space-l);
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  width: min(960px, calc(100% - 2 * var(--k-space-l)));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-m) var(--k-space-xl);
+  border-radius: calc(var(--k-radius-l) * 1.2);
+  pointer-events: auto;
+  transition:
+    opacity var(--k-motion-base) ease,
+    translate var(--k-motion-base) var(--k-motion-spring);
+}
+
+/* Where it comes from when it appears. */
+@starting-style {
+  .island {
+    opacity: 0;
+    translate: 0 var(--k-space-m);
+  }
+}
+
+.island[data-hidden='true'] {
+  opacity: 0;
+  translate: 0 var(--k-space-m);
+  pointer-events: none;
+}
+
+/* Volume on the left, the transport in the middle of the island, the buttons on the right. */
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--k-space-m);
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--k-space-xs);
+}

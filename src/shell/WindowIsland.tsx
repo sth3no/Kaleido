@@ -87,7 +87,7 @@ export default function WindowIsland({ overVideo }: WindowIslandProps) {
   const maximizeLabel = maximized ? t('shell.window.restore') : t('shell.window.maximize');
 
   return (
-    <div ref={island} className={className} data-tauri-drag-region>
+    <div ref={island} className={className} data-tauri-drag-region data-island>
       <button
         type="button"
         className={styles.button}

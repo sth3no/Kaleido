@@ -21,6 +21,23 @@ export const FOLDER =
 export const LINK =
   'M10.6 13.4a1 1 0 0 0 1.4 1.4l4.6-4.6a3 3 0 0 0-4.2-4.2l-2 2 1.4 1.4 2-2a1 1 0 0 1 1.4 1.4zm2.8-2.8a1 1 0 0 0-1.4-1.4l-4.6 4.6a3 3 0 0 0 4.2 4.2l2-2-1.4-1.4-2 2a1 1 0 0 1-1.4-1.4z';
 
+// The player's controls (key-screens-v2.html, screen 2).
+export const PLAY =
+  'M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z';
+export const PAUSE = 'M7 5h3.5v14H7zm6.5 0H17v14h-3.5z';
+export const PREVIOUS = 'M6 5h2v14H6zM9.5 12l9 6.5V5.5z';
+export const NEXT = 'M16 5h2v14h-2zM5.5 5.5v13l9-6.5z';
+export const VOLUME =
+  'M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z';
+/** The speaker with a cross in place of the waves. */
+export const MUTED = 'M4 9v6h4l5 4V5L8 9H4zm11.4-.5 2.8 2.8L21 8.5l.7.7-2.8 2.8 2.8 2.8-.7.7-2.8-2.8-2.8 2.8-.7-.7 2.8-2.8-2.8-2.8z';
+export const SUBTITLES =
+  'M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1z';
+export const PLAYLIST = 'M3 6h13v2H3zm0 5h13v2H3zm0 5h9v2H3zm15-2v-4l4 3z';
+export const FULLSCREEN = 'M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z';
+export const EXIT_FULLSCREEN =
+  'M8 4h2v6H4V8h4zm6 0h2v4h4v2h-6zM4 14h6v6H8v-4H4zm10 0h6v2h-4v4h-2z';
+
 const VIEW_BOX = '0 0 24 24';
 
 export default function Icon({ path }: { path: string }) {

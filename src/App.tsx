@@ -1,6 +1,7 @@
 import styles from './App.module.css';
 import HomeScreen from './home/HomeScreen';
 import { useDrop } from './home/useDrop';
+import PlayerPage from './player/PlayerPage';
 import AppShell from './shell/AppShell';
 
 /**
@@ -12,7 +13,7 @@ export default function App() {
   const dragging = useDrop();
   return (
     <div className={styles.root}>
-      <AppShell home={<HomeScreen dragging={dragging} />} player={null} settings={null} />
+      <AppShell home={<HomeScreen dragging={dragging} />} player={<PlayerPage />} settings={null} />
     </div>
   );
 }

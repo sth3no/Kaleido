@@ -62,6 +62,22 @@
 
 .islands {
   z-index: 3;
+  transition: opacity var(--k-motion-base) ease;
+}
+
+/*
+ * The video plays and nothing has moved for 2.5 s (player/useAutohide.ts): the islands fade. What
+ * is in them takes no pointer and moves no window then, and their glass is left out of the shader's
+ * list (an island at no opacity has no region, glass/regions.ts).
+ */
+.islands[data-hidden='true'] {
+  opacity: 0;
+}
+
+.islands[data-hidden='true'] * {
+  pointer-events: none;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 
 .sidebar {

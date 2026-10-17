@@ -1,0 +1,92 @@
+/*
+ * The mute button and the volume slider (VolumeControl.tsx; key-screens-v2.html, screen 2). The
+ * slider is the browser's own, drawn as the seekbar is: `--fill` is how much of it is set (0 to 1),
+ * `--mark` where 100 % of the file's volume is (0 to 1), both set by script. The thumb's centre goes
+ * from half its width in to half its width short of the end, and the fill and the mark follow it.
+ */
+.volume {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+}
+
+.slider {
+  --thumb: 14px;
+  position: relative;
+  width: 96px;
+  height: 20px;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  /* The accent up to the thumb, the rest of the track faint. */
+  background:
+    var(--k-accent-gradient) left / calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fill, 0)) 100%
+      no-repeat,
+    color-mix(in srgb, var(--k-color-on-glass) 25%, transparent);
+}
+
+.input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  /* Half the difference of its height and the track's: centred on it. */
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-color-on-glass);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--k-accent-solid) 35%, transparent);
+}
+
+/* The keyboard's focus is shown around the whole slider, not around a thumb that moves. */
+.input:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+  border-radius: 4px;
+}
+
+/* 100 %: a tick on the track, where the thumb's centre is at that value. */
+.mark {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--mark, 1));
+  width: 2px;
+  height: 10px;
+  margin: -5px 0 0 -1px;
+  border-radius: 1px;
+  background: var(--k-color-on-glass);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+@media (forced-colors: active) {
+  .input::-webkit-slider-runnable-track {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+
+  .input::-webkit-slider-thumb {
+    background: ButtonText;
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+
+  .mark {
+    background: CanvasText;
+    opacity: 1;
+  }
+}

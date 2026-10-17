@@ -1,0 +1,35 @@
+/*
+ * The preview bubble above the seekbar (ThumbBubble.tsx; player-direction.html). It comes after
+ * theme/glass.module.css, so its radius and padding win over the glass' own. Its left edge is set
+ * by script (the middle of the bubble under the pointer, kept inside the window).
+ */
+.bubble {
+  position: absolute;
+  bottom: calc(100% + var(--k-space-m));
+  left: 0;
+  translate: -50% 0;
+  display: grid;
+  justify-items: center;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-s);
+  border-radius: var(--k-radius-m);
+  pointer-events: none;
+  opacity: 0;
+  /* Only a fade: the bubble follows the pointer, so a slide would lag behind it. */
+  transition: opacity var(--k-motion-fast) ease;
+}
+
+.bubble[data-shown='true'] {
+  opacity: 1;
+}
+
+.picture {
+  max-width: 100%;
+  border-radius: var(--k-radius-s);
+}
+
+.time {
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  white-space: nowrap;
+}

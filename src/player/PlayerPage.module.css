@@ -1,0 +1,19 @@
+/*
+ * The black curtain over the window while it switches to or from fullscreen (fullscreen.ts; spec
+ * 5.1). It is fixed to the window, and is in the body so that nothing of the shell is above it.
+ * It comes down at once (the window is about to change size under it) and goes with a short fade.
+ */
+.curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--k-motion-fast) ease;
+}
+
+.curtain[data-on='true'] {
+  opacity: 1;
+  transition: none;
+}

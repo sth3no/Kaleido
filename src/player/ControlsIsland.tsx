@@ -1,0 +1,163 @@
+/**
+ * The big island at the bottom (spec 8.4; key-screens-v2.html, screen 2): the timeline, and under
+ * it the volume, previous / play and pause / next, and the buttons for the subtitles, the playlist
+ * and fullscreen.
+ *
+ * - Previous and next work with a playlist; without one they are off.
+ * - The subtitles button opens quick settings on its Subtitles tab and the playlist button the
+ *   playlist; the panels are `panels/` (Task 20): here only `uiStore.panel` and `quickTab` are set.
+ * - Fullscreen is mpv's property: the button asks mpv, and Rust switches the window (the UI never
+ *   does), so a double click on the video and the key do the same.
+ * - It is glass over the video, so it is one of the regions the shader blurs, and the subtitles
+ *   are lifted above it while it is shown (`useSubMargin`).
+ * - `hidden` fades it out (the video plays and nothing moved, `useAutohide`); it is then out of the
+ *   tab order and of the screen reader's reach, and takes no pointer.
+ */
+
+import { useRef, type MouseEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { useGlassRegion } from '../glass/useGlassRegion';
+import { playerCommand } from '../ipc/commands';
+import type { PlayerCommand } from '../ipc/types';
+import {
+  selectPaused,
+  selectPlaylist,
+  usePlayerStore,
+} from '../state/playerStore';
+import { useUiStore, type Panel } from '../state/uiStore';
+import {
+  EXIT_FULLSCREEN,
+  FULLSCREEN,
+  NEXT,
+  PAUSE,
+  PLAY,
+  PLAYLIST,
+  PREVIOUS,
+  SUBTITLES,
+} from '../shell/Icon';
+import glass from '../theme/glass.module.css';
+import ControlButton from './ControlButton';
+import styles from './ControlsIsland.module.css';
+import Seekbar from './Seekbar';
+import { useSubMargin } from './subMargin';
+import VolumeControl from './VolumeControl';
+
+export interface ControlsIslandProps {
+  /** Faded out: nothing moved for 2.5 s while the video plays. */
+  hidden?: boolean;
+}
+
+const send = (cmd: PlayerCommand) => {
+  playerCommand(cmd).catch((error: unknown) => {
+    console.warn('player_command', cmd.type, error);
+  });
+};
+
+/** The context menu of the WebView is not for the controls. */
+const noContextMenu = (e: MouseEvent) => {
+  e.preventDefault();
+};
+
+export default function ControlsIsland({ hidden = false }: ControlsIslandProps) {
+  const { t } = useTranslation();
+  const island = useRef<HTMLDivElement>(null);
+  const paused = usePlayerStore((state) => selectPaused(state.props));
+  // One entry is no list to go through.
+  const hasPlaylist = usePlayerStore((state) => selectPlaylist(state.props).length > 1);
+  const fullscreen = usePlayerStore((state) => state.props['fullscreen'] === true);
+  const panel = useUiStore((state) => state.panel);
+  const quickTab = useUiStore((state) => state.quickTab);
+  const setPanel = useUiStore((state) => state.setPanel);
+  const setQuickTab = useUiStore((state) => state.setQuickTab);
+  useGlassRegion(island);
+  useSubMargin(island, hidden);
+
+  const subtitlesOpen = panel === 'quick-settings' && quickTab === 'subtitles';
+  const playlistOpen = panel === 'playlist';
+
+  const toggleSubtitles = () => {
+    if (subtitlesOpen) {
+      setPanel(null);
+      return;
+    }
+    setQuickTab('subtitles');
+    setPanel('quick-settings');
+  };
+  const togglePlaylist = () => {
+    const open: Panel | null = playlistOpen ? null : 'playlist';
+    setPanel(open);
+  };
+  // The commands are here and not in the markup, which has no text of its own to write.
+  const previous = () => {
+    send({ type: 'playlistPrev' });
+  };
+  const togglePause = () => {
+    send({ type: 'togglePause' });
+  };
+  const next = () => {
+    send({ type: 'playlistNext' });
+  };
+  const toggleFullscreen = () => {
+    send({ type: 'setFullscreen', on: !fullscreen });
+  };
+
+  return (
+    <div
+      ref={island}
+      className={`${glass.glass} ${styles.island}`}
+      role="group"
+      aria-label={t('player.controls')}
+      data-island
+      data-hidden={hidden}
+      inert={hidden}
+      onContextMenu={noContextMenu}
+    >
+      <Seekbar />
+      <div className={styles.row}>
+        <VolumeControl />
+        <div className={styles.transport}>
+          <ControlButton
+            label={t('player.previous')}
+            icon={PREVIOUS}
+            disabled={!hasPlaylist}
+            onClick={previous}
+          />
+          <ControlButton
+            label={paused ? t('player.play') : t('player.pause')}
+            icon={paused ? PLAY : PAUSE}
+            large
+            onClick={togglePause}
+          />
+          <ControlButton
+            label={t('player.next')}
+            icon={NEXT}
+            disabled={!hasPlaylist}
+            onClick={next}
+          />
+        </div>
+        <div className={styles.tools}>
+          <ControlButton
+            label={t('player.subtitles')}
+            icon={SUBTITLES}
+            popup
+            aria-expanded={subtitlesOpen}
+            onClick={toggleSubtitles}
+          />
+          <ControlButton
+            label={t('panels.playlist')}
+            icon={PLAYLIST}
+            popup
+            aria-expanded={playlistOpen}
+            onClick={togglePlaylist}
+          />
+          <ControlButton
+            label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
+            icon={fullscreen ? EXIT_FULLSCREEN : FULLSCREEN}
+            onClick={toggleFullscreen}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
