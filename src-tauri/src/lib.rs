@@ -1,5 +1,6 @@
 //! Kaleido: the Tauri shell around libmpv.
 
+pub mod commands;
 pub mod job;
 pub mod paths;
 pub mod player;
@@ -21,6 +22,10 @@ pub fn run() {
         eprintln!("Kaleido: child processes will not end with the app: {error}");
     }
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            commands::player_command,
+            commands::player_load
+        ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
             paths.ensure_dirs()?;

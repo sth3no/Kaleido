@@ -1,17 +1,21 @@
 //! The libmpv core behind the video (spec 4.2, 5.1): its threads, the options Kaleido enforces
 //! and the events it sends to the UI.
 
+pub mod command;
 pub mod engine;
+pub mod load;
 pub mod options;
 pub mod state;
 
+pub use command::{CommandError, PlayerCommand, to_mpv};
 pub use engine::{ENGINE_OBSERVE_BASE, Engine, EngineConfig, EventLoop, Request};
+pub use load::{LoadIssue, LoadMode, open_sources};
 pub use state::{EndReason, EventSink, LogLine, PlayerEvent, StateLoop, observe_all, snapshot};
 
 #[cfg(test)]
 pub(crate) mod testing {
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -76,6 +80,42 @@ pub(crate) mod testing {
 
         fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
             None
+        }
+    }
+
+    /// Keeps every event the event thread delivers.
+    #[derive(Clone, Default)]
+    pub struct Recorded(Arc<Mutex<Vec<Event>>>);
+
+    impl EventLoop for Recorded {
+        fn on_event(&mut self, _mpv: &Mpv, event: Event) {
+            self.0.lock().unwrap().push(event);
+        }
+
+        fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
+            None
+        }
+    }
+
+    impl Recorded {
+        pub fn events(&self) -> Vec<Event> {
+            self.0.lock().unwrap().clone()
+        }
+
+        /// Waits until `done` accepts the events so far; panics after `timeout`.
+        pub fn wait_until(&self, what: &str, timeout: Duration, done: impl Fn(&[Event]) -> bool) {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let events = self.events();
+                if done(&events) {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting until {what}: {events:#?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 }
