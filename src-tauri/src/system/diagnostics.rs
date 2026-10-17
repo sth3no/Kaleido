@@ -146,16 +146,24 @@ fn hardware_adapters() -> windows::core::Result<Vec<String>> {
 }
 
 /// The folders in `<config>\scripts`, by name. Single script files are not listed: plugins
-/// are folders.
+/// are folders. A folder that is a link (a junction or a symbolic link to a plugin kept
+/// elsewhere) counts, as mpv loads it: the type is read from where the link points, which
+/// `DirEntry::file_type` does not do.
 fn script_folders(config_dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(config_dir.join(SCRIPTS_DIR)) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect();
+    let mut names = Vec::new();
+    for entry in entries.flatten() {
+        if !fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir()) {
+            continue;
+        }
+        match entry.file_name().into_string() {
+            Ok(name) => names.push(name),
+            // Windows names are UTF-16 and may hold a lone surrogate; the text cannot show it.
+            Err(name) => tracing::warn!("a script folder is not in the diagnostics: {name:?}"),
+        }
+    }
     names.sort_unstable();
     names
 }
@@ -472,6 +480,55 @@ mod tests {
         assert!(licenses(dir).is_empty());
     }
 
+    /// A plugin kept elsewhere and linked into `scripts` is a plugin folder to mpv, but
+    /// `DirEntry::file_type` calls it a link. A junction needs no privilege to make.
+    #[test]
+    fn a_linked_plugin_folder_is_listed_and_a_single_file_is_not() {
+        use std::os::windows::process::CommandExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let scripts = tmp.path().join(SCRIPTS_DIR);
+        let kept_elsewhere = tmp.path().join("kept-elsewhere");
+        fs::create_dir_all(scripts.join("plain")).unwrap();
+        fs::create_dir(&kept_elsewhere).unwrap();
+        fs::write(scripts.join("single.lua"), "").unwrap();
+        let made = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/C mklink /J \"{}\" \"{}\"",
+                scripts.join("linked").display(),
+                kept_elsewhere.display()
+            ))
+            // CREATE_NO_WINDOW
+            .creation_flags(0x0800_0000)
+            .output()
+            .unwrap();
+        assert!(
+            made.status.success(),
+            "{}",
+            String::from_utf8_lossy(&made.stdout)
+        );
+
+        assert_eq!(script_folders(tmp.path()), ["linked", "plain"]);
+    }
+
+    /// A Windows name is UTF-16 and may hold a lone surrogate. Such a folder is left out (and
+    /// logged) instead of being listed wrongly or stopping the list.
+    #[test]
+    fn a_folder_name_that_is_not_unicode_is_left_out() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let scripts = tmp.path().join(SCRIPTS_DIR);
+        fs::create_dir_all(scripts.join("uosc")).unwrap();
+        // "a" and a lone surrogate.
+        let odd = OsString::from_wide(&[0x61, 0xD800]);
+        assert!(odd.to_str().is_none());
+        fs::create_dir(scripts.join(&odd)).unwrap();
+
+        assert_eq!(script_folders(tmp.path()), ["uosc"]);
+    }
+
     /// The lists in the repository are what the installation holds (`bundle.resources`).
     #[test]
     fn the_shipped_license_lists_read() {
@@ -482,7 +539,9 @@ mod tests {
                 .unwrap();
 
         let find = |name: &str| extra.iter().find(|entry| entry.name == name).unwrap();
-        assert!(find("libmpv").license.contains("GPL"));
+        // The build's FFmpeg flags are unknown, and GPL-2.0-or-later code may be passed on under
+        // GPLv3, so GPLv3+ is right either way (ruling R29).
+        assert_eq!(find("libmpv").license, "GPL-3.0-or-later");
         assert_eq!(find("thumbfast").license, "MPL-2.0");
         assert!(third_party.iter().any(|entry| entry.name == "tauri"));
         assert!(third_party.iter().any(|entry| entry.name == "react"));

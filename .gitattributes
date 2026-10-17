@@ -1,0 +1,4 @@
+# The license lists are generated with LF line ends (scripts/generate-licenses.ps1); keep them LF in
+# a checkout too, whatever core.autocrlf says, so that CI's `git diff --exit-code` is the same
+# everywhere.
+resources/licenses/*.json text eol=lf

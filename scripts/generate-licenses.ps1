@@ -8,8 +8,8 @@
   so a changed dependency shows up as a changed list. The same dependencies give the same bytes:
   sorted in code-unit order, one entry per line, no dates, no machine paths, LF line ends.
 
-  Needs: cargo-about 0.9.2 (`cargo install --locked --features cli cargo-about@0.9.2`), Node with
-  npm and the UI's packages installed (`npm ci`). Run from anywhere.
+  Needs: exactly cargo-about 0.9.2 (`cargo install --locked --features cli cargo-about@0.9.2`;
+  the script checks), Node with npm and the UI's packages installed (`npm ci`). Run from anywhere.
 #>
 param(
     [string]$Output = (Join-Path $PSScriptRoot '..\resources\licenses\third-party.json')
@@ -23,8 +23,16 @@ $LicenseChecker = 'license-checker-rseidelsohn@5.0.1'
 $Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $Output = [System.IO.Path]::GetFullPath($Output)
 
+# The version decides how a license is worded, so the committed list and CI's check need the
+# same one everywhere.
+$AboutVersion = '0.9.2'
+$AboutHelp = "cargo install --locked --features cli cargo-about@$AboutVersion"
 if (-not (Get-Command cargo-about -ErrorAction SilentlyContinue)) {
-    throw 'cargo-about is missing: cargo install --locked --features cli cargo-about@0.9.2'
+    throw "cargo-about is missing: $AboutHelp"
+}
+$AboutFound = (& cargo about --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $AboutFound -ne "cargo-about $AboutVersion") {
+    throw "cargo-about $AboutVersion is needed, but this is '$AboutFound': $AboutHelp"
 }
 
 # One JSON string. The values here are names, versions, SPDX expressions and URLs.

@@ -144,7 +144,9 @@ fn archive_name(at: SystemTime) -> String {
     )
 }
 
-/// The time in the name of an archive; `None` for any other name.
+/// The time in the name of an archive; `None` for any other name, and for a time before 1970,
+/// which no archive of ours has: Windows' `SystemTime` starts in 1601, and the conversion
+/// panics before that, so a hand-made `mpv-00010101-000000.log` must not get that far.
 fn archive_time(name: &str) -> Option<SystemTime> {
     let stamp = name.strip_prefix("mpv-")?.strip_suffix(".log")?;
     // Digits only, which also keeps `parse` from taking a sign, and ASCII, so that slicing at
@@ -168,7 +170,8 @@ fn archive_time(name: &str) -> Option<SystemTime> {
     )
     .ok()?;
     let time = Time::from_hms(two(9)?, two(11)?, two(13)?).ok()?;
-    Some(PrimitiveDateTime::new(date, time).assume_utc().into())
+    let at = PrimitiveDateTime::new(date, time).assume_utc();
+    (at >= OffsetDateTime::UNIX_EPOCH).then(|| at.into())
 }
 
 #[cfg(test)]
@@ -246,6 +249,11 @@ mod tests {
             "mpv-2020010-1200000.log",
             "mpv-+0200101-120000.log",
             "mpv-20201301-120000.log",
+            // Before 1970: not ours, and too early for Windows' SystemTime (1601), whose
+            // conversion would panic.
+            "mpv-00010101-000000.log",
+            "mpv-15000101-000000.log",
+            "mpv-19691231-235959.log",
             "mpv.log.old",
             // From the future: the clock was wrong once.
             "mpv-20271017-120000.log",
@@ -273,6 +281,14 @@ mod tests {
             let at = UNIX_EPOCH + Duration::from_secs(seconds);
             assert_eq!(archive_name(at), name);
             assert_eq!(archive_time(name), Some(at), "{name}");
+        }
+        // Before 1970 there is no archive, however well the name is formed.
+        for name in [
+            "mpv-00010101-000000.log",
+            "mpv-15000101-000000.log",
+            "mpv-19691231-235959.log",
+        ] {
+            assert_eq!(archive_time(name), None, "{name}");
         }
     }
 
