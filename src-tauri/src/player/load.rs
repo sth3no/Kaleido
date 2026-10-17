@@ -159,9 +159,11 @@ fn http_url(text: &str) -> Option<Url> {
 /// Whether `path` is a place on a disk: a drive path (also as `\\?\C:\`), or a share of a
 /// server (also as `\\?\UNC\`). A path with no prefix is one only once joined to a `cwd`.
 /// The rest is not: `\\.\` is the device namespace and `\\?\` reaches any object (`pipe`,
-/// `GLOBALROOT`), and the `pipe` and `mailslot` shares of a server are its pipes. Named pipes
-/// pass `is_file`, and opening one connects to whichever process serves it. `Path` reads the
-/// prefix the way Windows does, so `//./pipe/x` is no different from `\\.\pipe\x`.
+/// `GLOBALROOT`), and the `pipe`, `mailslot` and `IPC$` shares of a server are its pipes. Named
+/// pipes pass `is_file`, and opening one connects to whichever process serves it. So the check
+/// goes by name and comes before any call that touches the path (even `is_file` opens it).
+/// `Path` reads the prefix the way Windows does, so `//./pipe/x` is no different from
+/// `\\.\pipe\x`.
 fn is_disk_path(path: &Path) -> bool {
     let Some(Component::Prefix(prefix)) = path.components().next() else {
         return true;
@@ -169,7 +171,7 @@ fn is_disk_path(path: &Path) -> bool {
     let ordinary_share = |server: &OsStr, share: &OsStr| {
         let is = |name: &str| share.eq_ignore_ascii_case(name);
         // `//?/C:/x` is a verbatim path to Windows, and Rust sees a server named `?` in it.
-        server != "?" && server != "." && !is("pipe") && !is("mailslot")
+        server != "?" && server != "." && !is("pipe") && !is("mailslot") && !is("ipc$")
     };
     match prefix.kind() {
         Prefix::Disk(_) | Prefix::VerbatimDisk(_) => true,
@@ -288,18 +290,33 @@ pub fn open_sources(
 
 /// Runs the commands of an append, on the request thread (the engine's queue keeps it in order
 /// with everything sent before). Added to a player that plays, the files only join the
-/// playlist and `pause` stays as it is. An idle player starts the first one, and that has to
-/// play (spec 9.3) even if `pause` was left on by a file that ended or was stopped. Only
-/// there can it be known whether the player is idle.
+/// playlist, and `pause` and the position stay as they are. When nothing plays, the first
+/// added file has to start and play (spec 9.3), even if `pause` was left on by a file that
+/// ended or was stopped. Nothing plays when the player is idle, and also when the last file
+/// ended with keep-open: it stays loaded, paused at its end, so the player is not idle and
+/// `append-play` leaves it there. Only here can it be known which of these it is.
 fn append(mpv: &Mpv, commands: &[Vec<String>]) {
-    let idle = mpv.get_flag("idle-active").unwrap_or(false);
-    let resume = [vec!["set".to_owned(), "pause".to_owned(), "no".to_owned()]];
-    let resume = if idle { &resume[..] } else { &[] };
-    for args in commands.iter().chain(resume) {
+    let nothing_playing = mpv.get_flag("idle-active").unwrap_or(false)
+        || mpv.get_flag("eof-reached").unwrap_or(false);
+    // Where the first added entry will be.
+    let first_added = mpv.get_i64("playlist-count").unwrap_or(0);
+    for args in commands {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        if let Err(error) = mpv.command(&args) {
-            tracing::warn!("mpv request failed: {error}");
-        }
+        run(mpv, &args);
+    }
+    if !nothing_playing {
+        return;
+    }
+    // An idle player has started it by now (`append-play`); one at the end of a file has not.
+    if mpv.get_i64("playlist-pos").ok() != Some(first_added) {
+        run(mpv, &["playlist-play-index", &first_added.to_string()]);
+    }
+    run(mpv, &["set", "pause", "no"]);
+}
+
+fn run(mpv: &Mpv, args: &[&str]) {
+    if let Err(error) = mpv.command(args) {
+        tracing::warn!("mpv request failed: {error}");
     }
 }
 
@@ -406,6 +423,15 @@ mod tests {
             r"\\localhost\PIPE\srvsvc",
             r"\\localhost\mailslot\anything",
             r"\\?\UNC\localhost\pipe\srvsvc",
+            // The same pipes through the share every server has for them, which exists on this
+            // machine as `IPC$`.
+            r"\\localhost\IPC$\srvsvc",
+            r"\\localhost\IPC$\InitShutdown",
+            r"\\LOCALHOST\ipc$\srvsvc",
+            r"\\localhost\ipc$\x",
+            r"\\?\UNC\localhost\IPC$\srvsvc",
+            r"\\?\UNC\localhost\IPC$\x",
+            "//localhost/IPC$/x",
         ] {
             assert_eq!(parse(raw), Err(SourceError::Invalid), "{raw}");
         }
@@ -471,6 +497,10 @@ mod tests {
             r"\\server\pipe\x",
             r"\\server\MAILSLOT\x",
             r"\\?\UNC\server\pipe\x",
+            r"\\localhost\IPC$\srvsvc",
+            r"\\localhost\ipc$\x",
+            r"\\?\UNC\localhost\IPC$\x",
+            "//localhost/IPC$/x",
         ] {
             assert!(!is_disk_path(Path::new(path)), "{path}");
         }
@@ -817,6 +847,49 @@ mod tests {
         eventually(&engine, "the appended file is playing", |mpv| {
             !mpv.get_flag("pause").unwrap() && mpv.get_f64("time-pos").is_ok_and(|time| time > 0.1)
         });
+        // `append-play` started it; it was not started a second time.
+        let starts = |events: &Recorded| {
+            events
+                .events()
+                .iter()
+                .filter(|event| **event == Event::StartFile)
+                .count()
+        };
+        assert_eq!(starts(&events), 1, "{:#?}", events.events());
+    }
+
+    /// Spec 9.3 again, for an append: the last file has ended with keep-open, so the player is
+    /// not idle, it sits paused at the end of the file, and `append-play` alone leaves it there.
+    #[test]
+    fn appending_after_the_previous_one_ended_plays_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first.y4m");
+        mpv_ffi::testing::write_y4m(&first, 64, 36, 15).unwrap();
+        let second = tmp.path().join("second.y4m");
+        mpv_ffi::testing::write_y4m(&second, 64, 36, 300).unwrap();
+        let events = Recorded::default();
+        let engine = keep_open_engine(tmp.path(), events.clone());
+
+        let raw = [first.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Replace, tmp.path()).unwrap();
+        eventually(&engine, "the first file ended, paused", |mpv| {
+            mpv.get_flag("eof-reached").unwrap_or(false) && mpv.get_flag("pause").unwrap()
+        });
+        assert!(!engine.call(|mpv| mpv.get_flag("idle-active").unwrap()));
+
+        let raw = [second.to_string_lossy().into_owned()];
+        open_sources(&engine, &raw, LoadMode::Append, tmp.path()).unwrap();
+
+        let second = second.to_string_lossy().into_owned();
+        eventually(&engine, "the appended file is playing", move |mpv| {
+            mpv.get_string("path").is_ok_and(|path| path == second)
+                && !mpv.get_flag("pause").unwrap()
+                && !mpv.get_flag("eof-reached").unwrap_or(false)
+                && mpv.get_f64("time-pos").is_ok_and(|time| time > 0.1)
+        });
+        // Added to the playlist, not instead of the first file.
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-count").unwrap()), 2);
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-pos").unwrap()), 1);
     }
 
     /// The other half of the same rule: while something plays, an append changes nothing about it.
