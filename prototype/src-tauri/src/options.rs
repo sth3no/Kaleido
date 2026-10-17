@@ -72,7 +72,7 @@ pub fn mpv_options(paths: &Paths) -> Vec<(&'static str, String)> {
         (
             "script-opts",
             format!(
-                "thumbfast-mpv_path={},thumbfast-network=no",
+                "thumbfast-mpv_path={},thumbfast-network=no,thumbfast-tone_mapping=mobius",
                 paths.helper_exe.display()
             ),
         ),

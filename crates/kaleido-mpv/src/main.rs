@@ -3,6 +3,7 @@
 //! thumbnailer without Kaleido shipping a full mpv.exe (spec 4.1).
 
 mod args;
+mod thumbnail;
 
 use mpv_ffi::{Event, Mpv, load_api, locate_libmpv};
 
@@ -18,7 +19,8 @@ fn main() {
 }
 
 fn run() -> mpv_ffi::Result<()> {
-    let invocation = args::parse_args(std::env::args().skip(1));
+    let mut invocation = args::parse_args(std::env::args().skip(1));
+    thumbnail::prepare(&mut invocation);
     let mpv = Mpv::create(load_api(&locate_libmpv())?)?;
     // mpv CLI behaviour that libmpv does not default to: leave once the playlist is done,
     // never read a config directory, never touch a terminal.
