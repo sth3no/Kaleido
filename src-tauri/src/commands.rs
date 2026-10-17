@@ -2,11 +2,16 @@
 //! queue it on the engine; none of them waits for mpv on the main thread, where Tauri runs a
 //! synchronous command (M0 review), because mpv may be busy.
 
-use tauri::{AppHandle, State};
+use std::collections::BTreeMap;
+
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
+use crate::paths::AppPaths;
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
+use crate::settings::{self, AudioDevice, Settings, SettingsError, SharedSettings};
 use crate::surface::{Layout, Surface};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 use crate::thumbs::{self, ThumbStore};
@@ -133,4 +138,107 @@ pub fn thumb_clear(engine: State<'_, Engine>) {
 #[tauri::command]
 pub fn thumb_get(store: State<'_, ThumbStore>) -> tauri::ipc::Response {
     tauri::ipc::Response::new(store.latest())
+}
+
+/// Runs `job` on a blocking thread: it waits for mpv (or the system), which must hold up
+/// neither the main thread nor the async runtime. `None` if it panicked.
+async fn on_blocking_thread<T: Send + 'static>(
+    job: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    match tauri::async_runtime::spawn_blocking(job).await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::error!("a settings task failed: {error}");
+            None
+        }
+    }
+}
+
+/// Kaleido's own settings (settings.json). Reads the store only.
+#[tauri::command]
+pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
+    settings::lock(&store).get().clone()
+}
+
+/// Changes Kaleido's settings: `patch` is merged in (a JSON merge patch), checked and written;
+/// on an error nothing changed. The UI hears the new settings as `settings:changed`.
+/// Synchronous: it writes one small file and never waits for mpv.
+#[tauri::command]
+pub fn settings_set(
+    app: AppHandle,
+    store: State<'_, SharedSettings>,
+    patch: Value,
+) -> Result<Settings, SettingsError> {
+    let settings = settings::lock(&store).update(patch)?;
+    if let Err(error) = app.emit("settings:changed", &settings) {
+        tracing::warn!("cannot send settings:changed to the UI: {error}");
+    }
+    Ok(settings)
+}
+
+/// Every mpv option the settings manage, from mpv.conf or else the player. Waits for mpv,
+/// hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_get_mpv(app: AppHandle) -> BTreeMap<String, Option<String>> {
+    on_blocking_thread(move || {
+        let (Some(engine), Some(paths), Some(glass)) = (
+            app.try_state::<Engine>(),
+            app.try_state::<AppPaths>(),
+            app.try_state::<GlassController>(),
+        ) else {
+            return BTreeMap::new();
+        };
+        settings::get_mpv(&engine, &paths.config_dir, glass.shader())
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Sets an mpv option from the allow-list in mpv.conf and, if it can be, in the player (`None`
+/// takes it out). Waits for mpv (the audio devices), hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_set_mpv(
+    app: AppHandle,
+    key: String,
+    value: Option<String>,
+) -> Result<(), SettingsError> {
+    on_blocking_thread(move || {
+        let (Some(engine), Some(paths), Some(glass)) = (
+            app.try_state::<Engine>(),
+            app.try_state::<AppPaths>(),
+            app.try_state::<GlassController>(),
+        ) else {
+            return Err(SettingsError::Unavailable);
+        };
+        settings::set_mpv(&engine, &glass, &paths.config_dir, &key, value.as_deref())
+    })
+    .await
+    .unwrap_or(Err(SettingsError::Unavailable))
+}
+
+/// The audio outputs mpv offers. Waits for mpv, hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn settings_audio_devices(app: AppHandle) -> Vec<AudioDevice> {
+    on_blocking_thread(move || {
+        app.try_state::<Engine>()
+            .map(|engine| settings::audio_devices(&engine))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The files in the shaders folder that `glsl-shaders` may name. Lists one local folder.
+#[tauri::command]
+pub fn settings_list_shaders(paths: State<'_, AppPaths>) -> Vec<String> {
+    settings::list_shaders(&paths.config_dir)
+}
+
+/// The installed font families (DirectWrite). The first call reads them, which may take a
+/// moment, so it is asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn system_fonts() -> Vec<String> {
+    on_blocking_thread(|| settings::system_fonts().to_vec())
+        .await
+        .unwrap_or_default()
 }

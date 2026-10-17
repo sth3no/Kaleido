@@ -20,7 +20,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::player::{self, Engine, LoadMode};
+use crate::player::{self, Engine};
+use crate::settings;
 use open_queue::{Batch, OpenQueue, OpenRequest};
 
 /// Kaleido's public roadmap (spec 11.7): the GitHub Project in the Kaleido repository, which the
@@ -29,10 +30,6 @@ pub const ROADMAP_URL: &str = "https://github.com/sth3no/Kaleido/projects";
 
 /// Requests this close together make one playlist (spec 9.3).
 pub const JOIN_WINDOW: Duration = Duration::from_millis(300);
-
-/// What a file opened while another plays does ("chování při otevření souboru za běhu",
-/// spec 8.10); Task 10 reads it from the settings.
-const OPEN_WHILE_PLAYING: LoadMode = LoadMode::Replace;
 
 /// The current value of every observed property, as `player::snapshot` reads it.
 pub type Snapshot = BTreeMap<String, Value>;
@@ -133,12 +130,13 @@ fn handover() -> MutexGuard<'static, ()> {
 }
 
 /// Hands `req`, which came at `arrived`, to the queue and plays it as soon as the queue lets it
-/// through (once the UI is ready).
+/// through (once the UI is ready). A request without its own mode follows the open-while-playing
+/// setting as it is now (spec 8.10).
 pub fn open(app: &AppHandle, arrived: Instant, req: OpenRequest) {
     let _order = handover();
     let batch = app
         .try_state::<OpenQueue>()
-        .and_then(|queue| queue.submit(arrived, req, OPEN_WHILE_PLAYING));
+        .and_then(|queue| queue.submit(arrived, req, settings::open_while_playing(app)));
     if let Some(batch) = batch {
         play(app, batch);
     }
@@ -149,7 +147,7 @@ pub fn open(app: &AppHandle, arrived: Instant, req: OpenRequest) {
 pub fn ui_ready(app: &AppHandle) -> Snapshot {
     if let Some(queue) = app.try_state::<OpenQueue>() {
         let _order = handover();
-        for batch in queue.ui_ready(Instant::now(), OPEN_WHILE_PLAYING) {
+        for batch in queue.ui_ready(Instant::now(), settings::open_while_playing(app)) {
             play(app, batch);
         }
     }
@@ -178,6 +176,7 @@ fn play(app: &AppHandle, batch: Batch) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::player::LoadMode;
     use crate::player::load::{LoadOptions, Source};
 
     const TIMEOUT: Duration = Duration::from_secs(5);

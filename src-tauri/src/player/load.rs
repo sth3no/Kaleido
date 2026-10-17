@@ -39,7 +39,8 @@ pub struct LoadIssue {
     pub kind: SourceError,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// Also the open-while-playing setting (`settings.json`), hence `Serialize`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LoadMode {
     /// Start the sources now, in place of what is open.

@@ -6,6 +6,7 @@ pub mod input;
 pub mod job;
 pub mod paths;
 pub mod player;
+pub mod settings;
 pub mod surface;
 pub mod system;
 pub mod thumbs;
@@ -68,11 +69,23 @@ pub fn run() {
             commands::thumb_request,
             commands::thumb_clear,
             commands::thumb_get,
+            commands::settings_get,
+            commands::settings_set,
+            commands::settings_get_mpv,
+            commands::settings_set_mpv,
+            commands::settings_audio_devices,
+            commands::settings_list_shaders,
+            commands::system_fonts,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
             paths.ensure_dirs()?;
             player::options::ensure_defaults(&paths)?;
+            // Before the engine: the open-while-playing setting decides how the first
+            // launch's files play.
+            app.manage(settings::SharedSettings::new(
+                settings::SettingsStore::load(paths.config_dir.join(settings::SETTINGS_FILE)),
+            ));
             let window = app
                 .get_webview_window("main")
                 .context("the main window is missing")?;

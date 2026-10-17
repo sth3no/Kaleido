@@ -35,6 +35,8 @@ webview2-com = "0.39"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
+  # The system font families for the subtitle font setting.
+  "Win32_Graphics_DirectWrite",
   "Win32_Security",
   "Win32_System_JobObjects",
   "Win32_System_Threading",

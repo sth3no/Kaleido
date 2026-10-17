@@ -388,6 +388,27 @@ impl GlassController {
         self.lock().state
     }
 
+    /// The glass shader's path as mpv has it in `glsl-shaders`.
+    pub fn shader(&self) -> &str {
+        &self.shader
+    }
+
+    /// The user's shaders (`glsl-shaders` entries as mpv.conf holds them) replace the ones in
+    /// mpv, and the glass shader, if it is on, comes after them again: it blurs what they made.
+    pub fn set_user_shaders(&self, user: &[String]) {
+        // Under the lock, so that switching the glass on or off cannot come in between.
+        let shared = self.lock();
+        let mut commands = vec![args(["change-list", SHADERS, "clr", ""])];
+        commands.extend(
+            user.iter()
+                .map(|shader| args(["change-list", SHADERS, "append", shader])),
+        );
+        if shared.attached {
+            commands.push(self.attach());
+        }
+        self.send(commands);
+    }
+
     /// The regions the UI measured (CSS px). Sent to mpv at once if they changed.
     pub fn set_regions(&self, mut rects: Vec<GlassRect>) {
         rects.truncate(MAX_REGIONS);
@@ -1114,6 +1135,32 @@ mod tests {
             "cplayer",
             "kaleido-glass"
         )));
+    }
+
+    /// The settings re-list the user's shaders (Task 10): the glass shader stays after them.
+    #[test]
+    fn user_shaders_are_listed_before_the_glass_shader() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (host, glass, path) = started(tmp.path());
+        let clear = cmd(&["change-list", "glsl-shaders", "clr", ""]);
+
+        glass.set_user_shaders(&["~~/shaders/a.glsl".into(), "~~/shaders/b.glsl".into()]);
+        assert_eq!(
+            host.take(),
+            [
+                clear.clone(),
+                cmd(&["change-list", "glsl-shaders", "append", "~~/shaders/a.glsl"]),
+                cmd(&["change-list", "glsl-shaders", "append", "~~/shaders/b.glsl"]),
+                cmd(&["change-list", "glsl-shaders", "append", &path]),
+            ]
+        );
+        assert_eq!(glass.shader(), path);
+
+        // With the glass off, the user's shaders alone.
+        glass.set_enabled(false, GlassReason::User);
+        host.take();
+        glass.set_user_shaders(&[]);
+        assert_eq!(host.take(), [clear]);
     }
 
     #[test]
