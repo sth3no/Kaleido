@@ -28,6 +28,59 @@ const OBSERVED: &[(&str, PropertyKind)] = &[
 
 const TIME_POS_INTERVAL: Duration = Duration::from_millis(100);
 
+/// At most one value per `interval` (spec 4.4: `time-pos` max 10×/s) without losing the latest:
+/// a value that comes too early is held and sent when the interval ends.
+struct Throttle<T> {
+    interval: Duration,
+    last_sent: Option<Instant>,
+    held: Option<T>,
+}
+
+impl<T> Throttle<T> {
+    fn new(interval: Duration) -> Throttle<T> {
+        Throttle {
+            interval,
+            last_sent: None,
+            held: None,
+        }
+    }
+
+    fn ready(&self, now: Instant) -> bool {
+        self.last_sent
+            .is_none_or(|sent| now.duration_since(sent) >= self.interval)
+    }
+
+    /// Some = send this now; None = held until `due`.
+    fn offer(&mut self, now: Instant, value: T) -> Option<T> {
+        if self.ready(now) {
+            self.held = None;
+            self.last_sent = Some(now);
+            Some(value)
+        } else {
+            self.held = Some(value);
+            None
+        }
+    }
+
+    /// The held value once its interval has ended.
+    fn due(&mut self, now: Instant) -> Option<T> {
+        if self.held.is_some() && self.ready(now) {
+            self.last_sent = Some(now);
+            self.held.take()
+        } else {
+            None
+        }
+    }
+
+    /// How long until the held value is due; None when nothing is held.
+    fn wait(&self, now: Instant) -> Option<Duration> {
+        let sent = self.last_sent?;
+        self.held
+            .as_ref()
+            .map(|_| self.interval.saturating_sub(now.duration_since(sent)))
+    }
+}
+
 #[derive(Default)]
 struct GlassState {
     rects: Vec<GlassRect>,
@@ -180,21 +233,36 @@ impl Engine {
     }
 
     fn run_events(&self, app: &AppHandle) {
-        let mut last_time_pos = Instant::now();
+        let mut time_pos = Throttle::new(TIME_POS_INTERVAL);
+        let emit_time_pos = |value: PropertyValue| {
+            let _ = app.emit(
+                "player:prop",
+                Prop {
+                    name: "time-pos".into(),
+                    value: to_json(&value),
+                },
+            );
+        };
         loop {
-            match self.mpv.wait_event(-1.0) {
+            let timeout = time_pos
+                .wait(Instant::now())
+                .map_or(-1.0, |wait| wait.as_secs_f64());
+            let event = self.mpv.wait_event(timeout);
+            if let Some(value) = time_pos.due(Instant::now()) {
+                emit_time_pos(value);
+            }
+            match event {
                 // mpv's `quit` (q, window close) ends the app (spec 5.1).
                 Event::Shutdown => {
                     app.exit(0);
                     return;
                 }
-                Event::PropertyChange { name, value, .. } => {
-                    if name == "time-pos" {
-                        if last_time_pos.elapsed() < TIME_POS_INTERVAL {
-                            continue;
-                        }
-                        last_time_pos = Instant::now();
+                Event::PropertyChange { name, value, .. } if name == "time-pos" => {
+                    if let Some(value) = time_pos.offer(Instant::now(), value) {
+                        emit_time_pos(value);
                     }
+                }
+                Event::PropertyChange { name, value, .. } => {
                     if name.starts_with("osd-dimensions/m") {
                         self.on_output_margin(&name, &value);
                     }
@@ -235,5 +303,54 @@ impl Engine {
                 let _ = app.emit("player:message", args);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MS: Duration = Duration::from_millis(1);
+
+    #[test]
+    fn first_value_goes_out_immediately() {
+        let start = Instant::now();
+        let mut throttle = Throttle::new(100 * MS);
+        assert_eq!(throttle.offer(start, 1.0), Some(1.0));
+        assert_eq!(throttle.wait(start), None);
+    }
+
+    /// Holding Left while paused seeks every ~25 ms; the last position must still reach the UI.
+    #[test]
+    fn a_value_inside_the_interval_is_held_and_sent_when_it_ends() {
+        let start = Instant::now();
+        let mut throttle = Throttle::new(100 * MS);
+        throttle.offer(start, 1.0);
+        assert_eq!(throttle.offer(start + 30 * MS, 2.0), None);
+        assert_eq!(throttle.wait(start + 30 * MS), Some(70 * MS));
+        assert_eq!(throttle.due(start + 99 * MS), None);
+        assert_eq!(throttle.due(start + 100 * MS), Some(2.0));
+        assert_eq!(throttle.wait(start + 100 * MS), None);
+    }
+
+    #[test]
+    fn the_latest_held_value_wins() {
+        let start = Instant::now();
+        let mut throttle = Throttle::new(100 * MS);
+        throttle.offer(start, 1.0);
+        throttle.offer(start + 30 * MS, 2.0);
+        throttle.offer(start + 60 * MS, 3.0);
+        assert_eq!(throttle.due(start + 100 * MS), Some(3.0));
+        assert_eq!(throttle.due(start + 200 * MS), None);
+    }
+
+    #[test]
+    fn after_the_interval_a_new_value_goes_out_at_once() {
+        let start = Instant::now();
+        let mut throttle = Throttle::new(100 * MS);
+        throttle.offer(start, 1.0);
+        assert_eq!(throttle.offer(start + 150 * MS, 2.0), Some(2.0));
+        assert_eq!(throttle.offer(start + 200 * MS, 3.0), None);
+        assert_eq!(throttle.due(start + 250 * MS), Some(3.0));
     }
 }
