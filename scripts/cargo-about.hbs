@@ -1,0 +1,5 @@
+[
+{{#each crates}}
+{"name":"{{{package.name}}}","version":"{{{package.version}}}","license":"{{{license}}}","source":"{{{package.source}}}","repository":"{{{package.repository}}}","homepage":"{{{package.homepage}}}"}{{#unless @last}},{{/unless}}
+{{/each}}
+]

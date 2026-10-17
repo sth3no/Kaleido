@@ -28,17 +28,28 @@ anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The dates of the archived mpv logs; tracing-appender uses it too.
+time = "0.3"
 tracing = "0.1"
+# kaleido.<date>.log: one file a day, the last seven.
+tracing-appender = "0.2.3"
+# Plain text lines (no colours) and the `log` records of the crates that do not use tracing.
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "tracing-log"] }
 url = "2"
 # The version wry uses, so that its WebView2 interfaces are the ones Tauri hands out.
 webview2-com = "0.39"
 windows = { version = "0.62", features = [
+  # The Windows build for the diagnostics: RtlGetVersion is not changed by the manifest.
+  "Wdk_System_SystemServices",
   "Win32_Foundation",
   "Win32_Globalization",
   # The system font families for the subtitle font setting.
   "Win32_Graphics_DirectWrite",
+  # The graphics adapters for the diagnostics.
+  "Win32_Graphics_Dxgi",
   "Win32_Security",
   "Win32_System_JobObjects",
+  "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_WindowsAndMessaging",
 ] }

@@ -1,0 +1,29 @@
+# Configuration of `cargo about` for scripts/generate-licenses.ps1: the licenses of the Rust crates
+# that go into Kaleido.exe.
+
+# The licenses the dependencies may have. A crate under another one fails the generator, so a new
+# license is looked at by a person before it ships.
+accepted = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+
+# Kaleido runs on 64-bit Windows only: crates that only other systems use do not ship.
+targets = ["x86_64-pc-windows-msvc"]
+
+# Not part of the program.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Kaleido's own crates are GPL-3.0-or-later and are not third-party.
+private = { ignore = true }

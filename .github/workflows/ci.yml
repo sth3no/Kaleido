@@ -47,6 +47,28 @@ jobs:
       - run: cargo clippy -p kaleido --all-targets -- -D warnings
       - run: cargo test -p kaleido
 
+  # The license list in the "About" page is generated from Cargo.lock and the UI's packages and
+  # committed (spec 11.6): a changed dependency must come with a changed list.
+  licenses:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      # license-checker reads the installed packages.
+      - run: npm ci
+      # The version the list was generated with: another one may word a license differently.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9.2
+      - name: Regenerate the license list
+        shell: pwsh
+        run: ./scripts/generate-licenses.ps1
+      - name: Fail when the committed list is out of date
+        run: git diff --exit-code resources/licenses
+
   # Goes away with the prototype (Task 24).
   prototype:
     runs-on: windows-latest

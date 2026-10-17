@@ -1,0 +1,14 @@
+[
+  {
+    "name": "libmpv",
+    "version": "git-accb7b2821 (build 20261011)",
+    "license": "GPL-2.0-or-later",
+    "url": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261011"
+  },
+  {
+    "name": "thumbfast",
+    "version": "0f711de",
+    "license": "MPL-2.0",
+    "url": "https://github.com/po5/thumbfast/tree/0f711de3138c9bd6718209d819ac54022c23ded2"
+  }
+]

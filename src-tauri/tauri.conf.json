@@ -31,7 +31,8 @@
     "icon": ["icons/icon.ico"],
     "resources": {
       "../vendor/thumbfast/thumbfast.lua": "resources/essentials/thumbfast.lua",
-      "../resources/defaults/": "resources/defaults/"
+      "../resources/defaults/": "resources/defaults/",
+      "../resources/licenses/": "resources/licenses/"
     }
   }
 }

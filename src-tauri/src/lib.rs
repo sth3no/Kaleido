@@ -12,10 +12,10 @@ pub mod system;
 pub mod thumbs;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Context;
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 
 use glass::{AppHost, GlassController};
 use player::command::ScreenshotMode;
@@ -24,6 +24,7 @@ use surface::{Surface, WindowSync};
 use system::OpenThread;
 use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
+use system::logs::LogGuard;
 use system::open_queue::OpenQueue;
 
 /// How long closing the window waits for mpv to save the position and shut down.
@@ -79,9 +80,18 @@ pub fn run() {
             commands::settings_reset_binding,
             commands::settings_list_shaders,
             commands::system_fonts,
+            commands::system_diagnostics,
+            commands::system_copy_diagnostics,
+            commands::system_open_logs,
+            commands::system_licenses,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;
+            // First, so that everything after is logged. The logs folder is known only from
+            // here, so lines logged before are not captured (the job object's failure goes to
+            // stderr). It makes the folder itself, and the guard stays managed so that the
+            // writer lives as long as the app does.
+            app.manage(system::logs::init(&paths));
             paths.ensure_dirs()?;
             player::options::ensure_defaults(&paths)?;
             // Before the engine: the open-while-playing setting decides how the first
@@ -100,6 +110,10 @@ pub fn run() {
             surface.apply(size.width, size.height, window.scale_factor()?);
             app.manage(surface);
             app.manage(WindowSync::default());
+            // Before the engine: mpv opens mpv.log anew, so the last run's log is archived now.
+            if let Err(error) = system::logs::rotate_mpv_log(&paths.logs_dir, SystemTime::now()) {
+                tracing::warn!("cannot archive the last mpv log: {error}");
+            }
             let engine = Engine::start(
                 EngineConfig {
                     paths: paths.clone(),
@@ -160,8 +174,17 @@ pub fn run() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run Kaleido");
+        .build(tauri::generate_context!())
+        .expect("failed to build Kaleido")
+        .run(|app, event| {
+            // The process ends without dropping the managed state, so the log writer is told
+            // to write what it still holds.
+            if matches!(event, RunEvent::Exit)
+                && let Some(log) = app.try_state::<LogGuard>()
+            {
+                log.flush();
+            }
+        });
 }
 
 /// Delivers the player's events: Rust's own handlers first, the UI for the rest.

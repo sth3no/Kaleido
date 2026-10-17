@@ -4,9 +4,11 @@
 
 pub mod cli;
 pub mod clipboard;
+pub mod diagnostics;
 pub mod dialog;
 pub mod drop;
 pub mod instance;
+pub mod logs;
 pub mod open_queue;
 
 use std::collections::BTreeMap;

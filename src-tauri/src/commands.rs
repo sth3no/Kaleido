@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
@@ -13,6 +14,7 @@ use crate::paths::AppPaths;
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{Layout, Surface};
+use crate::system::diagnostics::{self, License};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 use crate::thumbs::{self, ThumbStore};
 
@@ -148,7 +150,7 @@ async fn on_blocking_thread<T: Send + 'static>(
     match tauri::async_runtime::spawn_blocking(job).await {
         Ok(value) => Some(value),
         Err(error) => {
-            tracing::error!("a settings task failed: {error}");
+            tracing::error!("a task on a blocking thread failed: {error}");
             None
         }
     }
@@ -289,4 +291,60 @@ pub async fn system_fonts() -> Vec<String> {
     on_blocking_thread(|| settings::system_fonts().to_vec())
         .await
         .unwrap_or_default()
+}
+
+/// The diagnostics as text for a bug report: versions, Windows, GPU and plugins, with no file
+/// paths and no URLs. Waits for mpv (its versions), hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn system_diagnostics(app: AppHandle) -> String {
+    diagnostics_text(app).await
+}
+
+/// Puts the diagnostics (as `system_diagnostics` returns them) on the clipboard. Another program
+/// may hold the clipboard, so it can fail; the UI says so.
+#[tauri::command]
+pub async fn system_copy_diagnostics(app: AppHandle) -> Result<(), String> {
+    let text = diagnostics_text(app.clone()).await;
+    if text.is_empty() {
+        return Err("the diagnostics are not available".to_owned());
+    }
+    app.clipboard()
+        .write_text(text)
+        .map_err(|error| error.to_string())
+}
+
+async fn diagnostics_text(app: AppHandle) -> String {
+    on_blocking_thread(move || {
+        let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
+        else {
+            return String::new();
+        };
+        diagnostics::report(&engine, &paths)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Shows the logs folder in the file manager. Asynchronous: starting it may take a moment.
+#[tauri::command]
+pub async fn system_open_logs(app: AppHandle) {
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return;
+    };
+    if let Err(error) = tauri_plugin_opener::open_path(&paths.logs_dir, None::<&str>) {
+        tracing::warn!("cannot open the logs folder: {error}");
+    }
+}
+
+/// The licenses of the third-party software Kaleido ships (spec 11.6). Reads two files from the
+/// installation, hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn system_licenses(app: AppHandle) -> Vec<License> {
+    on_blocking_thread(move || {
+        app.try_state::<AppPaths>()
+            .map(|paths| diagnostics::licenses(&paths.resource_dir.join("licenses")))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
 }
