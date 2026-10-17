@@ -91,13 +91,12 @@ fn dropped_paths(
 /// other requests from outside.
 fn open_later(app: &AppHandle, paths: Vec<PathBuf>) {
     let arrived = Instant::now();
-    let handle = app.clone();
-    super::in_order(app, move || {
+    super::in_order(app, move |app| {
         let request = OpenRequest {
             sources: sources_from_paths(paths),
             ..OpenRequest::default()
         };
-        super::open(&handle, arrived, request);
+        super::open(app, arrived, request);
     });
 }
 

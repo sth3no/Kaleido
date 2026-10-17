@@ -8,15 +8,21 @@ use std::time::Instant;
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Manager, Wry};
 
+use super::OpenThread;
+
 /// The single-instance plugin. Register it before every other plugin: a later launch has to
 /// exit before the rest of the setup runs. Not called for the first launch, whose own command
-/// line goes through [`super::open_command_line`] in the setup.
+/// line is queued on the [`OpenThread`] before the app is built. The callback can run as soon
+/// as the app is built, even before the setup (while the main window is being created).
 pub fn plugin() -> TauriPlugin<Wry> {
     tauri_plugin_single_instance::init(|app, args, cwd| {
         let arrived = Instant::now();
         // As `std::env::args_os` collects them: the program comes first.
         let args = args.into_iter().skip(1).map(OsString::from).collect();
-        super::open_command_line(app, arrived, args, PathBuf::from(cwd));
+        match app.try_state::<OpenThread>() {
+            Some(opens) => super::open_command_line(&opens, arrived, args, PathBuf::from(cwd)),
+            None => tracing::warn!("later launch dropped: the open-requests thread is missing"),
+        }
         bring_to_front(app);
     })
 }

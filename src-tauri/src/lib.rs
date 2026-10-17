@@ -12,6 +12,7 @@ use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 use player::{Engine, EngineConfig, EventSink, PlayerEvent, Request, StateLoop};
+use system::OpenThread;
 use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
 use system::open_queue::OpenQueue;
@@ -25,13 +26,23 @@ pub fn run() {
         // There is no log file yet; a stray helper after a crash is not worth refusing to start.
         eprintln!("Kaleido: child processes will not end with the app: {error}");
     }
+    // This launch's own command line goes first, before the app is built: from then on a later
+    // launch can hand over its own (the single-instance callback runs while the main window is
+    // created, before the setup). It waits in the queue until the UI is ready.
+    let opens = OpenThread::start();
+    system::open_command_line(
+        &opens,
+        Instant::now(),
+        std::env::args_os().skip(1).collect(),
+        std::env::current_dir().unwrap_or_default(),
+    );
     tauri::Builder::default()
         // First: a later launch hands over its command line and exits before anything else.
         .plugin(system::instance::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(OpenQueue::new(system::JOIN_WINDOW))
-        .manage(system::OpenThread::start())
+        .manage(opens)
         .invoke_handler(tauri::generate_handler![
             commands::player_command,
             commands::player_load,
@@ -72,13 +83,8 @@ pub fn run() {
             if let Err(error) = system::drop::install(window.as_ref()) {
                 tracing::error!("dropped files will not open: {error:#}");
             }
-            // This launch's own command line; it waits in the queue until the UI is ready.
-            system::open_command_line(
-                app.handle(),
-                Instant::now(),
-                std::env::args_os().skip(1).collect(),
-                std::env::current_dir().unwrap_or_default(),
-            );
+            // The queued command lines (this launch's first) are checked from now on.
+            app.state::<OpenThread>().attach(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

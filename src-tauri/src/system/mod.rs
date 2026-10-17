@@ -43,49 +43,72 @@ struct OpenRequestEvent {
     count: usize,
 }
 
-type Job = Box<dyn FnOnce() + Send>;
+type Job<C> = Box<dyn FnOnce(&C) + Send>;
 
 /// The thread that checks the sources of requests from outside the UI (a launch, a drop) and
 /// queues them: the main thread must not wait for a slow disk or network share, and one thread
 /// keeps the requests in the order they came, so a playlist keeps the order of its files.
-pub struct OpenThread(mpsc::Sender<Job>);
+///
+/// It starts before the app is built and runs no job until [`OpenThread::attach`] gives it the
+/// app (`C`), so this launch's own command line can be queued first: a later launch can hand
+/// over its command line while the main window is still being created, before the setup runs.
+pub struct OpenThread<C: Send + 'static = AppHandle> {
+    jobs: mpsc::Sender<Job<C>>,
+    context: mpsc::Sender<C>,
+}
 
-impl OpenThread {
-    pub fn start() -> OpenThread {
-        let (jobs, queue) = mpsc::channel::<Job>();
+impl<C: Send + 'static> OpenThread<C> {
+    pub fn start() -> OpenThread<C> {
+        let (jobs, queued) = mpsc::channel::<Job<C>>();
+        let (context, attached) = mpsc::channel::<C>();
         thread::Builder::new()
             .name("open-requests".into())
             .spawn(move || {
-                for job in queue {
-                    job();
+                // Never attached (a later launch exits in its setup): its jobs never run.
+                let Ok(context) = attached.recv() else {
+                    return;
+                };
+                for job in queued {
+                    job(&context);
                 }
             })
             .expect("cannot start the open-requests thread");
-        OpenThread(jobs)
+        OpenThread { jobs, context }
+    }
+
+    /// Lets the queued jobs run, in order, with `context`. Only the first call counts.
+    pub fn attach(&self, context: C) {
+        // Fails only once the thread has ended, which it does not while jobs can come.
+        let _ = self.context.send(context);
+    }
+
+    /// Queues `job` after the jobs before it. Returns whether the thread took it.
+    pub fn run(&self, job: impl FnOnce(&C) + Send + 'static) -> bool {
+        self.jobs.send(Box::new(job)).is_ok()
     }
 }
 
-/// Runs `job` on the [`OpenThread`] after the jobs before it.
-fn in_order(app: &AppHandle, job: impl FnOnce() + Send + 'static) {
+/// Runs `job` on the app's [`OpenThread`] after the jobs before it.
+fn in_order(app: &AppHandle, job: impl FnOnce(&AppHandle) + Send + 'static) {
     let queued = app
         .try_state::<OpenThread>()
-        .is_some_and(|thread| thread.0.send(Box::new(job)).is_ok());
+        .is_some_and(|thread| thread.run(job));
     if !queued {
         tracing::warn!("open request dropped: the open-requests thread is not running");
     }
 }
 
-/// Opens what a command line asks for: the first launch's own, or a later launch's (`args`
-/// without the program name, relative to that process's `cwd`). It came at `arrived`.
-pub fn open_command_line(app: &AppHandle, arrived: Instant, args: Vec<OsString>, cwd: PathBuf) {
-    let handle = app.clone();
-    in_order(app, move || {
+/// Opens what a command line asks for: this launch's own (queued before the app is built), or a
+/// later launch's (`args` without the program name, relative to that process's `cwd`). It came
+/// at `arrived`.
+pub fn open_command_line(opens: &OpenThread, arrived: Instant, args: Vec<OsString>, cwd: PathBuf) {
+    let queued = opens.run(move |app| {
         let request = cli::parse(args, &cwd);
         for (arg, error) in &request.rejected {
             tracing::warn!("cannot open {arg} from the command line: {error:?}");
         }
         open(
-            &handle,
+            app,
             arrived,
             OpenRequest {
                 sources: request.sources,
@@ -94,6 +117,9 @@ pub fn open_command_line(app: &AppHandle, arrived: Instant, args: Vec<OsString>,
             },
         );
     });
+    if !queued {
+        tracing::warn!("command line dropped: the open-requests thread is not running");
+    }
 }
 
 /// Held from the queue's decision until the batch is queued on the player. Requests come from
@@ -146,5 +172,73 @@ fn play(app: &AppHandle, batch: Batch) {
     };
     if let Err(error) = app.emit("system:open-request", event) {
         tracing::warn!("cannot send system:open-request to the UI: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::player::load::{LoadOptions, Source};
+
+    const TIMEOUT: Duration = Duration::from_secs(5);
+
+    fn request(name: &str) -> OpenRequest {
+        OpenRequest {
+            sources: vec![Source::File(PathBuf::from(name))],
+            ..OpenRequest::default()
+        }
+    }
+
+    fn batch(name: &str, mode: LoadMode) -> Batch {
+        Batch {
+            sources: vec![Source::File(PathBuf::from(name))],
+            mode,
+            options: LoadOptions::default(),
+        }
+    }
+
+    /// As in `run`: this launch's command line is queued before the app is built; a later
+    /// launch hands over its own while the main window is being created (WebView2 pumps
+    /// messages then), before the setup attaches the app. The first launch's files still come
+    /// first, and the later ones join their playlist.
+    #[test]
+    fn the_first_launch_stays_first_when_a_later_launch_comes_during_setup() {
+        let opens = OpenThread::<OpenQueue>::start();
+        let start = Instant::now();
+        assert!(opens.run(move |queue: &OpenQueue| {
+            queue.submit(start, request("own.mkv"), LoadMode::Replace);
+        }));
+        // Ran before the app is there, it would have been lost or put first.
+        let (ran, has_run) = mpsc::channel();
+        assert!(opens.run(move |queue: &OpenQueue| {
+            queue.submit(
+                start + Duration::from_millis(50),
+                request("later.mkv"),
+                LoadMode::Replace,
+            );
+            ran.send(()).unwrap();
+        }));
+        assert!(
+            has_run.recv_timeout(Duration::from_millis(200)).is_err(),
+            "a job ran before the app was attached"
+        );
+
+        opens.attach(OpenQueue::new(JOIN_WINDOW));
+        has_run.recv_timeout(TIMEOUT).unwrap();
+        let (batches, handed_over) = mpsc::channel();
+        opens.run(move |queue: &OpenQueue| {
+            let ready = start + Duration::from_secs(2);
+            batches
+                .send(queue.ui_ready(ready, LoadMode::Replace))
+                .unwrap();
+        });
+
+        assert_eq!(
+            handed_over.recv_timeout(TIMEOUT).unwrap(),
+            [
+                batch("own.mkv", LoadMode::Replace),
+                batch("later.mkv", LoadMode::Append),
+            ]
+        );
     }
 }
