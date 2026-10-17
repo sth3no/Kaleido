@@ -16,6 +16,13 @@ function key(
   return e;
 }
 
+/** An element with the given attributes (not yet in the document). */
+function element(tag: string, attributes: Record<string, string> = {}): HTMLElement {
+  const el = document.createElement(tag);
+  for (const [name, value] of Object.entries(attributes)) el.setAttribute(name, value);
+  return el;
+}
+
 afterEach(() => {
   document.body.replaceChildren();
 });
@@ -68,13 +75,60 @@ describe('shouldForward', () => {
 
   test('other keys are forwarded, also with a button or the page in focus', () => {
     const button = document.createElement('button');
-    document.body.append(button);
-    for (const target of [document.body, button]) {
+    const link = element('a', { href: '#' });
+    const item = element('div', { role: 'menuitem' });
+    document.body.append(button, link, item);
+    for (const target of [document.body, button, link, item]) {
       expect(shouldForward(key('keydown', { key: 'a', code: 'KeyA' }, target))).toBe(true);
       expect(shouldForward(key('keydown', { key: 'a', code: 'KeyA', ctrlKey: true }, target))).toBe(
         true,
       );
       expect(shouldForward(key('keydown', { key: 'ArrowLeft', shiftKey: true }, target))).toBe(true);
+      expect(shouldForward(key('keydown', { key: 'Escape', code: 'Escape' }, target))).toBe(true);
+    }
+  });
+
+  test('tab_and_shift_tab_are_never_forwarded', () => {
+    const button = document.createElement('button');
+    document.body.append(button);
+    for (const target of [document.body, button]) {
+      expect(shouldForward(key('keydown', { key: 'Tab', code: 'Tab' }, target))).toBe(false);
+      expect(shouldForward(key('keydown', { key: 'Tab', code: 'Tab', shiftKey: true }, target))).toBe(
+        false,
+      );
+    }
+  });
+
+  test('enter_and_space_on_a_focused_button_are_not_forwarded', () => {
+    const activatable = [
+      element('button'),
+      element('a', { href: 'https://example.com' }),
+      element('summary'),
+      ...['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'switch', 'option'].map((role) =>
+        element('div', { role }),
+      ),
+    ];
+    document.body.append(...activatable);
+    for (const target of activatable) {
+      const what = `${target.tagName} ${target.getAttribute('role') ?? ''}`;
+      expect(shouldForward(key('keydown', { key: 'Enter', code: 'Enter' }, target)), what).toBe(false);
+      expect(shouldForward(key('keydown', { key: ' ', code: 'Space' }, target)), what).toBe(false);
+    }
+  });
+
+  test('enter and space go to mpv when the focus is not on a control they activate', () => {
+    // A link without href, a plain element or a role that Enter does not activate.
+    const plain = [
+      document.body,
+      element('div'),
+      element('a'),
+      element('div', { role: 'slider' }),
+      element('div', { role: 'dialog' }),
+    ];
+    document.body.append(...plain.filter((target) => target !== document.body));
+    for (const target of plain) {
+      expect(shouldForward(key('keydown', { key: 'Enter', code: 'Enter' }, target))).toBe(true);
+      expect(shouldForward(key('keydown', { key: ' ', code: 'Space' }, target))).toBe(true);
     }
   });
 });
@@ -188,6 +242,32 @@ describe('attachVideoInput', () => {
     expect(sent()).toEqual([]);
     expect(close.defaultPrevented).toBe(false);
     expect(swap.defaultPrevented).toBe(false);
+  });
+
+  test('Tab moves the focus: it is neither sent nor prevented, and neither is its release', () => {
+    const tab = key('keydown', { key: 'Tab', code: 'Tab' });
+    const back = key('keydown', { key: 'Tab', code: 'Tab', shiftKey: true });
+    const release = key('keyup', { key: 'Tab', code: 'Tab' });
+    expect(sent()).toEqual([]);
+    for (const e of [tab, back, release]) expect(e.defaultPrevented).toBe(false);
+  });
+
+  test('Enter and Space activate a focused button; elsewhere they go to mpv', () => {
+    const button = document.createElement('button');
+    document.body.append(button);
+    const down = key('keydown', { key: 'Enter', code: 'Enter' }, button);
+    const space = key('keydown', { key: ' ', code: 'Space' }, button);
+    const up = key('keyup', { key: ' ', code: 'Space' }, button);
+    expect(sent()).toEqual([]);
+    for (const e of [down, space, up]) expect(e.defaultPrevented).toBe(false);
+
+    const onPage = key('keydown', { key: 'Enter', code: 'Enter' });
+    key('keyup', { key: 'Enter', code: 'Enter' });
+    expect(sent()).toEqual([
+      { type: 'keyDown', key: 'ENTER' },
+      { type: 'keyUp', key: 'ENTER' },
+    ]);
+    expect(onPage.defaultPrevented).toBe(true);
   });
 
   test('a key pressed over the page is released even if the focus has moved into a field', () => {
@@ -306,6 +386,40 @@ describe('attachVideoInput', () => {
     const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     el.dispatchEvent(menu);
     expect(menu.defaultPrevented).toBe(true);
+  });
+
+  test('back_and_forward_buttons_are_forwarded_and_never_navigate', () => {
+    const stopped: MouseEvent[] = [];
+    const mouse = (type: string, button: number) => {
+      const e = new MouseEvent(type, { button, bubbles: true, cancelable: true });
+      el.dispatchEvent(e);
+      return e;
+    };
+    for (const button of [3, 4]) {
+      stopped.push(
+        pointer('pointerdown', { button }),
+        mouse('mousedown', button),
+        pointer('pointerup', { button }),
+        mouse('mouseup', button),
+        mouse('auxclick', button),
+      );
+    }
+    expect(stopped).toHaveLength(10);
+    for (const e of stopped) expect(e.defaultPrevented, `${e.type} ${e.button}`).toBe(true);
+    expect(sent()).toEqual([
+      { type: 'mouseMove', x: 150, y: 75 },
+      { type: 'buttonDown', button: 'MBTN_BACK' },
+      { type: 'buttonUp', button: 'MBTN_BACK' },
+      { type: 'mouseMove', x: 150, y: 75 },
+      { type: 'buttonDown', button: 'MBTN_FORWARD' },
+      { type: 'buttonUp', button: 'MBTN_FORWARD' },
+    ]);
+
+    // The main buttons are left alone: only history navigation is taken away.
+    const left = pointer('pointerdown', { button: 0 });
+    const leftUp = pointer('pointerup', { button: 0 });
+    expect(left.defaultPrevented).toBe(false);
+    expect(leftUp.defaultPrevented).toBe(false);
   });
 
   test('detaching releases what is held and stops forwarding', () => {

@@ -36,14 +36,46 @@ function isSystemShortcut(e: KeyboardEvent): boolean {
   return e.altKey && (e.key === 'F4' || e.key === 'Tab' || e.key === ' ' || e.code === 'Space');
 }
 
+/** Tab and Shift+Tab move the focus through the UI (spec 8.9); mpv never gets them. */
+function isFocusMove(e: KeyboardEvent): boolean {
+  return e.key === 'Tab' && !e.ctrlKey;
+}
+
+/** What the browser activates with Enter or Space. */
+const ACTIVATABLE = [
+  'button',
+  'a[href]',
+  'summary',
+  ...['button', 'link', 'menuitem', 'tab', 'checkbox', 'radio', 'switch', 'option'].map(
+    (role) => `[role="${role}"]`,
+  ),
+].join(', ');
+
+/** Enter or Space on a focused control that they activate: the control gets them, not mpv. */
+function activatesControl(e: KeyboardEvent): boolean {
+  return (
+    (e.key === 'Enter' || e.key === ' ') &&
+    e.target instanceof HTMLElement &&
+    e.target.matches(ACTIVATABLE)
+  );
+}
+
 /**
  * Whether the key goes on to mpv. Not when it is typing in a text field, composes text (an IME),
- * is a Windows shortcut, or was already handled by a control of the UI, which says so with
- * `preventDefault` (the seek bar, a panel). The listener runs in the bubbling phase, after the
- * controls.
+ * is a Windows shortcut, moves the focus (Tab), activates the focused button or link (Enter,
+ * Space), or was already handled by a control of the UI, which says so with `preventDefault`
+ * (the seek bar, a panel). Other keys on a focused control, the arrows say, go to mpv unless the
+ * control handles them. The listener runs in the bubbling phase, after the controls.
  */
 export function shouldForward(e: KeyboardEvent): boolean {
-  return !(e.defaultPrevented || e.isComposing || isSystemShortcut(e) || ownsTyping(e.target));
+  return !(
+    e.defaultPrevented ||
+    e.isComposing ||
+    isSystemShortcut(e) ||
+    isFocusMove(e) ||
+    activatesControl(e) ||
+    ownsTyping(e.target)
+  );
 }
 
 /**
@@ -173,6 +205,14 @@ export function attachVideoInput(el: HTMLElement): () => void {
   );
   // Right button: mpv's menu, not the WebView's.
   el.addEventListener('contextmenu', (e) => e.preventDefault(), { signal });
+  // The side buttons go to mpv as MBTN_BACK and MBTN_FORWARD (above); the WebView must not also
+  // take them as history navigation, which would leave the app.
+  const keepInApp = (e: MouseEvent) => {
+    if (e.button === 3 || e.button === 4) e.preventDefault();
+  };
+  for (const type of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'auxclick'] as const) {
+    el.addEventListener(type, keepInApp, { signal });
+  }
 
   return () => {
     releaseAll();
