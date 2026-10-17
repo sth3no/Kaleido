@@ -77,7 +77,15 @@ impl SurfaceState {
         let layout = *self.layout.lock().unwrap();
         // Until mpv has created its window there is nothing to place; it starts full-size.
         if let Some(mpv) = win::find_child(self.parent, MPV_WINDOW_CLASS) {
-            win::place(mpv, to_physical(layout, client_w, client_h, scale));
+            let rect = to_physical(layout, client_w, client_h, scale);
+            // mpv resizes its window to our whole client area whenever the main window moves or
+            // resizes. That is right for Full; the mini-player rect has to be pinned against it.
+            let pinned = match layout {
+                Layout::Rect { .. } => rect,
+                Layout::Full | Layout::Hidden => None,
+            };
+            win::pin(mpv, pinned);
+            win::place(mpv, rect);
         }
     }
 
@@ -89,16 +97,99 @@ impl SurfaceState {
 }
 
 pub mod win {
-    use windows::Win32::Foundation::HWND;
+    use std::sync::{Mutex, PoisonError};
+
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GW_CHILD, GW_HWNDNEXT, GetClassNameW, GetWindow, HWND_BOTTOM, SWP_HIDEWINDOW,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos,
+        CallWindowProcW, DefWindowProcW, GW_CHILD, GW_HWNDNEXT, GWLP_WNDPROC, GetClassNameW,
+        GetWindow, GetWindowLongPtrW, HWND_BOTTOM, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, WINDOWPOS,
+        WM_NCDESTROY, WM_WINDOWPOSCHANGED, WNDPROC,
     };
 
     use super::PxRect;
 
     fn hwnd(raw: isize) -> HWND {
         HWND(raw as *mut _)
+    }
+
+    /// A window whose procedure we wrapped to keep it at `rect`.
+    struct Pinned {
+        window: isize,
+        original: isize,
+        rect: Option<PxRect>,
+    }
+
+    static PINNED: Mutex<Vec<Pinned>> = Mutex::new(Vec::new());
+
+    /// Keeps a child window at `rect` (parent client coordinates) whoever moves it; None releases
+    /// it. The first pin wraps the window procedure, which keeps running on the owner's thread
+    /// (mpv's); call it before `place`, never while holding a lock that procedure could need.
+    pub fn pin(window: isize, rect: Option<PxRect>) {
+        let mut pinned = PINNED.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(entry) = pinned.iter_mut().find(|p| p.window == window) {
+            entry.rect = rect;
+            return;
+        }
+        if rect.is_none() {
+            return;
+        }
+        // Registered before the swap so the wrapper always finds the original procedure.
+        let original = unsafe { GetWindowLongPtrW(hwnd(window), GWLP_WNDPROC) };
+        pinned.push(Pinned {
+            window,
+            original,
+            rect,
+        });
+        drop(pinned);
+        unsafe {
+            SetWindowLongPtrW(
+                hwnd(window),
+                GWLP_WNDPROC,
+                pinned_proc as *const () as isize,
+            )
+        };
+    }
+
+    unsafe extern "system" fn pinned_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        let found = {
+            let mut pinned = PINNED.lock().unwrap_or_else(PoisonError::into_inner);
+            let index = pinned.iter().position(|p| p.window == h.0 as isize);
+            index.map(|i| {
+                if msg == WM_NCDESTROY {
+                    let gone = pinned.swap_remove(i);
+                    (gone.original, None)
+                } else {
+                    (pinned[i].original, pinned[i].rect)
+                }
+            })
+        };
+        let Some((original, rect)) = found else {
+            return unsafe { DefWindowProcW(h, msg, wp, lp) };
+        };
+        if msg == WM_NCDESTROY {
+            unsafe { SetWindowLongPtrW(h, GWLP_WNDPROC, original) };
+        }
+        // mpv resizes its window with SWP_NOSENDCHANGING, so only WM_WINDOWPOSCHANGED shows it.
+        // Put the window back before mpv's procedure sees the change: without the original
+        // procedure (and DefWindowProc) mpv gets no WM_SIZE and keeps its swapchain size.
+        if msg == WM_WINDOWPOSCHANGED
+            && let Some(r) = rect
+        {
+            // SAFETY: for WM_WINDOWPOSCHANGED lParam points to the applied WINDOWPOS.
+            let pos = unsafe { &*(lp.0 as *const WINDOWPOS) };
+            let moved = pos.flags.0 & SWP_NOMOVE.0 == 0 && (pos.x, pos.y) != (r.x, r.y);
+            let sized = pos.flags.0 & SWP_NOSIZE.0 == 0 && (pos.cx, pos.cy) != (r.w, r.h);
+            if moved || sized {
+                let _ = unsafe {
+                    SetWindowPos(h, None, r.x, r.y, r.w, r.h, SWP_NOZORDER | SWP_NOACTIVATE)
+                };
+                return LRESULT(0);
+            }
+        }
+        // SAFETY: `original` is the window procedure GetWindowLongPtrW returned for this window.
+        let original: WNDPROC = unsafe { std::mem::transmute::<isize, WNDPROC>(original) };
+        unsafe { CallWindowProcW(original, h, msg, wp, lp) }
     }
 
     /// Direct child of `parent` whose window class is `class`.
@@ -273,6 +364,23 @@ pub mod win {
         }
     }
 
+    /// Moves and resizes a top-level window (screen coordinates), like the user dragging it.
+    #[cfg(test)]
+    pub fn set_rect(window: isize, x: i32, y: i32, w: i32, h: i32) {
+        unsafe {
+            SetWindowPos(
+                hwnd(window),
+                None,
+                x,
+                y,
+                w,
+                h,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
+        .expect("SetWindowPos");
+    }
+
     #[cfg(test)]
     pub fn class_name(window: isize) -> String {
         let mut name = [0u16; 64];
@@ -288,6 +396,8 @@ pub mod win {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -381,16 +491,17 @@ mod tests {
         win::destroy(parent);
     }
 
-    /// Upstream detail the surface relies on (spec 5.1): with `wid` set, the real libmpv creates
-    /// its own window of class "mpv" as a direct child of `wid`, and the mini-player layout moves it.
-    /// Fails when a libmpv update renames that class or nests the window deeper.
-    #[test]
-    fn surface_moves_the_window_libmpv_creates_inside_wid() {
-        use std::time::Duration;
+    const MINI: Layout = Layout::Rect {
+        x: 10.0,
+        y: 20.0,
+        w: 160.0,
+        h: 90.0,
+    };
 
+    /// Real libmpv with `wid` = `parent` (a `win::test_parent()`), and the window it created there.
+    fn mpv_inside(parent: isize) -> (mpv_ffi::Mpv, isize) {
         use mpv_ffi::{Mpv, load_api, locate_libmpv};
 
-        let parent = win::test_parent();
         let mpv = Mpv::create(load_api(&locate_libmpv()).expect("load libmpv")).expect("create");
         let wid = parent.to_string();
         for (name, value) in [
@@ -406,23 +517,60 @@ mod tests {
             mpv.set_option(name, value).expect(name);
         }
         mpv.initialize().expect("initialize");
-
         // Found without find_child: the parent's only child is whatever mpv created.
         let video = win::wait_for_child(parent, Duration::from_secs(15))
             .expect("libmpv created no direct child window inside wid");
+        (mpv, video)
+    }
+
+    /// Upstream detail the surface relies on (spec 5.1): with `wid` set, the real libmpv creates
+    /// its own window of class "mpv" as a direct child of `wid`, and the mini-player layout moves it.
+    /// Fails when a libmpv update renames that class or nests the window deeper.
+    #[test]
+    fn surface_moves_the_window_libmpv_creates_inside_wid() {
+        let parent = win::test_parent();
+        let (mpv, video) = mpv_inside(parent);
         assert_eq!(win::class_name(video), "mpv");
 
         let surface = SurfaceState::new(parent);
         surface.apply(400, 300, 1.0);
-        surface.set_layout(Layout::Rect {
-            x: 10.0,
-            y: 20.0,
-            w: 160.0,
-            h: 90.0,
-        });
+        surface.set_layout(MINI);
         // Give mpv time to fight the placement; it must not.
         win::pump(Duration::from_millis(500));
         assert_eq!(win::window_rect(video), (110, 120, 160, 90));
+
+        drop(mpv);
+        win::destroy(parent);
+    }
+
+    /// libmpv snaps its window back to the parent's whole client area whenever the parent moves
+    /// or resizes. The mini player must stay put through both, and Full must follow the parent again.
+    #[test]
+    fn mini_player_survives_moving_and_resizing_the_window() {
+        let parent = win::test_parent();
+        let (mpv, video) = mpv_inside(parent);
+        let surface = SurfaceState::new(parent);
+        surface.apply(400, 300, 1.0);
+        surface.set_layout(MINI);
+
+        win::set_rect(parent, 150, 150, 400, 300);
+        win::pump(Duration::from_millis(500));
+        assert_eq!(win::window_rect(video), (160, 170, 160, 90), "after a move");
+
+        win::set_rect(parent, 150, 150, 500, 400);
+        surface.apply(500, 400, 1.0); // what WindowEvent::Resized does
+        win::pump(Duration::from_millis(500));
+        assert_eq!(
+            win::window_rect(video),
+            (160, 170, 160, 90),
+            "after a resize"
+        );
+
+        surface.set_layout(Layout::Full);
+        win::set_rect(parent, 150, 150, 600, 450);
+        surface.apply(600, 450, 1.0);
+        win::pump(Duration::from_millis(500));
+        assert_eq!(win::window_rect(video), (150, 150, 600, 450), "full again");
 
         drop(mpv);
         win::destroy(parent);
