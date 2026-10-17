@@ -9,6 +9,7 @@ use mpv_ffi::Mpv;
 
 use super::{Engine, EngineConfig, Request};
 use crate::paths::AppPaths;
+use crate::settings;
 
 /// Kaleido's default `mpv.conf`: only options the user may change.
 pub const DEFAULT_MPV_CONF: &str = include_str!("../../../resources/defaults/mpv.conf");
@@ -151,10 +152,8 @@ pub fn ensure_defaults(paths: &AppPaths) -> io::Result<()> {
         } else {
             built_in.as_bytes().to_vec()
         };
-        // Through a temporary file: a half-written file would count as the user's from then on.
-        let temporary = paths.config_dir.join(format!("{name}.tmp"));
-        fs::write(&temporary, contents)?;
-        fs::rename(&temporary, &target)?;
+        // Atomically: a half-written file would count as the user's from then on.
+        settings::write_atomic(&target, &contents)?;
     }
     Ok(())
 }

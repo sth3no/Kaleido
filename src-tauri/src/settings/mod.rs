@@ -4,27 +4,25 @@
 //! the lists the values are checked against (audio devices, fonts, shaders), and the atomic
 //! write both files go through.
 
+pub mod fonts;
 pub mod mpv_conf;
 pub mod mpv_keys;
 pub mod store;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use mpv_ffi::Mpv;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
-};
-use windows::core::{BOOL, w};
 
 use crate::glass::GlassController;
 use crate::player::{Engine, LoadMode, Request};
+pub use fonts::system_fonts;
 pub use mpv_conf::MpvConf;
 pub use mpv_keys::{MPV_SETTINGS, MpvSetting, ValidationCtx, ValueKind, validate_mpv};
 pub use store::{
@@ -59,13 +57,15 @@ pub fn open_while_playing(app: &AppHandle) -> LoadMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SettingsError {
-    /// Not a key the settings may change, or a value the system does not offer (an audio
-    /// device, a font or a shader that is not there).
+    /// Not a key the settings may change (an mpv option off the allow-list, a settings.json key
+    /// that does not exist), or a value the system does not offer (an audio device, a font or a
+    /// shader that is not there).
     NotAllowed { key: String },
     /// A value out of range or of the wrong form. `key` is the mpv option, or the settings.json
-    /// path in camelCase (`appearance.uiScale`; a whole section when its type is wrong).
+    /// path in camelCase (`appearance.uiScale`; a whole section when it is not an object).
     Invalid { key: String, reason: String },
-    /// The file could not be read or written.
+    /// The file could not be read or written, or settings.json could not be read at start and
+    /// is not replaced.
     Io { message: String },
     /// The player is not running (yet).
     Unavailable,
@@ -138,9 +138,16 @@ fn write_and_rename(temporary: &Path, path: &Path, contents: &[u8]) -> io::Resul
 // ---------------------------------------------------------------------------------------------
 // mpv options
 
-/// One read-change-write of mpv.conf at a time: two settings changed at once would otherwise
-/// each write the file without the other's change.
+/// One change of mpv.conf (and of the player with it) at a time: two settings changed at once
+/// would otherwise each write the file without the other's change, or reach the file and the
+/// player in different orders.
 static MPV_CONF_WRITES: Mutex<()> = Mutex::new(());
+
+fn mpv_conf_turn() -> MutexGuard<'static, ()> {
+    MPV_CONF_WRITES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Sets (or with `None` removes) `key` in `config_dir/mpv.conf`, gently ([`MpvConf`]) and
 /// atomically. A missing file is an empty one. A file that is not UTF-8 is left alone.
@@ -149,9 +156,16 @@ pub fn write_mpv_conf(
     key: &str,
     value: Option<&str>,
 ) -> Result<(), SettingsError> {
-    let _turn = MPV_CONF_WRITES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let _turn = mpv_conf_turn();
+    rewrite_mpv_conf(config_dir, key, value)
+}
+
+/// [`write_mpv_conf`] for a caller that has the turn already.
+fn rewrite_mpv_conf(
+    config_dir: &Path,
+    key: &str,
+    value: Option<&str>,
+) -> Result<(), SettingsError> {
     let path = config_dir.join(MPV_CONF);
     let text = match fs::read(&path) {
         Ok(bytes) => String::from_utf8(bytes).map_err(|_| {
@@ -161,7 +175,7 @@ pub fn write_mpv_conf(
         Err(error) => return Err(SettingsError::io(error)),
     };
     let mut conf = MpvConf::parse(&text);
-    conf.set(key, value);
+    conf.set(key, value)?;
     let changed = conf.render();
     if changed != text {
         write_atomic(&path, changed.as_bytes()).map_err(SettingsError::io)?;
@@ -183,8 +197,9 @@ fn read_mpv_conf(config_dir: &Path) -> MpvConf {
 }
 
 /// Every key of [`MPV_SETTINGS`] with its value: from mpv.conf's main section where it is set
-/// there, else the player's current value (`None` if mpv has none). The glass shader is not the
-/// user's and never shows in `glsl-shaders`. Waits for mpv, so not on the main thread.
+/// there, else the player's current value (`None` if mpv has none), numbers in the short form
+/// mpv.conf has them in. The glass shader is not the user's and never shows in
+/// `glsl-shaders`. Waits for mpv, so not on the main thread.
 pub fn get_mpv(
     engine: &Engine,
     config_dir: &Path,
@@ -208,7 +223,11 @@ pub fn get_mpv(
             .map(|setting| {
                 let value = mpv.get_string(setting.key).ok();
                 let value = match setting.kind {
-                    ValueKind::Shaders => value.map(|list| without_entry(&list, &glass_shader)),
+                    ValueKind::Shaders => value.map(|list| without_glass(&list, &glass_shader)),
+                    // mpv prints `55.000000`; mpv.conf and the UI say `55`.
+                    ValueKind::Number { .. } => {
+                        value.map(|number| mpv_keys::normal_number(&number))
+                    }
                     _ => value,
                 };
                 (setting.key, value)
@@ -223,23 +242,17 @@ pub fn get_mpv(
     values
 }
 
-/// `list` (`glsl-shaders` as mpv prints it) without `entry`, matched whole. mpv joins a path
-/// list with `;` on Windows or with `,`; whichever splits `entry` out is used.
-fn without_entry(list: &str, entry: &str) -> String {
-    if list == entry {
+/// `list` (`glsl-shaders` as mpv prints it) without the glass shader, which the controller always
+/// keeps as the last entry: its exact path at the end, after whatever separator mpv joins the
+/// list with. Nothing is guessed from separators, so a path with a comma or `;` in it is fine.
+fn without_glass(list: &str, glass: &str) -> String {
+    if list == glass {
         return String::new();
     }
-    for separator in [';', ','] {
-        let parts: Vec<&str> = list.split(separator).collect();
-        if parts.contains(&entry) {
-            return parts
-                .into_iter()
-                .filter(|part| *part != entry)
-                .collect::<Vec<_>>()
-                .join(&separator.to_string());
-        }
+    match list.strip_suffix(glass) {
+        Some(rest) if rest.ends_with([';', ',']) => rest[..rest.len() - 1].to_owned(),
+        _ => list.to_owned(),
     }
-    list.to_owned()
 }
 
 /// Changes an mpv option from the settings: checks it ([`validate_mpv`]), writes it to mpv.conf,
@@ -261,7 +274,10 @@ pub fn set_mpv(
     };
     let ctx = context(setting.kind, engine, config_dir);
     let value = validate_mpv(key, value, &ctx)?;
-    write_mpv_conf(config_dir, setting.key, value.as_deref())?;
+    // The file and the player change in one turn: quick changes reach both in the same order.
+    // Applying only queues on the engine, so the turn is short.
+    let _turn = mpv_conf_turn();
+    rewrite_mpv_conf(config_dir, setting.key, value.as_deref())?;
     if setting.live {
         apply_live(engine, glass, setting, value);
     }
@@ -370,65 +386,6 @@ pub fn list_shaders(config_dir: &Path) -> Vec<String> {
     names
 }
 
-/// The font families installed on Windows (DirectWrite), as libass finds them: English names
-/// where a family has one, without duplicates, sorted. Read once and kept.
-pub fn system_fonts() -> &'static [String] {
-    static FONTS: OnceLock<Vec<String>> = OnceLock::new();
-    FONTS.get_or_init(|| {
-        font_families().unwrap_or_else(|error| {
-            tracing::error!("cannot list the system fonts: {error}");
-            Vec::new()
-        })
-    })
-}
-
-fn font_families() -> windows::core::Result<Vec<String>> {
-    // SAFETY: DirectWrite calls on the interfaces it returned; the out pointer is a local.
-    let collection = unsafe {
-        let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-        let mut collection = None;
-        factory.GetSystemFontCollection(&mut collection, false)?;
-        collection
-    };
-    let Some(collection) = collection else {
-        return Ok(Vec::new());
-    };
-    // SAFETY: as above.
-    let count = unsafe { collection.GetFontFamilyCount() };
-    let mut families = BTreeSet::new();
-    for index in 0..count {
-        match family_name(&collection, index) {
-            Ok(name) if !name.is_empty() => {
-                families.insert(name);
-            }
-            Ok(_) => {}
-            Err(error) => tracing::warn!("font family {index} has no name: {error}"),
-        }
-    }
-    let mut families: Vec<String> = families.into_iter().collect();
-    families.sort_by_cached_key(|name| name.to_lowercase());
-    Ok(families)
-}
-
-/// The family's en-us name, else its first.
-fn family_name(collection: &IDWriteFontCollection, index: u32) -> windows::core::Result<String> {
-    // SAFETY: DirectWrite calls on the interfaces it returned; the buffer holds the string's
-    // length plus its terminating NUL, as GetString needs.
-    unsafe {
-        let names = collection.GetFontFamily(index)?.GetFamilyNames()?;
-        let mut at = 0;
-        let mut exists = BOOL::default();
-        names.FindLocaleName(w!("en-us"), &mut at, &mut exists)?;
-        if !exists.as_bool() {
-            at = 0;
-        }
-        let length = names.GetStringLength(at)? as usize;
-        let mut buffer = vec![0u16; length + 1];
-        names.GetString(at, &mut buffer)?;
-        Ok(String::from_utf16_lossy(&buffer[..length]))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -478,6 +435,14 @@ mod tests {
             "# mine\r\nvolume=50\r\n# --- Kaleido ---\r\nhwdec=no\r\n[p]\r\nvolume=10\r\n"
         );
 
+        // A line break cannot go into the file: refused, and the file stays as it was.
+        let before = fs::read(&path).unwrap();
+        assert!(matches!(
+            write_mpv_conf(tmp.path(), "sub-font", Some("a\nvolume=100")),
+            Err(SettingsError::Invalid { .. })
+        ));
+        assert_eq!(fs::read(&path).unwrap(), before);
+
         // Not UTF-8: refused, and the file stays as it was.
         let latin1 = b"# m\xe9n\nvolume=37\n".to_vec();
         fs::write(&path, &latin1).unwrap();
@@ -502,37 +467,39 @@ mod tests {
         assert_eq!(list_shaders(tmp.path()), ["A.hook", "b.glsl"]);
     }
 
+    /// The glass shader is the last entry; its path may hold a comma or a `;` (a user name).
     #[test]
-    fn without_entry_takes_out_the_whole_entry_only() {
-        let glass = r"C:\Users\a, b\AppData\Local\Kaleido\cache\shaders\kaleido-glass.glsl";
-        assert_eq!(without_entry(glass, glass), "");
-        assert_eq!(
-            without_entry(&format!("~~/shaders/u.glsl;{glass}"), glass),
-            "~~/shaders/u.glsl"
-        );
-        assert_eq!(
-            without_entry(&format!("~~/shaders/u.glsl,{glass}"), "x-glass.glsl"),
-            format!("~~/shaders/u.glsl,{glass}"),
-            "another file stays"
-        );
-        assert_eq!(
-            without_entry("a.glsl,kaleido-glass.glsl,b.glsl", "kaleido-glass.glsl"),
-            "a.glsl,b.glsl"
-        );
-        assert_eq!(without_entry("", glass), "");
-    }
-
-    /// DirectWrite needs no window; every Windows has Segoe UI.
-    #[test]
-    fn system_fonts_are_sorted_unique_and_include_segoe_ui() {
-        let fonts = system_fonts();
-        assert!(fonts.iter().any(|font| font == "Segoe UI"), "{fonts:?}");
-        let mut sorted = fonts.to_vec();
-        sorted.sort_by_cached_key(|name| name.to_lowercase());
-        assert_eq!(fonts, sorted.as_slice());
-        let unique: BTreeSet<&String> = fonts.iter().collect();
-        assert_eq!(unique.len(), fonts.len());
-        assert!(std::ptr::eq(fonts, system_fonts()), "read once");
+    fn the_glass_shader_is_taken_off_the_end_of_the_list() {
+        for glass in [
+            r"C:\Users\Novák, Jan\AppData\Local\Kaleido\cache\shaders\kaleido-glass.glsl",
+            r"C:\Users\a;b\AppData\Local\Kaleido\cache\shaders\kaleido-glass.glsl",
+        ] {
+            assert_eq!(without_glass(glass, glass), "");
+            for separator in [";", ","] {
+                assert_eq!(
+                    without_glass(&format!("~~/shaders/u.glsl{separator}{glass}"), glass),
+                    "~~/shaders/u.glsl"
+                );
+                assert_eq!(
+                    without_glass(
+                        &format!(
+                            "~~/shaders/a, b.glsl{separator}~~/shaders/c.glsl{separator}{glass}"
+                        ),
+                        glass
+                    ),
+                    format!("~~/shaders/a, b.glsl{separator}~~/shaders/c.glsl")
+                );
+            }
+            // Without the glass (off, or a script changed the list), nothing is taken.
+            assert_eq!(
+                without_glass("~~/shaders/u.glsl", glass),
+                "~~/shaders/u.glsl"
+            );
+            assert_eq!(without_glass("", glass), "");
+            // Only the whole path counts, not a file that ends the same way.
+            let longer = format!("~~/shaders/x{glass}");
+            assert_eq!(without_glass(&longer, glass), longer);
+        }
     }
 
     // --- the real libmpv --------------------------------------------------------------------
@@ -597,6 +564,19 @@ mod tests {
             Some(property(&engine, "hwdec").as_str())
         );
 
+        // The default volume is written for the next start; the playing volume does not jump,
+        // neither when it changes nor when it goes (Ruling R25).
+        let volume = || engine.call(|mpv| mpv.get_f64("volume").unwrap());
+        set("volume", Some("80")).unwrap();
+        assert!(mpv_conf(&paths).lines().any(|line| line == "volume=80"));
+        assert_eq!(volume(), 37.0);
+        set("volume", None).unwrap();
+        assert!(!mpv_conf(&paths).contains("volume="));
+        assert_eq!(volume(), 37.0);
+        // From the player now, in mpv.conf's short form (mpv prints 37.000000).
+        let values = get_mpv(&engine, &paths.config_dir, glass.shader());
+        assert_eq!(values["volume"].as_deref(), Some("37"));
+
         // Taken out again: the line goes and mpv is back at its default.
         set("sub-font-size", None).unwrap();
         assert!(!mpv_conf(&paths).contains("sub-font-size=40"));
@@ -612,6 +592,11 @@ mod tests {
             )
         });
         assert_eq!(now, default.parse::<f64>().unwrap());
+        let values = get_mpv(&engine, &paths.config_dir, glass.shader());
+        assert_eq!(
+            values["sub-font-size"].as_deref(),
+            Some(mpv_keys::short_number(now).as_str())
+        );
 
         // A profile applies at the next start: written, not applied.
         set("profile", Some("fast")).unwrap();

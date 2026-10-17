@@ -1,14 +1,20 @@
 //! A gentle editor for mpv.conf (spec 8.10). Kaleido changes only the keys it is asked to, only
-//! in the main section (before the first `[profile]`) and only their last occurrence there; a
-//! key that is missing goes into a marked block at the end of the main section. Every other
-//! line (comments, unknown and unreadable lines, profiles) stays byte for byte, with its line
-//! ending, and so does the BOM.
+//! in the main section and only their last occurrence there; a key that is missing goes into a
+//! marked block at the end of the main section's first part. The main section is what mpv
+//! applies at start: the lines before the first `[profile]`, and those after a `[default]`,
+//! which goes back to it. Every other line (comments, unknown and unreadable lines, profiles)
+//! stays byte for byte, with its line ending, and so does the BOM.
 //!
 //! Lines are read the way mpv's own parser (`m_config_parse`) reads them: `key=value`, `key`
-//! (yes) and `no-key` (no); a value may be quoted as `"…"`, `'…'` or `%N%…` (N bytes).
+//! (yes) and `no-key` (no), each also with `--` in front; a value may be quoted as `"…"`, `'…'`
+//! or `%N%…` (N bytes).
+
+use super::SettingsError;
 
 /// The line that opens Kaleido's block in the main section.
 pub const BLOCK_MARKER: &str = "# --- Kaleido ---";
+/// The option that applies a profile where it stands; what follows it overrides the profile.
+const PROFILE: &str = "profile";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Ending {
@@ -47,17 +53,19 @@ pub struct MpvConf {
 enum Parsed<'a> {
     /// Empty, white space only or a comment.
     Blank,
-    /// `[name]`: a profile starts. A malformed one counts too, so that nothing after it is
-    /// touched.
-    Section,
+    /// `[name]`: a profile starts, or with `[default]` (`main`) the main section goes on. A
+    /// malformed header counts as a profile, so that nothing after it is touched.
+    Section {
+        main: bool,
+    },
     Option(OptionLine<'a>),
     /// A line mpv would refuse (`key value`, an open quote, ...).
     Unreadable,
 }
 
 struct OptionLine<'a> {
-    /// White space before the name.
-    indent: &'a str,
+    /// White space and a `--` before the name, if the line has them.
+    lead: &'a str,
     /// The name as written: `no-osc` for the `no-` form.
     name: &'a str,
     /// The value after `=`, unquoted; `None` without `=`.
@@ -89,18 +97,22 @@ fn parse_line(text: &str) -> Parsed<'_> {
     if line.is_empty() || line.starts_with('#') {
         return Parsed::Blank;
     }
-    if line.starts_with('[') {
-        return Parsed::Section;
+    if let Some(header) = line.strip_prefix('[') {
+        return Parsed::Section {
+            main: returns_to_main(header),
+        };
     }
-    let indent = &text[..text.len() - line.len()];
-    let name_length = line
+    // mpv takes `--key` for `key` in a config file too.
+    let body = line.strip_prefix("--").unwrap_or(line);
+    let lead = &text[..text.len() - body.len()];
+    let name_length = body
         .bytes()
         .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
         .count();
     if name_length == 0 {
         return Parsed::Unreadable;
     }
-    let (name, after_name) = line.split_at(name_length);
+    let (name, after_name) = body.split_at(name_length);
     let rest = after_name.trim_start_matches(is_space);
     let (value, tail) = match rest.strip_prefix('=') {
         None => (None, after_name),
@@ -114,10 +126,19 @@ fn parse_line(text: &str) -> Parsed<'_> {
         return Parsed::Unreadable;
     }
     Parsed::Option(OptionLine {
-        indent,
+        lead,
         name,
         value,
         tail,
+    })
+}
+
+/// Whether a header (after its `[`) is a well-formed `[default]`: mpv goes back to the main
+/// section there.
+fn returns_to_main(header: &str) -> bool {
+    header.split_once(']').is_some_and(|(name, rest)| {
+        let rest = rest.trim_start_matches(is_space);
+        name == "default" && (rest.is_empty() || rest.starts_with('#'))
     })
 }
 
@@ -200,9 +221,9 @@ impl MpvConf {
     }
 
     /// Sets `key` in the main section, or with `None` removes every line of it there.
-    /// Profiles are never touched. A value with a line break cannot be written and is ignored;
-    /// the values Kaleido writes are checked before (`mpv_keys::validate_mpv`).
-    pub fn set(&mut self, key: &str, value: Option<&str>) {
+    /// Profiles are never touched. A value with a line break cannot be written: an error, and
+    /// nothing changes.
+    pub fn set(&mut self, key: &str, value: Option<&str>) -> Result<(), SettingsError> {
         match value {
             None => {
                 for (index, _) in self.occurrences(key).into_iter().rev() {
@@ -210,10 +231,11 @@ impl MpvConf {
                 }
             }
             Some(value) if value.contains(['\n', '\r']) => {
-                tracing::warn!("mpv.conf cannot hold a line break; {key} stays as it is");
+                return Err(SettingsError::invalid(key, "a value without line breaks"));
             }
             Some(value) => self.put(key, value),
         }
+        Ok(())
     }
 
     fn put(&mut self, key: &str, value: &str) {
@@ -224,57 +246,81 @@ impl MpvConf {
             Some((index, _)) => {
                 let line = &mut self.lines[index];
                 line.text = match parse_line(&line.text) {
-                    // The indentation and a comment after the value stay.
-                    Parsed::Option(option) => format!("{}{written}{}", option.indent, option.tail),
+                    // The indentation, a `--` and a comment after the value stay.
+                    Parsed::Option(option) => format!("{}{written}{}", option.lead, option.tail),
                     _ => written,
                 };
             }
             None => {
-                let at = self.block_end();
+                // A profile is a preset: Kaleido's explicit settings after it override it
+                // (Ruling R24).
+                let at = self.block_position(key == PROFILE);
                 self.insert(at, written);
             }
         }
     }
 
-    /// Where the main section ends: at the first profile, or at the end of the file.
-    fn main_end(&self) -> usize {
+    /// Which lines are in the main section: those before the first profile, and those after a
+    /// `[default]` up to the next profile. Headers themselves are not.
+    fn main_lines(&self) -> Vec<bool> {
+        let mut main = true;
         self.lines
             .iter()
-            .position(|line| matches!(parse_line(&line.text), Parsed::Section))
+            .map(|line| match parse_line(&line.text) {
+                Parsed::Section { main: back } => {
+                    main = back;
+                    false
+                }
+                _ => main,
+            })
+            .collect()
+    }
+
+    /// Where the first part of the main section ends: at the first header, or at the end.
+    fn first_part_end(&self) -> usize {
+        self.lines
+            .iter()
+            .position(|line| matches!(parse_line(&line.text), Parsed::Section { .. }))
             .unwrap_or(self.lines.len())
     }
 
     /// The lines of the main section that set `key`, with the value each gives it, in order.
     fn occurrences(&self, key: &str) -> Vec<(usize, String)> {
-        self.lines[..self.main_end()]
+        self.lines
             .iter()
+            .zip(self.main_lines())
             .enumerate()
-            .filter_map(|(index, line)| match parse_line(&line.text) {
+            .filter(|(_, (_, main))| *main)
+            .filter_map(|(index, (line, _))| match parse_line(&line.text) {
                 Parsed::Option(option) => option.value_for(key).map(|value| (index, value)),
                 _ => None,
             })
             .collect()
     }
 
-    /// Where a missing key goes: after the options of Kaleido's block. Without a block, one is
-    /// made after the last line of the main section that is not blank or a comment, so that the
-    /// blank lines and comments above a profile stay with it.
-    fn block_end(&mut self) -> usize {
-        let main_end = self.main_end();
-        let marker = self.lines[..main_end]
+    /// Where a missing key goes in Kaleido's block: after its options, or with `first` right
+    /// after the marker. Without a block, one is made after the last line of the main section's
+    /// first part that is not blank or a comment, so that the blank lines and comments above a
+    /// profile stay with it.
+    fn block_position(&mut self, first: bool) -> usize {
+        let end = self.first_part_end();
+        let marker = self.lines[..end]
             .iter()
             .position(|line| line.text.trim_matches(is_space) == BLOCK_MARKER);
         if let Some(marker) = marker {
             let mut at = marker + 1;
-            while at < main_end && matches!(parse_line(&self.lines[at].text), Parsed::Option(_)) {
+            while !first
+                && at < end
+                && matches!(parse_line(&self.lines[at].text), Parsed::Option(_))
+            {
                 at += 1;
             }
             return at;
         }
-        let at = self.lines[..main_end]
+        let at = self.lines[..end]
             .iter()
             .rposition(|line| !matches!(parse_line(&line.text), Parsed::Blank))
-            .map_or(main_end, |index| index + 1);
+            .map_or(end, |index| index + 1);
         self.insert(at, BLOCK_MARKER.to_owned());
         at + 1
     }
@@ -316,7 +362,7 @@ mod tests {
     fn changed(text: &str, changes: &[(&str, Option<&str>)]) -> String {
         let mut conf = MpvConf::parse(text);
         for (key, value) in changes {
-            conf.set(key, *value);
+            conf.set(key, *value).unwrap();
         }
         conf.render()
     }
@@ -358,7 +404,7 @@ mod tests {
         let mut conf = MpvConf::parse(text);
         assert_eq!(conf.get("volume").as_deref(), Some("50"));
 
-        conf.set("volume", Some("70"));
+        conf.set("volume", Some("70")).unwrap();
         assert_eq!(
             conf.render(),
             "volume=30\nhwdec=no\nvolume=70\n[quiet]\nvolume=10\n"
@@ -374,23 +420,56 @@ mod tests {
     #[test]
     fn mpv_conf_never_touches_profile_sections() {
         let text =
-            "hwdec=no\n\n[hq]\nprofile-desc=High quality\nvolume=80\nfs\n[default]\nvolume=90\n";
+            "hwdec=no\n\n[hq]\nprofile-desc=High quality\nvolume=80\nfs\n[big] # c\nvolume=90\n";
         let mut conf = MpvConf::parse(text);
         assert_eq!(conf.get("volume"), None, "only profiles set it");
         assert_eq!(conf.get("fs"), None);
 
-        conf.set("volume", None);
+        conf.set("volume", None).unwrap();
         assert_eq!(conf.render(), text, "nothing to remove in the main section");
-        conf.set("volume", Some("70"));
+        conf.set("volume", Some("70")).unwrap();
         assert_eq!(
             conf.render(),
             "hwdec=no\n# --- Kaleido ---\nvolume=70\n\n[hq]\nprofile-desc=High quality\n\
-             volume=80\nfs\n[default]\nvolume=90\n"
+             volume=80\nfs\n[big] # c\nvolume=90\n"
         );
         // A file that starts with a profile: the block goes before it.
         assert_eq!(
             changed("[hq]\nvolume=80\n", &[("volume", Some("70"))]),
             "# --- Kaleido ---\nvolume=70\n[hq]\nvolume=80\n"
+        );
+        // Headers that are not quite `[default]` start profiles: nothing after them is read.
+        for header in ["[ default ]", "[default] extra", "[Default]", "[default"] {
+            let text = format!("{header}\nvolume=5\n");
+            assert_eq!(MpvConf::parse(&text).get("volume"), None, "{header}");
+            assert_eq!(changed(&text, &[("volume", None)]), text, "{header}");
+        }
+    }
+
+    /// mpv goes back to the main section at `[default]`: its lines count, and the block stays in
+    /// the first part.
+    #[test]
+    fn mpv_conf_default_section_is_the_main_section() {
+        let text =
+            "hwdec=no\n[hq]\nvolume=80\n[default] # back\nvolume=90\nfs\n[quiet]\nvolume=10\n";
+        let conf = MpvConf::parse(text);
+        assert_eq!(conf.get("volume").as_deref(), Some("90"));
+        assert_eq!(conf.get("fs").as_deref(), Some("yes"));
+        assert_eq!(conf.get("hwdec").as_deref(), Some("no"));
+
+        // The last main occurrence is the one after `[default]`; a new key goes to the block.
+        assert_eq!(
+            changed(text, &[("volume", Some("70")), ("slang", Some("cs"))]),
+            "hwdec=no\n# --- Kaleido ---\nslang=cs\n[hq]\nvolume=80\n[default] # back\n\
+             volume=70\nfs\n[quiet]\nvolume=10\n"
+        );
+        // Removing takes it out of every main part, not out of the profiles.
+        assert_eq!(
+            changed(
+                "volume=1\n[hq]\nvolume=80\n[default]\nvolume=90\n",
+                &[("volume", None)]
+            ),
+            "[hq]\nvolume=80\n[default]\n"
         );
     }
 
@@ -433,6 +512,34 @@ mod tests {
         );
     }
 
+    /// A profile is a preset; the settings Kaleido writes after it must win (Ruling R24).
+    #[test]
+    fn mpv_conf_puts_a_profile_before_the_explicit_settings() {
+        assert_eq!(
+            changed(
+                "ytdl=yes\n",
+                &[("hdr-compute-peak", Some("yes")), ("profile", Some("fast"))]
+            ),
+            "ytdl=yes\n# --- Kaleido ---\nprofile=fast\nhdr-compute-peak=yes\n"
+        );
+        // Into an existing block too, and a later setting still goes after it.
+        assert_eq!(
+            changed(
+                "# --- Kaleido ---\nvolume=70\ndeinterlace=yes\n",
+                &[("profile", Some("high-quality")), ("hwdec", Some("no"))]
+            ),
+            "# --- Kaleido ---\nprofile=high-quality\nvolume=70\ndeinterlace=yes\nhwdec=no\n"
+        );
+        // A profile line that is there already is changed where it stands.
+        assert_eq!(
+            changed(
+                "# --- Kaleido ---\nvolume=70\nprofile=fast\n",
+                &[("profile", Some("high-quality"))]
+            ),
+            "# --- Kaleido ---\nvolume=70\nprofile=high-quality\n"
+        );
+    }
+
     #[test]
     fn mpv_conf_understands_flag_and_no_forms() {
         let text = "fs\nno-osc\nno-border # frameless\n";
@@ -462,6 +569,26 @@ mod tests {
     }
 
     #[test]
+    fn mpv_conf_takes_dashed_option_names() {
+        let text = "--volume=50\n  --no-osc # c\n--fs\n";
+        let conf = MpvConf::parse(text);
+        assert_eq!(conf.get("volume").as_deref(), Some("50"));
+        assert_eq!(conf.get("osc").as_deref(), Some("no"));
+        assert_eq!(conf.get("fs").as_deref(), Some("yes"));
+        // Changed in place, as written; removed like any other line.
+        assert_eq!(
+            changed(text, &[("volume", Some("70")), ("osc", Some("yes"))]),
+            "--volume=70\n  --osc=yes # c\n--fs\n"
+        );
+        assert_eq!(
+            changed(text, &[("fs", None)]),
+            "--volume=50\n  --no-osc # c\n"
+        );
+        // `--` alone names nothing.
+        assert_eq!(MpvConf::parse("--\n").get(""), None);
+    }
+
+    #[test]
     fn mpv_conf_removing_a_key_deletes_only_main_section_lines() {
         assert_eq!(
             changed(
@@ -472,7 +599,7 @@ mod tests {
         );
         // Every form of the key goes; similar keys stay.
         let mut conf = MpvConf::parse("fs\nno-fs\nfs=no\nfs-screen=1\n");
-        conf.set("fs", None);
+        conf.set("fs", None).unwrap();
         assert_eq!(conf.render(), "fs-screen=1\n");
         assert_eq!(conf.get("fs"), None);
         // Nothing to remove: nothing changes.
@@ -482,7 +609,7 @@ mod tests {
     #[test]
     fn mpv_conf_quotes_values_with_hash_or_quotes() {
         let mut conf = MpvConf::parse("");
-        conf.set("sub-font", Some("a#b"));
+        conf.set("sub-font", Some("a#b")).unwrap();
         assert_eq!(conf.render(), "# --- Kaleido ---\nsub-font=%3%a#b\n");
         assert_eq!(conf.get("sub-font").as_deref(), Some("a#b"));
 
@@ -513,8 +640,15 @@ mod tests {
         assert_eq!(conf.get("b").as_deref(), Some("z"));
         assert_eq!(conf.get("c").as_deref(), Some("#c"));
         assert_eq!(conf.get("d"), None, "the length runs past the line");
-        // A line break cannot be written.
-        assert_eq!(changed("x=1\n", &[("x", Some("a\nb"))]), "x=1\n");
+        // A line break cannot be written: an error, and nothing changes.
+        for broken in ["a\nb", "a\rb", "\n"] {
+            let mut conf = MpvConf::parse("x=1\n");
+            assert!(matches!(
+                conf.set("x", Some(broken)),
+                Err(SettingsError::Invalid { ref key, .. }) if key == "x"
+            ));
+            assert_eq!(conf.render(), "x=1\n");
+        }
     }
 
     #[test]
@@ -528,11 +662,11 @@ mod tests {
 
         // A change keeps every other byte, the BOM and the line endings included.
         let mut conf = MpvConf::parse(text);
-        conf.set("volume", Some("70"));
+        conf.set("volume", Some("70")).unwrap();
         assert_eq!(conf.render(), text.replace("volume=50", "volume=70"));
-        conf.set("volume", Some("70"));
+        conf.set("volume", Some("70")).unwrap();
         assert_eq!(conf.render(), text.replace("volume=50", "volume=70"));
-        conf.set("indented", Some("spaced"));
+        conf.set("indented", Some("spaced")).unwrap();
         assert_eq!(conf.render(), text.replace("volume=50", "volume=70"));
     }
 }

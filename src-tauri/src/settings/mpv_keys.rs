@@ -49,6 +49,15 @@ const fn live(key: &'static str, kind: ValueKind) -> MpvSetting {
     }
 }
 
+/// Written to mpv.conf only: it applies from the next start.
+const fn at_start(key: &'static str, kind: ValueKind) -> MpvSetting {
+    MpvSetting {
+        key,
+        kind,
+        live: false,
+    }
+}
+
 /// Every mpv option Kaleido's settings manage, by section of the settings page (spec 8.10).
 pub const MPV_SETTINGS: &[MpvSetting] = &[
     // Playback
@@ -83,7 +92,9 @@ pub const MPV_SETTINGS: &[MpvSetting] = &[
     live("slang", ValueKind::Languages),
     // Audio
     live("audio-device", ValueKind::AudioDevice),
-    live(
+    // The default volume (spec 8.10): changing it must not make the playing volume jump
+    // (Ruling R25).
+    at_start(
         "volume",
         ValueKind::Number {
             min: 0.0,
@@ -120,11 +131,10 @@ pub const MPV_SETTINGS: &[MpvSetting] = &[
         ValueKind::Choice(&["auto", "yes", "no"]),
     ),
     // mpv applies profiles at start; `apply-profile` cannot be undone, so it waits for a restart.
-    MpvSetting {
-        key: "profile",
-        kind: ValueKind::ChoiceOrNone(&["fast", "high-quality"]),
-        live: false,
-    },
+    at_start(
+        "profile",
+        ValueKind::ChoiceOrNone(&["fast", "high-quality"]),
+    ),
     live("glsl-shaders", ValueKind::Shaders),
 ];
 
@@ -221,14 +231,27 @@ fn choice(key: &str, value: &str, words: &[&str]) -> Result<String, SettingsErro
     }
 }
 
-/// A finite number in the range, written the short way (`40`, not `40.0`).
+/// A finite number in the range, in its short form.
 fn number(key: &str, value: &str, min: f64, max: f64) -> Result<String, SettingsError> {
     match value.parse::<f64>() {
         Ok(number) if number.is_finite() && (min..=max).contains(&number) => {
-            // -0 is 0.
-            Ok(format!("{}", number + 0.0))
+            Ok(short_number(number))
         }
         _ => Err(invalid(key, &format!("a number from {min} to {max}"))),
+    }
+}
+
+/// A number the short way, as Kaleido writes it to mpv.conf: `40`, not `40.0` or mpv's own
+/// `40.000000`; -0 is 0.
+pub fn short_number(number: f64) -> String {
+    format!("{}", number + 0.0)
+}
+
+/// `value` in the short form if it is a finite number, else as it is.
+pub fn normal_number(value: &str) -> String {
+    match value.parse::<f64>() {
+        Ok(number) if number.is_finite() => short_number(number),
+        _ => value.to_owned(),
     }
 }
 
@@ -323,7 +346,8 @@ mod tests {
             .filter(|setting| !setting.live)
             .map(|setting| setting.key)
             .collect();
-        assert_eq!(waiting, ["profile"], "profiles apply at start only");
+        // The default volume must not move the playing one (R25); profiles apply at start.
+        assert_eq!(waiting, ["volume", "profile"]);
     }
 
     #[test]
@@ -440,6 +464,12 @@ mod tests {
             Some("high-quality")
         );
         assert_eq!(check("profile", Some("")), None, "no profile");
+        // mpv's own way of printing numbers reads as the form Kaleido writes.
+        assert_eq!(normal_number("55.000000"), "55");
+        assert_eq!(normal_number("1.500000"), "1.5");
+        assert_eq!(normal_number("-0.000000"), "0");
+        assert_eq!(normal_number("auto"), "auto");
+        assert_eq!(normal_number("inf"), "inf");
         // Removing a managed key is always allowed.
         for setting in MPV_SETTINGS {
             assert_eq!(check(setting.key, None), None, "{}", setting.key);

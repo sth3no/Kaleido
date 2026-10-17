@@ -1,7 +1,8 @@
 //! Kaleido's own settings in `settings.json` (spec 4.3, 8.10): language, appearance and how a
 //! file opened during playback is played. The store holds valid settings only: a change is
-//! merged in, checked and written atomically, or nothing changes. It knows nothing of Tauri, so
-//! it can be tested on its own; the command layer tells the UI (`settings:changed`).
+//! merged in, checked and written atomically, or nothing changes; a file with a bad field keeps
+//! its other fields (Ruling R23). It knows nothing of Tauri, so it can be tested on its own;
+//! the command layer tells the UI (`settings:changed`).
 
 use std::fs;
 use std::io;
@@ -36,7 +37,8 @@ pub struct Settings {
     pub language: Language,
     pub appearance: Appearance,
     pub playback: Playback,
-    /// Top-level keys this Kaleido does not know (a newer one's, say): kept as they are.
+    /// Top-level keys of the file this Kaleido does not know (a newer one's, say): kept as they
+    /// are. A change cannot add, change or remove them.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -137,7 +139,7 @@ impl Default for Playback {
 }
 
 impl Settings {
-    /// Every value within its limits; the first that is not is the error.
+    /// Every value within its limits; the first that is not is the error, named by its path.
     pub fn validate(&self) -> Result<(), SettingsError> {
         if self.version != SETTINGS_VERSION {
             return Err(SettingsError::invalid(
@@ -181,33 +183,30 @@ impl Settings {
 pub struct SettingsStore {
     path: PathBuf,
     current: Settings,
+    /// Why changes are not saved: the file is there but could not be read or kept safe, and
+    /// writing would replace what the user has.
+    refused: Option<String>,
 }
 
 impl SettingsStore {
-    /// Reads the settings at `path`. A missing file gives the defaults (nothing is written until
-    /// something changes). A file that cannot be used (not JSON, wrong types, values out of
-    /// range) is moved aside to `settings.json.bad-<unix time>` for the user, and the defaults
-    /// are used.
+    /// Reads the settings at `path` (Ruling R23):
+    /// - missing: the defaults; nothing is written until something changes;
+    /// - not a JSON object (not JSON at all, an array, ...): moved aside to
+    ///   `settings.json.bad-<unix time>`, and the defaults are used;
+    /// - a JSON object: read field by field. A field of the wrong type, with an unknown variant
+    ///   or out of range (a `version` other than 1 too) takes its default with a warning; the
+    ///   other fields, and unknown top-level keys, are kept. The file as it was is copied to
+    ///   `settings.json.bad-<unix time>`; it is rewritten at the next change;
+    /// - there but unreadable, or a bad file that cannot be moved or copied aside: the defaults,
+    ///   and every change is refused, so the user's file is never replaced.
     pub fn load(path: impl Into<PathBuf>) -> SettingsStore {
         let path = path.into();
-        let current = match fs::read(&path) {
-            Ok(bytes) => match parse(&bytes) {
-                Ok(settings) => settings,
-                Err(reason) => {
-                    set_aside(&path, &reason);
-                    Settings::default()
-                }
-            },
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Settings::default(),
-            Err(error) => {
-                tracing::error!(
-                    "cannot read {}: {error}; the default settings are used",
-                    path.display()
-                );
-                Settings::default()
-            }
-        };
-        SettingsStore { path, current }
+        let (current, refused) = read(&path);
+        SettingsStore {
+            path,
+            current,
+            refused,
+        }
     }
 
     pub fn get(&self) -> &Settings {
@@ -215,11 +214,18 @@ impl SettingsStore {
     }
 
     /// Merges `patch` into the settings (a JSON merge patch, RFC 7386: objects merge key by key,
-    /// `null` removes a key, so a known one takes its default), checks the result and writes it
-    /// atomically. On any error the file and the settings stay as they were.
+    /// `null` removes a key, so it takes its default), checks the result and writes it
+    /// atomically. A key the settings do not have is refused. On any error the file and the
+    /// settings stay as they were.
     pub fn update(&mut self, patch: Value) -> Result<Settings, SettingsError> {
-        if !patch.is_object() {
+        if let Some(reason) = &self.refused {
+            return Err(SettingsError::io(reason));
+        }
+        let Value::Object(changes) = &patch else {
             return Err(SettingsError::invalid("", "a change is a JSON object"));
+        };
+        if let Some(key) = unknown_key(changes, &known(), "") {
+            return Err(SettingsError::NotAllowed { key });
         }
         let mut merged = serde_json::to_value(&self.current).map_err(SettingsError::io)?;
         merge(&mut merged, patch);
@@ -233,45 +239,206 @@ impl SettingsStore {
     }
 }
 
-/// The settings in a file's bytes, or why there are none.
-fn parse(bytes: &[u8]) -> Result<Settings, String> {
+/// The settings in the file at `path`, and why changes must be refused, if they must.
+fn read(path: &Path) -> (Settings, Option<String>) {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return (Settings::default(), None);
+        }
+        Err(error) => {
+            tracing::error!(
+                "cannot read {}: {error}; the default settings are used and changes are not saved",
+                path.display()
+            );
+            return (
+                Settings::default(),
+                Some(format!("settings.json cannot be read: {error}")),
+            );
+        }
+    };
+    let object = match json_object(&bytes) {
+        Ok(object) => object,
+        Err(reason) => {
+            // Not settings at all: out of the way, so the user still has it.
+            let aside = aside(path);
+            return match fs::rename(path, &aside) {
+                Ok(()) => {
+                    tracing::error!(
+                        "{} is not settings ({reason}); it is kept as {} and the default settings \
+                         are used",
+                        path.display(),
+                        aside.display()
+                    );
+                    (Settings::default(), None)
+                }
+                Err(error) => {
+                    tracing::error!(
+                        "{} is not settings ({reason}) and cannot be moved aside ({error}); the \
+                         default settings are used and changes are not saved",
+                        path.display()
+                    );
+                    (
+                        Settings::default(),
+                        Some(format!(
+                            "settings.json is not valid and cannot be moved aside: {error}"
+                        )),
+                    )
+                }
+            };
+        }
+    };
+    let (settings, fallen) = lenient(object);
+    if fallen.is_empty() {
+        return (settings, None);
+    }
+    for key in &fallen {
+        tracing::warn!("settings.json: {key} is not valid; it takes its default");
+    }
+    let aside = aside(path);
+    match fs::copy(path, &aside) {
+        Ok(_) => {
+            tracing::warn!("settings.json as it was is kept as {}", aside.display());
+            (settings, None)
+        }
+        Err(error) => {
+            tracing::error!(
+                "cannot keep a copy of {} ({error}); the default settings are used and changes \
+                 are not saved",
+                path.display()
+            );
+            (
+                Settings::default(),
+                Some(format!("a copy of settings.json cannot be made: {error}")),
+            )
+        }
+    }
+}
+
+/// The JSON object in a file's bytes, or why there is none.
+fn json_object(bytes: &[u8]) -> Result<Map<String, Value>, String> {
     // Notepad may have saved it with a BOM.
     let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
-    let value: Value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-    if !value.is_object() {
-        return Err("not a JSON object".to_owned());
+    match serde_json::from_slice(bytes) {
+        Ok(Value::Object(object)) => Ok(object),
+        Ok(_) => Err("not a JSON object".to_owned()),
+        Err(error) => Err(error.to_string()),
     }
-    let settings = from_value(value).map_err(|error| error.to_string())?;
-    settings.validate().map_err(|error| error.to_string())?;
-    Ok(settings)
 }
 
-/// Typed settings from JSON; the error names the top-level key whose value does not fit.
+/// The settings in `object`, field by field: a field that does not fit (wrong type, unknown
+/// variant, out of range) is taken out, so that it takes its default, and the rest is read
+/// again. Returns the settings and the paths of the fields taken out.
+fn lenient(mut object: Map<String, Value>) -> (Settings, Vec<String>) {
+    let mut fallen = Vec::new();
+    loop {
+        let bad = match Settings::deserialize(&Value::Object(object.clone())) {
+            Ok(settings) => match settings.validate() {
+                Ok(()) => return (settings, fallen),
+                Err(SettingsError::Invalid { key, .. }) => Some(key),
+                Err(_) => None,
+            },
+            Err(_) => misfit(&object),
+        };
+        match bad {
+            Some(key) if take_out(&mut object, &key) => fallen.push(key),
+            // Nothing to take out; cannot happen, as every default fits. Counted as a fallback,
+            // so the file is copied before anything replaces it.
+            _ => {
+                fallen.push("settings".to_owned());
+                return (Settings::default(), fallen);
+            }
+        }
+    }
+}
+
+/// Typed settings from JSON; the error names the field whose value does not fit.
 fn from_value(value: Value) -> Result<Settings, SettingsError> {
-    match Settings::deserialize(&value) {
-        Ok(settings) => Ok(settings),
-        Err(error) => Err(SettingsError::invalid(misfit(&value), &error.to_string())),
+    Settings::deserialize(&value).map_err(|error| {
+        let key = value.as_object().and_then(misfit).unwrap_or_default();
+        SettingsError::invalid(&key, &error.to_string())
+    })
+}
+
+/// The first known key whose value is not of its type: `version`, `language`, or a field of
+/// `appearance` or `playback` (the whole section if it is not an object).
+fn misfit(object: &Map<String, Value>) -> Option<String> {
+    fn fits<T: DeserializeOwned>(value: &Value) -> bool {
+        T::deserialize(value).is_ok()
+    }
+    /// The field of a section that does not fit when it is read alone.
+    fn field<T: DeserializeOwned>(section: &str, value: &Value) -> String {
+        let bad = value.as_object().and_then(|fields| {
+            fields.iter().find(|&(key, value)| {
+                let alone = Map::from_iter([(key.clone(), value.clone())]);
+                !fits::<T>(&Value::Object(alone))
+            })
+        });
+        match bad {
+            Some((key, _)) => format!("{section}.{key}"),
+            None => section.to_owned(),
+        }
+    }
+    let unfit = |key: &str, fits: fn(&Value) -> bool| object.get(key).is_some_and(|v| !fits(v));
+    if unfit("version", fits::<u32>) {
+        return Some("version".to_owned());
+    }
+    if unfit("language", fits::<Language>) {
+        return Some("language".to_owned());
+    }
+    if let Some(value) = object.get("appearance")
+        && !fits::<Appearance>(value)
+    {
+        return Some(field::<Appearance>("appearance", value));
+    }
+    if let Some(value) = object.get("playback")
+        && !fits::<Playback>(value)
+    {
+        return Some(field::<Playback>("playback", value));
+    }
+    None
+}
+
+/// Takes `path` (`key` or `section.key`) out of `object`; whether it was there.
+fn take_out(object: &mut Map<String, Value>, path: &str) -> bool {
+    match path.split_once('.') {
+        None => object.remove(path).is_some(),
+        Some((section, key)) => object
+            .get_mut(section)
+            .and_then(Value::as_object_mut)
+            .is_some_and(|fields| fields.remove(key).is_some()),
     }
 }
 
-/// The first known top-level key whose value is not of its type.
-fn misfit(value: &Value) -> &'static str {
-    fn fits<T: DeserializeOwned>(value: &Value, key: &str) -> bool {
-        value
-            .get(key)
-            .is_none_or(|section| T::deserialize(section).is_ok())
+/// Every key the settings have, as the file holds them.
+fn known() -> Map<String, Value> {
+    match serde_json::to_value(Settings::default()) {
+        Ok(Value::Object(known)) => known,
+        // Cannot happen; then nothing is known and every change is refused.
+        _ => Map::new(),
     }
-    if !fits::<u32>(value, "version") {
-        "version"
-    } else if !fits::<Language>(value, "language") {
-        "language"
-    } else if !fits::<Appearance>(value, "appearance") {
-        "appearance"
-    } else if !fits::<Playback>(value, "playback") {
-        "playback"
-    } else {
-        ""
-    }
+}
+
+/// The first key of `patch` that `known` does not have, as its path.
+fn unknown_key(
+    patch: &Map<String, Value>,
+    known: &Map<String, Value>,
+    prefix: &str,
+) -> Option<String> {
+    patch.iter().find_map(|(key, value)| {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match (known.get(key), value) {
+            (None, _) => Some(path),
+            (Some(Value::Object(fields)), Value::Object(changes)) => {
+                unknown_key(changes, fields, &path)
+            }
+            _ => None,
+        }
+    })
 }
 
 /// RFC 7386: `patch` into `target`.
@@ -294,25 +461,14 @@ fn merge(target: &mut Value, patch: Value) {
     }
 }
 
-/// Moves a file that cannot be used out of the way, so the user still has it.
-fn set_aside(path: &Path, reason: &str) {
+/// Where a bad settings file is kept for the user: `settings.json.bad-<unix time>`.
+fn aside(path: &Path) -> PathBuf {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".bad-{seconds}"));
-    let aside = path.with_file_name(name);
-    match fs::rename(path, &aside) {
-        Ok(()) => tracing::error!(
-            "{} cannot be used ({reason}); it is kept as {} and the default settings are used",
-            path.display(),
-            aside.display()
-        ),
-        Err(error) => tracing::error!(
-            "{} cannot be used ({reason}) nor moved aside ({error}); the default settings are used",
-            path.display()
-        ),
-    }
+    path.with_file_name(name)
 }
 
 #[cfg(test)]
@@ -333,6 +489,22 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    /// The one `settings.json.bad-<unix time>` in `dir`, as text.
+    fn kept_aside(dir: &Path) -> String {
+        let bad: Vec<String> = names(dir)
+            .into_iter()
+            .filter(|name| name.starts_with("settings.json.bad-"))
+            .collect();
+        assert_eq!(bad.len(), 1, "{bad:?}");
+        let stamp = bad[0].strip_prefix("settings.json.bad-").unwrap();
+        assert!(
+            !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit()),
+            "{}",
+            bad[0]
+        );
+        fs::read_to_string(dir.join(&bad[0])).unwrap()
     }
 
     #[test]
@@ -365,27 +537,29 @@ mod tests {
             })
         );
 
-        // An older file without some keys: they take their defaults.
+        // An older file without some keys: they take their defaults, and nothing is copied.
         fs::write(&path, r#"{ "version": 1, "appearance": { "blur": 10 } }"#).unwrap();
         let store = SettingsStore::load(&path);
         assert_eq!(store.get().appearance.blur, 10.0);
         assert_eq!(store.get().appearance.ui_scale, 1.0);
         assert_eq!(store.get().language, Language::System);
         assert_eq!(store.get().playback.open_while_playing, LoadMode::Replace);
+        assert_eq!(names(tmp.path()), ["settings.json"]);
         // A BOM from Notepad is fine.
         fs::write(&path, "\u{feff}{ \"language\": \"cs\" }").unwrap();
         assert_eq!(SettingsStore::load(&path).get().language, Language::Cs);
     }
 
+    /// Only a file that is not a JSON object is moved aside (Ruling R23).
     #[test]
     fn corrupt_settings_are_kept_aside_and_defaults_used() {
         for broken in [
             "{not json",
             "",
+            "{ \"language\": \"cs\"",
             "[1, 2]",
-            r#"{ "language": "de" }"#,
-            r#"{ "appearance": { "uiScale": "big" } }"#,
-            r#"{ "appearance": { "uiScale": 7 } }"#,
+            "\"settings\"",
+            "null",
         ] {
             let tmp = tempfile::tempdir().unwrap();
             let path = file(tmp.path());
@@ -393,24 +567,128 @@ mod tests {
 
             let mut store = SettingsStore::load(&path);
             assert_eq!(*store.get(), Settings::default(), "{broken}");
-            let found = names(tmp.path());
-            assert_eq!(found.len(), 1, "{found:?}");
-            let stamp = found[0].strip_prefix("settings.json.bad-").unwrap();
-            assert!(
-                !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit()),
-                "{}",
-                found[0]
-            );
-            assert_eq!(
-                fs::read_to_string(tmp.path().join(&found[0])).unwrap(),
-                broken
-            );
+            assert!(!path.exists(), "moved, not copied: {broken}");
+            assert_eq!(kept_aside(tmp.path()), broken);
 
             // The next change writes a good file; the bad one stays for the user.
             store.update(json!({ "language": "en" })).unwrap();
             assert_eq!(SettingsStore::load(&path).get().language, Language::En);
+            assert_eq!(kept_aside(tmp.path()), broken);
             assert_eq!(names(tmp.path()).len(), 2);
         }
+    }
+
+    #[test]
+    fn one_bad_field_takes_its_default_and_keeps_the_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let text = r##"{
+            "language": "cs",
+            "appearance": { "uiScale": 7, "blur": 10, "accent": "#112233", "radius": 30 },
+            "playback": { "openWhilePlaying": "append" },
+            "plugins": { "autoUpdate": true }
+        }"##;
+        fs::write(&path, text).unwrap();
+
+        let mut store = SettingsStore::load(&path);
+        let settings = store.get();
+        assert_eq!(
+            settings.appearance.ui_scale, 1.0,
+            "out of range: the default"
+        );
+        assert_eq!(
+            settings.appearance.radius, 20.0,
+            "out of range: the default"
+        );
+        assert_eq!(settings.appearance.blur, 10.0);
+        assert_eq!(settings.appearance.accent, "#112233");
+        assert_eq!(settings.language, Language::Cs);
+        assert_eq!(settings.playback.open_while_playing, LoadMode::Append);
+        assert_eq!(settings.extra["plugins"], json!({ "autoUpdate": true }));
+        // The file as it was is copied; the file itself stays until the next change.
+        assert_eq!(kept_aside(tmp.path()), text);
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+
+        store
+            .update(json!({ "appearance": { "mica": false } }))
+            .unwrap();
+        let written: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["appearance"]["uiScale"], 1.0);
+        assert_eq!(written["appearance"]["blur"], 10.0);
+        assert_eq!(written["appearance"]["mica"], false);
+        assert_eq!(written["plugins"], json!({ "autoUpdate": true }));
+        assert_eq!(kept_aside(tmp.path()), text, "the copy stays as it was");
+    }
+
+    #[test]
+    fn an_unknown_variant_falls_back_for_that_field_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let text = r##"{
+            "language": "de",
+            "appearance": { "mode": "dim", "mica": false, "glassTint": "#000000", "uiScale": "big" },
+            "playback": "replace"
+        }"##;
+        fs::write(&path, text).unwrap();
+
+        let store = SettingsStore::load(&path);
+        let settings = store.get();
+        assert_eq!(settings.language, Language::System);
+        assert_eq!(settings.appearance.mode, ThemeMode::System);
+        assert_eq!(settings.appearance.ui_scale, 1.0, "wrong type: the default");
+        assert!(!settings.appearance.mica, "kept");
+        assert_eq!(settings.appearance.glass_tint, "#000000", "kept");
+        assert_eq!(settings.playback, Playback::default(), "not an object");
+        assert_eq!(kept_aside(tmp.path()), text);
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn a_newer_version_is_read_best_effort_and_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let text =
+            r#"{ "version": 2, "language": "en", "appearance": { "blur": 5 }, "future": [1] }"#;
+        fs::write(&path, text).unwrap();
+
+        let mut store = SettingsStore::load(&path);
+        assert_eq!(store.get().version, SETTINGS_VERSION);
+        assert_eq!(store.get().language, Language::En);
+        assert_eq!(store.get().appearance.blur, 5.0);
+        assert_eq!(store.get().extra["future"], json!([1]));
+        assert_eq!(kept_aside(tmp.path()), text, "the newer file is kept");
+        // A change writes version 1; the copy keeps version 2.
+        store.update(json!({ "language": "cs" })).unwrap();
+        assert_eq!(SettingsStore::load(&path).get().language, Language::Cs);
+        assert_eq!(kept_aside(tmp.path()), text);
+    }
+
+    /// A file that is there but cannot be read (here a folder of that name, as a sharing
+    /// violation would be) is never replaced.
+    #[test]
+    fn an_unreadable_file_is_never_overwritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("inside"), "the user's").unwrap();
+
+        let mut store = SettingsStore::load(&path);
+        assert_eq!(*store.get(), Settings::default());
+        assert!(matches!(
+            store.update(json!({ "language": "cs" })),
+            Err(SettingsError::Io { .. })
+        ));
+        assert_eq!(*store.get(), Settings::default());
+        assert!(path.is_dir());
+        assert_eq!(
+            fs::read_to_string(path.join("inside")).unwrap(),
+            "the user's"
+        );
+        assert_eq!(
+            names(tmp.path()),
+            ["settings.json"],
+            "nothing moved or copied"
+        );
     }
 
     #[test]
@@ -424,6 +702,11 @@ mod tests {
         .unwrap();
         let mut store = SettingsStore::load(&path);
         assert_eq!(store.get().extra["plugins"], json!({ "autoUpdate": true }));
+        assert_eq!(
+            names(tmp.path()),
+            ["settings.json"],
+            "unknown keys are no fault"
+        );
 
         let updated = store
             .update(json!({ "appearance": { "uiScale": 1.25 } }))
@@ -442,16 +725,36 @@ mod tests {
             "no temporary file left"
         );
 
-        // `null` removes a key: an unknown one goes, a known one takes its default.
+        // A change may name only keys the settings have; the unknown ones stay as they are.
+        let before = fs::read(&path).unwrap();
+        for (patch, key) in [
+            (json!({ "later": { "a": 1 } }), "later"),
+            (json!({ "updates": null }), "updates"),
+            (json!({ "plugins": { "autoUpdate": false } }), "plugins"),
+            (
+                json!({ "appearance": { "uiScal": 1.2 } }),
+                "appearance.uiScal",
+            ),
+            (
+                json!({ "playback": { "shuffle": true } }),
+                "playback.shuffle",
+            ),
+        ] {
+            assert_eq!(
+                store.update(patch.clone()),
+                Err(SettingsError::NotAllowed { key: key.into() }),
+                "{patch}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), before, "{patch}");
+        }
+
+        // `null` on a known key: it takes its default.
         let updated = store
-            .update(json!({ "updates": null, "appearance": { "uiScale": null } }))
+            .update(json!({ "appearance": { "uiScale": null } }))
             .unwrap();
         assert_eq!(updated.appearance.ui_scale, 1.0);
-        assert!(!updated.extra.contains_key("updates"));
         assert_eq!(updated.extra["plugins"], json!({ "autoUpdate": true }));
-        // New unknown keys are kept too.
-        let updated = store.update(json!({ "later": { "a": 1 } })).unwrap();
-        assert_eq!(updated.extra["later"], json!({ "a": 1 }));
+        assert_eq!(updated.extra["updates"], "beta");
     }
 
     #[test]
@@ -510,12 +813,19 @@ mod tests {
                 json!({ "appearance": { "glassTint": "#16161c80" } }),
                 "appearance.glassTint",
             ),
-            (json!({ "appearance": { "uiScale": "big" } }), "appearance"),
-            (json!({ "appearance": { "mode": "dim" } }), "appearance"),
+            (
+                json!({ "appearance": { "uiScale": "big" } }),
+                "appearance.uiScale",
+            ),
+            (
+                json!({ "appearance": { "mode": "dim" } }),
+                "appearance.mode",
+            ),
+            (json!({ "appearance": 5 }), "appearance"),
             (json!({ "language": "de" }), "language"),
             (
                 json!({ "playback": { "openWhilePlaying": "shuffle" } }),
-                "playback",
+                "playback.openWhilePlaying",
             ),
             (json!({ "version": 2 }), "version"),
             (json!("not an object"), ""),
