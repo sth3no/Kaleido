@@ -14,25 +14,29 @@ pub use error::{Error, Result};
 pub use event::{EndFileReason, Event, PropertyKind, PropertyValue};
 pub use handle::Mpv;
 
-/// Overrides where libmpv is loaded from.
+/// Overrides where libmpv is loaded from (debug builds only).
 pub const LIBMPV_ENV: &str = "KALEIDO_LIBMPV";
 pub const LIBMPV_DLL: &str = "libmpv-2.dll";
 
-/// `$KALEIDO_LIBMPV`, then next to the running executable, then the repo's `vendor/` (dev builds).
+/// Release builds load only the DLL next to the running executable, so neither the environment
+/// nor the build machine's paths choose the code Kaleido runs. Debug builds look at
+/// `$KALEIDO_LIBMPV` first and fall back to the repo's `vendor/`.
 pub fn locate_libmpv() -> PathBuf {
+    #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os(LIBMPV_ENV) {
         return PathBuf::from(path);
     }
-    if let Some(candidate) = std::env::current_exe()
+    let beside_exe = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join(LIBMPV_DLL)))
-        .filter(|path| path.is_file())
-    {
-        return candidate;
+        .and_then(|exe| Some(exe.parent()?.join(LIBMPV_DLL)));
+    #[cfg(debug_assertions)]
+    if !beside_exe.as_deref().is_some_and(Path::is_file) {
+        return Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../vendor/libmpv")
+            .join(LIBMPV_DLL);
     }
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../vendor/libmpv")
-        .join(LIBMPV_DLL)
+    // Without an executable path, an empty path fails to load instead of searching the DLL path.
+    beside_exe.unwrap_or_default()
 }
 
 pub fn load_api(path: &Path) -> Result<Arc<sys::Api>> {

@@ -25,7 +25,7 @@ pub struct AppPaths {
     pub cache_dir: PathBuf,
     /// `<local_dir>\crash`.
     pub crash_dir: PathBuf,
-    /// Where the bundled resources sit (`essentials\thumbfast.lua`, ...).
+    /// `resources\` of the installation: `defaults\`, `essentials\thumbfast.lua`, ...
     pub resource_dir: PathBuf,
     /// The user's Desktop: mpv `screenshot-dir`.
     pub desktop_dir: PathBuf,
@@ -35,7 +35,8 @@ pub struct AppPaths {
 
 impl AppPaths {
     /// Lays out the folders under the given roots. Touches no disk, so it can be tested with
-    /// made-up roots.
+    /// made-up roots. `resources` is Tauri's resource folder, which on Windows is the folder of
+    /// the executable; the bundled files sit in its `resources` subfolder (spec 4.3).
     pub fn from_roots(
         roaming: &Path,
         local: &Path,
@@ -53,7 +54,7 @@ impl AppPaths {
             crash_dir: local_dir.join("crash"),
             state_dir,
             local_dir,
-            resource_dir: resources.to_path_buf(),
+            resource_dir: resources.join("resources"),
             desktop_dir: desktop.to_path_buf(),
             exe_dir: exe_dir.to_path_buf(),
         }
@@ -119,7 +120,7 @@ mod tests {
         assert_eq!(p.logs_dir, Path::new("L/Kaleido/logs"));
         assert_eq!(p.cache_dir, Path::new("L/Kaleido/cache"));
         assert_eq!(p.crash_dir, Path::new("L/Kaleido/crash"));
-        assert_eq!(p.resource_dir, Path::new("res"));
+        assert_eq!(p.resource_dir, Path::new("res/resources"));
         assert_eq!(p.desktop_dir, Path::new("D"));
         assert_eq!(p.exe_dir, Path::new("E"));
     }

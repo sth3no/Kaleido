@@ -1870,9 +1870,11 @@ name = "kaleido"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mpv-ffi",
  "tauri",
  "tauri-build",
  "tempfile",
+ "tracing",
  "windows",
 ]
 

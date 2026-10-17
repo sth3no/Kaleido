@@ -30,7 +30,8 @@
     "active": false,
     "icon": ["icons/icon.ico"],
     "resources": {
-      "../vendor/thumbfast/thumbfast.lua": "essentials/thumbfast.lua"
+      "../vendor/thumbfast/thumbfast.lua": "resources/essentials/thumbfast.lua",
+      "../resources/defaults/": "resources/defaults/"
     }
   }
 }

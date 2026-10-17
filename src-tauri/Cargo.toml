@@ -20,6 +20,8 @@ tauri-build = { version = "2.7", features = [] }
 [dependencies]
 tauri = { version = "2.12", features = [] }
 anyhow = "1"
+mpv-ffi = { path = "../crates/mpv-ffi" }
+tracing = "0.1"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security",
