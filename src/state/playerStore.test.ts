@@ -66,12 +66,31 @@ describe('the store', () => {
     expect(store.getState().loaded).toBe(true);
   });
 
+  test('a snapshot taken before mpv knew a time does not undo a file-loaded heard before it (Ruling R33)', () => {
+    // The reply to system_ui_ready can come after player:file-loaded, and be a snapshot taken right
+    // after loadfile.
+    store.getState().fileLoaded();
+    expect(store.getState().loaded).toBe(true);
+    store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: null });
+    expect(store.getState().loaded).toBe(true);
+
+    // The same snapshot after the file ended, or of an idle player, still clears it.
+    store.getState().endFile({ reason: 'eof', error: null });
+    store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: null });
+    expect(store.getState().loaded).toBe(false);
+    store.getState().fileLoaded();
+    store.getState().applySnapshot({ 'idle-active': true, 'time-pos': null, duration: null });
+    expect(store.getState().loaded).toBe(false);
+  });
+
   test('an idle snapshot, or one of a file that is still loading, says nothing is loaded', () => {
     store.getState().fileLoaded();
     store.getState().applySnapshot({ 'idle-active': true, 'time-pos': null, duration: null });
     expect(store.getState().loaded).toBe(false);
 
-    // Open, but mpv has no time and no duration yet.
+    // Open, but mpv has no time and no duration yet, and no file-loaded was heard: the idle
+    // snapshot above left nothing loaded, so this starts from false.
+    expect(store.getState().loaded).toBe(false);
     store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: null });
     expect(store.getState().loaded).toBe(false);
 

@@ -54,10 +54,14 @@ export const usePlayerStore = create<PlayerState>()((set) => ({
       props: { ...state.props, ...snapshot },
       // A UI that starts or reloads while a file plays never hears its `player:file-loaded`; the
       // snapshot says whether a file is loaded: something is open (not idle) and has a time or a
-      // duration (Ruling R32).
+      // duration (Ruling R32). The reply can also come after `player:file-loaded` and be taken
+      // right after `loadfile`, before mpv knew a time: a file that was heard loaded stays loaded
+      // unless the snapshot says mpv is idle (Ruling R33).
       loaded:
         snapshot['idle-active'] === false &&
-        (Number.isFinite(snapshot['time-pos']) || Number.isFinite(snapshot['duration'])),
+        (Number.isFinite(snapshot['time-pos']) ||
+          Number.isFinite(snapshot['duration']) ||
+          state.loaded),
     }));
   },
   applyChanges: (changes) => {
