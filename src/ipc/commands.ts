@@ -19,14 +19,20 @@ import type {
   ThumbFrame,
 } from './types';
 
+/** The arguments of a call: none for a command that takes none, else exactly its arguments. */
+type CallArgs<K extends keyof CommandTable> = CommandTable[K]['args'] extends undefined
+  ? []
+  : [args: CommandTable[K]['args']];
+
 function call<K extends keyof CommandTable>(
   command: K,
-  args?: CommandTable[K]['args'],
+  ...args: CallArgs<K>
 ): Promise<CommandTable[K]['result']> {
   // Without a second argument at all for a command that takes none.
-  return args === undefined
+  const [payload] = args as unknown as [Record<string, unknown>?];
+  return payload === undefined
     ? invoke<CommandTable[K]['result']>(command)
-    : invoke<CommandTable[K]['result']>(command, args);
+    : invoke<CommandTable[K]['result']>(command, payload);
 }
 
 // --- The player ------------------------------------------------------------------------------

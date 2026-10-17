@@ -50,7 +50,15 @@ export const usePlayerStore = create<PlayerState>()((set) => ({
   lastEnd: null,
   logTail: [],
   applySnapshot: (snapshot) => {
-    set((state) => ({ props: { ...state.props, ...snapshot } }));
+    set((state) => ({
+      props: { ...state.props, ...snapshot },
+      // A UI that starts or reloads while a file plays never hears its `player:file-loaded`; the
+      // snapshot says whether a file is loaded: something is open (not idle) and has a time or a
+      // duration (Ruling R32).
+      loaded:
+        snapshot['idle-active'] === false &&
+        (Number.isFinite(snapshot['time-pos']) || Number.isFinite(snapshot['duration'])),
+    }));
   },
   applyChanges: (changes) => {
     set((state) => {
@@ -139,10 +147,12 @@ export const selectSpeed = (props: PlayerProps): number => {
 };
 
 /**
- * Whether the time is running: not paused, not stalled for the network, not seeking, not at the
- * end, and a time to run from.
+ * Whether the time is running: a file is loaded (so a stale `time-pos` after `end-file` runs
+ * nothing), not paused, not stalled for the network, not seeking, not at the end, and a time to
+ * run from. Takes the store's state, not only the props: `usePlayerStore(selectPlaying)`.
  */
-export const selectPlaying = (props: PlayerProps): boolean =>
+export const selectPlaying = ({ props, loaded }: Pick<PlayerState, 'props' | 'loaded'>): boolean =>
+  loaded &&
   !selectIdle(props) &&
   props['pause'] === false &&
   props['paused-for-cache'] !== true &&

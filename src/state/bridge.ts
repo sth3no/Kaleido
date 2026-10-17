@@ -37,21 +37,26 @@ export async function startPlayerBridge(signal?: AbortSignal): Promise<() => voi
   // A `glass:state` that arrives is newer than the answer to `glass_state`, which is asked for
   // meanwhile.
   let glassEvent = false;
+  let released = false;
+  // A bridge that was stopped hears nothing, also in the moment before its listeners are gone
+  // (React runs an effect twice in development: the first run must not add a line to the log).
+  const stopped = () => released || signal?.aborted === true;
 
   const subscriptions = await Promise.allSettled([
     onPlayerState(({ changes }) => {
-      player().applyChanges(changes);
+      if (!stopped()) player().applyChanges(changes);
     }),
     onFileLoaded(() => {
-      player().fileLoaded();
+      if (!stopped()) player().fileLoaded();
     }),
     onEndFile((end) => {
-      player().endFile(end);
+      if (!stopped()) player().endFile(end);
     }),
     onLog((line) => {
-      player().addLog(line);
+      if (!stopped()) player().addLog(line);
     }),
     onGlassState((state) => {
+      if (stopped()) return;
       glassEvent = true;
       ui().setGlass(state);
     }),
@@ -59,11 +64,10 @@ export async function startPlayerBridge(signal?: AbortSignal): Promise<() => voi
     // so with this event while it answers, so it has to be handled here, not by a page that
     // mounts later: the player is the page to show for it.
     onOpenRequest(() => {
-      ui().setPage('player');
+      if (!stopped()) ui().setPage('player');
     }),
   ]);
 
-  let released = false;
   const release = () => {
     if (released) return;
     released = true;

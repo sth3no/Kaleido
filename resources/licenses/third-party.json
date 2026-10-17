@@ -1,5 +1,6 @@
 [
   {"name":"@tauri-apps/api","version":"2.12.4","license":"Apache-2.0 OR MIT","url":"https://github.com/tauri-apps/tauri"},
+  {"name":"@types/react","version":"19.3.0","license":"MIT","url":"https://github.com/DefinitelyTyped/DefinitelyTyped"},
   {"name":"adler2","version":"2.0.1","license":"0BSD OR MIT OR Apache-2.0","url":"https://github.com/oyvindln/adler2"},
   {"name":"aho-corasick","version":"1.1.5","license":"Unlicense OR MIT","url":"https://github.com/BurntSushi/aho-corasick"},
   {"name":"alloc-no-stdlib","version":"3.0.0","license":"BSD-3-Clause","url":"https://github.com/dropbox/rust-alloc-no-stdlib"},
@@ -32,6 +33,7 @@
   {"name":"crypto-common","version":"0.1.7","license":"MIT OR Apache-2.0","url":"https://github.com/RustCrypto/traits"},
   {"name":"cssparser","version":"0.37.0","license":"MPL-2.0","url":"https://github.com/servo/rust-cssparser"},
   {"name":"cssparser-macros","version":"0.7.1","license":"MPL-2.0","url":"https://github.com/servo/rust-cssparser"},
+  {"name":"csstype","version":"3.2.3","license":"MIT","url":"https://github.com/frenic/csstype"},
   {"name":"ctor","version":"1.0.13","license":"Apache-2.0 OR MIT","url":"https://github.com/mmastrac/linktime"},
   {"name":"darling","version":"0.24.1","license":"MIT","url":"https://github.com/TedDriggs/darling"},
   {"name":"darling_core","version":"0.24.1","license":"MIT","url":"https://github.com/TedDriggs/darling"},

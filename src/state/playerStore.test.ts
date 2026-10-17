@@ -53,6 +53,35 @@ describe('the store', () => {
     expect(store.getState().props).not.toBe(before);
   });
 
+  test('a snapshot of a playing file says it is loaded: the UI missed its file-loaded (Ruling R32)', () => {
+    expect(store.getState().loaded).toBe(false);
+    store.getState().applySnapshot(playing);
+    expect(store.getState().loaded).toBe(true);
+  });
+
+  test('a snapshot with a time or a duration but no other is a loaded file too', () => {
+    store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: 90 });
+    expect(store.getState().loaded).toBe(true);
+    store.getState().applySnapshot({ 'idle-active': false, 'time-pos': 3, duration: null });
+    expect(store.getState().loaded).toBe(true);
+  });
+
+  test('an idle snapshot, or one of a file that is still loading, says nothing is loaded', () => {
+    store.getState().fileLoaded();
+    store.getState().applySnapshot({ 'idle-active': true, 'time-pos': null, duration: null });
+    expect(store.getState().loaded).toBe(false);
+
+    // Open, but mpv has no time and no duration yet.
+    store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: null });
+    expect(store.getState().loaded).toBe(false);
+
+    // A stale time of a file that has ended does not count while mpv is idle.
+    store.getState().applySnapshot({ 'idle-active': true, 'time-pos': 42, duration: 100 });
+    expect(store.getState().loaded).toBe(false);
+    store.getState().applySnapshot({ pause: true });
+    expect(store.getState().loaded).toBe(false);
+  });
+
   test('a value that is gone arrives as null and is kept as null', () => {
     store.getState().applyChanges({ sid: 2, aid: 1 });
     store.getState().applyChanges({ sid: null });
@@ -103,7 +132,7 @@ describe('selectors on an empty state', () => {
     expect(selectDuration(empty)).toBe(0);
     expect(selectVolume(empty)).toBe(100);
     expect(selectSpeed(empty)).toBe(1);
-    expect(selectPlaying(empty)).toBe(false);
+    expect(selectPlaying({ props: empty, loaded: false })).toBe(false);
     expect(selectIdle(empty)).toBe(false);
     expect(selectTracks('audio')(empty)).toEqual([]);
     expect(selectPlaylist(empty)).toEqual([]);
@@ -134,24 +163,40 @@ describe('selectors on a playing file', () => {
     expect(selectDuration(playing)).toBe(3600.25);
     expect(selectVolume(playing)).toBe(100);
     expect(selectSpeed(playing)).toBe(1);
-    expect(selectPlaying(playing)).toBe(true);
+    expect(selectPlaying({ props: playing, loaded: true })).toBe(true);
     expect(selectIdle(playing)).toBe(false);
   });
 
   test('the time does not run while paused, seeking, stalled or at the end', () => {
-    expect(selectPlaying({ ...playing, pause: true })).toBe(false);
-    expect(selectPlaying({ ...playing, seeking: true })).toBe(false);
-    expect(selectPlaying({ ...playing, 'paused-for-cache': true })).toBe(false);
-    expect(selectPlaying({ ...playing, 'eof-reached': true })).toBe(false);
+    const running = (props: PlayerProps) => selectPlaying({ props: { ...playing, ...props }, loaded: true });
+    expect(running({ pause: true })).toBe(false);
+    expect(running({ seeking: true })).toBe(false);
+    expect(running({ 'paused-for-cache': true })).toBe(false);
+    expect(running({ 'eof-reached': true })).toBe(false);
     // Nothing to run on from while the file loads: mpv has no time yet.
-    expect(selectPlaying({ ...playing, 'time-pos': null })).toBe(false);
+    expect(running({ 'time-pos': null })).toBe(false);
+  });
+
+  test('the time does not run before the file is loaded', () => {
+    expect(selectPlaying({ props: playing, loaded: false })).toBe(false);
+  });
+
+  test('a time-pos that arrives after endFile does not make the player play', () => {
+    store.getState().applyChanges(playing);
+    store.getState().fileLoaded();
+    expect(selectPlaying(store.getState())).toBe(true);
+
+    store.getState().endFile({ reason: 'eof', error: null });
+    // end-file comes first; idle-active only turns true after it, and mpv can still send a time.
+    store.getState().applyChanges({ 'time-pos': 42, pause: false });
+    expect(selectPlaying(store.getState())).toBe(false);
   });
 
   test('idle comes from idle-active, and a stale time-pos after end-file shows nothing', () => {
     const afterEnd = { ...playing, 'idle-active': true, 'time-pos': 42 };
     expect(selectIdle(afterEnd)).toBe(true);
     expect(selectTimePos(afterEnd)).toBe(0);
-    expect(selectPlaying(afterEnd)).toBe(false);
+    expect(selectPlaying({ props: afterEnd, loaded: true })).toBe(false);
     // No time-pos is not idle: a file that is still loading has none either.
     expect(selectIdle({ 'idle-active': false, 'time-pos': null })).toBe(false);
   });

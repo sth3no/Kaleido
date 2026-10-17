@@ -24,6 +24,8 @@ const EVENTS = [
 /** What happened, in order: `listen <event>`, `unlisten <event>` and `invoke <command>`. */
 let order: string[];
 const handlers = new Map<string, EventCallback<unknown>>();
+/** Every handler that was registered, also of a subscription that was let go since. */
+let registered: { event: string; handler: EventCallback<unknown> }[];
 /** Subscriptions that wait for `release()`; `null`: they are there at once. */
 let held: (() => void)[] | null;
 /** The event whose subscription fails. */
@@ -41,6 +43,13 @@ const fire = (event: string, payload: unknown) => {
   handler({ event, id: 0, payload });
 };
 
+/** The event reaches every handler that was ever registered for it, as one that is in flight would. */
+const fireAll = (event: string, payload: unknown) => {
+  for (const entry of registered.filter((one) => one.event === event)) {
+    entry.handler({ event, id: 0, payload });
+  }
+};
+
 const steps = (kind: 'listen' | 'unlisten' | 'invoke') =>
   order.filter((step) => step.startsWith(`${kind} `));
 
@@ -49,6 +58,7 @@ const listening = () => expect(steps('listen')).toHaveLength(EVENTS.length);
 beforeEach(() => {
   order = [];
   handlers.clear();
+  registered = [];
   held = null;
   failing = null;
   answers = {
@@ -60,6 +70,7 @@ beforeEach(() => {
   vi.mocked(listen).mockImplementation(((event: string, handler: EventCallback<unknown>) => {
     order.push(`listen ${event}`);
     handlers.set(event, handler);
+    registered.push({ event, handler });
     if (event === failing) return Promise.reject(new Error(`cannot listen to ${event}`));
     const unlisten: UnlistenFn = () => {
       order.push(`unlisten ${event}`);
@@ -161,12 +172,25 @@ describe('startPlayerBridge', () => {
     expect(useUiStore.getState().glass).toEqual({ enabled: false, reason: 'gpuFailure' });
   });
 
-  test('stopping lets go of every listener, once', async () => {
+  test('stopping lets go of every listener, once, and an event still on its way is ignored', async () => {
     const stop = await startPlayerBridge();
     expect(steps('unlisten')).toEqual([]);
     stop();
     stop();
     expect(steps('unlisten').sort()).toEqual(EVENTS.map((event) => `unlisten ${event}`).sort());
+
+    // Tauri's unlisten is asynchronous: an event that was sent before it is still delivered.
+    fire('player:log', { level: 'warn', prefix: 'ffmpeg', text: 'late' });
+    fire('player:state', { changes: { pause: false } });
+    fire('player:file-loaded', {});
+    fire('player:end-file', { reason: 'eof', error: null });
+    fire('glass:state', { enabled: false, reason: 'user' });
+    fire('system:open-request', { count: 1 });
+    expect(usePlayerStore.getState().logTail).toEqual([]);
+    expect(usePlayerStore.getState().props).toEqual({ pause: true, 'time-pos': 1 });
+    expect(usePlayerStore.getState().loaded).toBe(false);
+    expect(usePlayerStore.getState().lastEnd).toBeNull();
+    expect(useUiStore.getState().glass).toEqual({ enabled: true, reason: null });
   });
 
   test('stopping while it subscribes asks Rust for nothing and lets go', async () => {
@@ -228,6 +252,15 @@ describe('usePlayerBridge', () => {
     await vi.waitFor(() => expect(usePlayerStore.getState().props).toEqual({ pause: true, 'time-pos': 1 }));
     expect(steps('invoke')).toEqual(['invoke system_ui_ready', 'invoke glass_state']);
     expect(steps('listen')).toHaveLength(2 * EVENTS.length);
+
+    // The first run's listeners were let go, but Tauri's unlisten is asynchronous, so an event
+    // can still reach them: one line of the log is one line, not two.
+    fireAll('player:log', { level: 'warn', prefix: 'ffmpeg', text: 'Invalid NAL unit size' });
+    expect(usePlayerStore.getState().logTail).toEqual([
+      { level: 'warn', prefix: 'ffmpeg', text: 'Invalid NAL unit size' },
+    ]);
+    fireAll('player:end-file', { reason: 'error', error: 'loading failed' });
+    expect(usePlayerStore.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed' });
 
     unmount();
     await vi.waitFor(() => expect(steps('unlisten')).toHaveLength(2 * EVENTS.length));

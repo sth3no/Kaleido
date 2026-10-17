@@ -14,7 +14,9 @@ use super::open_queue::OpenRequest;
 use crate::player::Engine;
 use crate::player::load::Source;
 
+// `Serialize` only for the IPC contract test, which writes what it read back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "camelCase")]
 pub enum DialogPurpose {
     /// Files to play, opened by the open-while-playing setting.

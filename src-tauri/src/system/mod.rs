@@ -36,6 +36,12 @@ pub const JOIN_WINDOW: Duration = Duration::from_millis(300);
 /// The current value of every observed property, as `player::snapshot` reads it.
 pub type Snapshot = BTreeMap<String, Value>;
 
+/// The event that tells the UI Rust has handed the player sources; its payload is
+/// [`OpenRequestEvent`].
+pub const OPEN_REQUEST_EVENT: &str = "system:open-request";
+/// The event that tells the UI Ctrl+V found no link on the clipboard; its payload is `{}`.
+pub const PASTE_EMPTY_EVENT: &str = "system:paste-empty";
+
 /// The payload of `system:open-request`: Rust has handed the player `count` sources.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct OpenRequestEvent {
@@ -170,8 +176,8 @@ fn play(app: &AppHandle, batch: Batch) {
     let event = OpenRequestEvent {
         count: batch.sources.len(),
     };
-    if let Err(error) = app.emit("system:open-request", event) {
-        tracing::warn!("cannot send system:open-request to the UI: {error}");
+    if let Err(error) = app.emit(OPEN_REQUEST_EVENT, event) {
+        tracing::warn!("cannot send {OPEN_REQUEST_EVENT} to the UI: {error}");
     }
 }
 

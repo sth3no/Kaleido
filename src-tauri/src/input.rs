@@ -21,7 +21,9 @@ const WHEEL: &[&str] = &["WHEEL_UP", "WHEEL_DOWN", "WHEEL_LEFT", "WHEEL_RIGHT"];
 
 /// What the UI sends. There is no double click: mpv builds it from two quick presses of the left
 /// button itself.
+// `Serialize` only for the IPC contract test, which writes what it read back.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum InputEvent {
     KeyDown {

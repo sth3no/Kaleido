@@ -11,6 +11,9 @@ pub mod surface;
 pub mod system;
 pub mod thumbs;
 
+#[cfg(test)]
+mod ipc_contract_tests;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -242,9 +245,12 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
         PlayerEvent::Message { args } => match args.as_slice() {
             [action] if action == "paste" => {
                 if system::clipboard::paste(app) == PasteOutcome::Empty
-                    && let Err(error) = app.emit("system:paste-empty", serde_json::json!({}))
+                    && let Err(error) = app.emit(system::PASTE_EMPTY_EVENT, serde_json::json!({}))
                 {
-                    tracing::warn!("cannot send system:paste-empty to the UI: {error}");
+                    tracing::warn!(
+                        "cannot send {} to the UI: {error}",
+                        system::PASTE_EMPTY_EVENT
+                    );
                 }
                 true
             }

@@ -5,9 +5,12 @@
  * The animation-frame loop exists only while a component uses the hook and the player is playing.
  * Controls that are hidden do not use it, so they cost nothing (spec 13), and a paused player
  * redraws nothing.
+ *
+ * The time never goes back by itself. A new `time-pos` is the truth and replaces it; without one
+ * (a pause, a change of speed) the time stays where it has run to, and starts from there again.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   selectDuration,
@@ -17,27 +20,38 @@ import {
   usePlayerStore,
 } from './playerStore';
 
-/** `time` as it ran on from `anchor`, the `time-pos` it started from. */
-type Running = { anchor: number; time: number };
-
 /** Seconds into the file, running on between updates while playing; never past the duration. */
 export function useInterpolatedTime(): number {
   const timePos = usePlayerStore((state) => selectTimePos(state.props));
   const duration = usePlayerStore((state) => selectDuration(state.props));
   const speed = usePlayerStore((state) => selectSpeed(state.props));
-  const playing = usePlayerStore((state) => selectPlaying(state.props));
-  const [running, setRunning] = useState<Running>({ anchor: timePos, time: timePos });
+  const playing = usePlayerStore(selectPlaying);
+  const [time, setTime] = useState(timePos);
+  const [anchor, setAnchor] = useState(timePos);
+
+  // A new `time-pos` is where the time is from now on. Set while rendering, so that the old time
+  // is never drawn next to it.
+  const changed = anchor !== timePos;
+  if (changed) {
+    setAnchor(timePos);
+    setTime(timePos);
+  }
+
+  // Where the loop starts from: the time as it was last drawn.
+  const drawn = useRef(time);
+  useEffect(() => {
+    drawn.current = time;
+  }, [time]);
 
   useEffect(() => {
     if (!playing) return undefined;
+    const from = drawn.current;
     const startedAt = performance.now();
     let frame = 0;
     const tick = () => {
       const elapsed = Math.max(0, performance.now() - startedAt) / 1000;
-      const ran = timePos + elapsed * speed;
-      const time = duration > 0 ? Math.min(ran, Math.max(duration, timePos)) : ran;
-      // The same time (the end of the file) draws nothing.
-      setRunning((was) => (was.anchor === timePos && was.time === time ? was : { anchor: timePos, time }));
+      const ran = from + elapsed * speed;
+      setTime(duration > 0 ? Math.min(ran, Math.max(duration, from)) : ran);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -46,7 +60,5 @@ export function useInterpolatedTime(): number {
     };
   }, [playing, timePos, speed, duration]);
 
-  // A new `time-pos` is the truth from the first render on; the loop catches up with it a frame
-  // later, so the time never jumps ahead of it.
-  return playing && running.anchor === timePos ? running.time : timePos;
+  return changed ? timePos : time;
 }

@@ -21,6 +21,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::player::command::ScreenshotMode;
 use crate::player::{Engine, LogLine, Request};
 
+/// The event that tells the UI the glass went on or off; its payload is [`GlassState`].
+pub const STATE_EVENT: &str = "glass:state";
 /// Regions the shader can blur at once (spec 8.2).
 pub const MAX_REGIONS: usize = 6;
 /// Shader file stem; also the prefix that targets only our params in glsl-shader-opts.
@@ -37,7 +39,9 @@ const OPTS: &str = "glsl-shader-opts";
 const SHADERS: &str = "glsl-shaders";
 
 /// Glass element as measured by the UI: CSS px in window coordinates, radius, opacity.
+// `Serialize` only for the IPC contract test, which writes what it read back.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
 pub struct GlassRect {
     pub x: f64,
     pub y: f64,
@@ -595,8 +599,8 @@ impl GlassHost for AppHost {
     }
 
     fn state_changed(&self, state: &GlassState) {
-        if let Err(error) = self.app.emit("glass:state", state) {
-            tracing::warn!("cannot send glass:state to the UI: {error}");
+        if let Err(error) = self.app.emit(STATE_EVENT, state) {
+            tracing::warn!("cannot send {STATE_EVENT} to the UI: {error}");
         }
     }
 }

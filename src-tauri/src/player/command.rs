@@ -9,7 +9,9 @@ use serde::Deserialize;
 use super::{Engine, Request};
 
 /// How `Seek::target` is read.
+// `Serialize` only for the IPC contract test, which writes what it read back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "camelCase")]
 pub enum SeekMode {
     Absolute,
@@ -18,6 +20,7 @@ pub enum SeekMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "camelCase")]
 pub enum TrackKind {
     Audio,
@@ -26,6 +29,7 @@ pub enum TrackKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(rename_all = "camelCase")]
 pub enum ScreenshotMode {
     Subtitles,
@@ -35,6 +39,7 @@ pub enum ScreenshotMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PlayerCommand {
     TogglePause,

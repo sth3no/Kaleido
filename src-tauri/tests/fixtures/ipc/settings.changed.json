@@ -32,5 +32,22 @@
       "uiScale": 1.25
     },
     "playback": { "openWhilePlaying": "append" }
+  },
+  {
+    "version": 1,
+    "language": "en",
+    "appearance": {
+      "mode": "light",
+      "accent": "kaleido",
+      "glassTint": "#16161c",
+      "glassOpacity": 0.55,
+      "blur": 24,
+      "saturation": 1.4,
+      "radius": 20,
+      "mica": true,
+      "reduceTransparency": "off",
+      "uiScale": 1
+    },
+    "playback": { "openWhilePlaying": "replace" }
   }
 ]

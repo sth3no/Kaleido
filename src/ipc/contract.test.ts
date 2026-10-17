@@ -5,9 +5,12 @@
  *
  * - `tsc` (`npm run build`): each fixture is assigned to its type, below. A JSON module has no
  *   literal types, so a string is checked as a string (`Widen`); the names are checked at run time.
- * - this test: every name in a fixture is one of the type's, and every name of the type is in a
- *   fixture; the wrapper of each command calls `invoke` with its fixture's arguments; each
- *   `on…` function hands the callback the fixture's payload.
+ *   The tables of the keys of every struct and of every variant of a tagged union (`Shape`,
+ *   `Shapes`) are written for every key of their type, or they do not compile.
+ * - this test: the fixtures have exactly the keys of those tables and exactly the names of the
+ *   enums, in both directions (the Rust test holds the fixtures to the serde types the same
+ *   way); the wrapper of each command calls `invoke` with its fixture's arguments; each `on…`
+ *   function hands the callback the fixture's payload.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -62,26 +65,40 @@ import thumbRequestJson from '../../src-tauri/tests/fixtures/ipc/thumb_request.j
 import * as commands from './commands';
 import * as events from './events';
 import type {
+  Appearance,
+  AudioDevice,
+  Binding,
   BindingSource,
   CommandErrors,
   CommandTable,
   DialogPurpose,
+  EndFile,
   EndReason,
   EventTable,
+  GlassRect,
   GlassReason,
+  GlassState,
   InputEvent,
   Language,
   Layout,
+  License,
+  LoadIssue,
   LoadMode,
   LogLine,
+  OpenRequest,
   PasteOutcome,
+  Playback,
   PlayerCommand,
+  PlayerMessage,
+  PlayerStateBatch,
   ReduceTransparency,
   ScreenshotMode,
   SeekMode,
+  Settings,
   SettingsError,
   SourceError,
   ThemeMode,
+  ThumbReady,
   TrackKind,
   WheelKey,
 } from './types';
@@ -239,6 +256,107 @@ const SETTINGS_ERROR_SHAPES: Shapes<SettingsError, 'type'> = {
   unavailable: { type: true },
 };
 
+/**
+ * For a struct type, an entry for every key of `T`, and whether the key may be left out: all of
+ * them with the right answer, or it does not compile. `inside` is the same for the structs a field
+ * holds.
+ */
+type Fields<T> = {
+  [K in keyof T]-?: Record<never, never> extends Pick<T, K> ? 'optional' : 'required';
+};
+type Shape<T> = { fields: Fields<T>; inside?: { [K in keyof T]?: Shape<NonNullable<T[K]>> } };
+
+// The structs of the contract. These tables are what keeps a field added to or taken out of a
+// TypeScript type from going unnoticed; `contract.test.ts` compares them with the fixtures, which
+// the Rust test holds to the serde types in both directions.
+const GLASS_RECT: Shape<GlassRect> = {
+  fields: { x: 'required', y: 'required', w: 'required', h: 'required', r: 'required', a: 'optional' },
+};
+const END_FILE: Shape<EndFile> = { fields: { reason: 'required', error: 'required' } };
+const LOG_LINE: Shape<LogLine> = {
+  fields: { level: 'required', prefix: 'required', text: 'required' },
+};
+const PLAYER_MESSAGE: Shape<PlayerMessage> = { fields: { args: 'required' } };
+// What is in `changes` is mpv's property values, which Rust passes on as they are.
+const PLAYER_STATE_BATCH: Shape<PlayerStateBatch> = { fields: { changes: 'required' } };
+const THUMB_READY: Shape<ThumbReady> = {
+  fields: { width: 'required', height: 'required', seq: 'required' },
+};
+const OPEN_REQUEST: Shape<OpenRequest> = { fields: { count: 'required' } };
+const GLASS_STATE: Shape<GlassState> = { fields: { enabled: 'required', reason: 'required' } };
+const APPEARANCE: Shape<Appearance> = {
+  fields: {
+    mode: 'required',
+    accent: 'required',
+    glassTint: 'required',
+    glassOpacity: 'required',
+    blur: 'required',
+    saturation: 'required',
+    radius: 'required',
+    mica: 'required',
+    reduceTransparency: 'required',
+    uiScale: 'required',
+  },
+};
+const PLAYBACK: Shape<Playback> = { fields: { openWhilePlaying: 'required' } };
+const SETTINGS: Shape<Settings> = {
+  fields: { version: 'required', language: 'required', appearance: 'required', playback: 'required' },
+  inside: { appearance: APPEARANCE, playback: PLAYBACK },
+};
+// The `source` of a binding is a tagged union: see `BINDING_SOURCE_SHAPES`.
+const BINDING: Shape<Binding> = {
+  fields: { key: 'required', command: 'required', source: 'required', comment: 'required' },
+};
+const AUDIO_DEVICE: Shape<AudioDevice> = { fields: { name: 'required', description: 'required' } };
+const LICENSE: Shape<License> = {
+  fields: { name: 'required', version: 'required', license: 'required', url: 'required' },
+};
+const LOAD_ISSUE: Shape<LoadIssue> = { fields: { source: 'required', kind: 'required' } };
+
+/** What `expectShape` reads a `Shape<T>` as. */
+type LooseShape = {
+  fields: Record<string, 'optional' | 'required'>;
+  inside?: Record<string, LooseShape>;
+};
+
+/**
+ * The samples have exactly the fields of the struct, in both directions: none the type lacks, every
+ * required one, every field in some sample, and a field that may be left out left out in some. The
+ * same for the structs inside, through `inside`.
+ */
+function expectShape(samples: object[], shape: object, what: string) {
+  const { fields, inside = {} } = shape as LooseShape;
+  const known = Object.keys(fields);
+  const found = samples as Record<string, unknown>[];
+  expect(found.length, `${what}: no samples`).toBeGreaterThan(0);
+  for (const sample of found) {
+    const keys = Object.keys(sample);
+    for (const key of keys) expect(known, `${what}: ${key} is not a field of the type`).toContain(key);
+    for (const key of known) {
+      if (fields[key] === 'required') expect(keys, `${what}: ${key} is required`).toContain(key);
+    }
+  }
+  for (const key of known) {
+    expect(
+      found.some((sample) => key in sample),
+      `${what}: no sample has ${key}`,
+    ).toBe(true);
+    if (fields[key] === 'optional') {
+      expect(
+        found.some((sample) => !(key in sample)),
+        `${what}: no sample leaves out ${key}`,
+      ).toBe(true);
+    }
+  }
+  for (const [key, within] of Object.entries(inside)) {
+    const held = found.flatMap((sample) => {
+      const value = sample[key];
+      return typeof value === 'object' && value !== null ? [value] : [];
+    });
+    expectShape(held, within, `${what}.${key}`);
+  }
+}
+
 const SEEK_MODES = names<SeekMode>({ absolute: true, relative: true, absolutePercent: true });
 const TRACK_KINDS = names<TrackKind>({ audio: true, sub: true, video: true });
 const SCREENSHOT_MODES = names<ScreenshotMode>({
@@ -334,14 +452,44 @@ describe('fixtures type-check against the IPC types', () => {
 
   test('settings:changed', () => {
     const changed = eventFixtures['settings:changed'];
-    expectKnown(changed.map(({ language }) => language), LANGUAGES, 'language');
-    expectKnown(changed.map(({ appearance }) => appearance.mode), THEME_MODES, 'mode');
-    expectKnown(
+    expectAll(changed.map(({ language }) => language), LANGUAGES, 'language');
+    expectAll(changed.map(({ appearance }) => appearance.mode), THEME_MODES, 'mode');
+    expectAll(
       changed.map(({ appearance }) => appearance.reduceTransparency),
       REDUCE_TRANSPARENCY,
       'reduce transparency',
     );
-    expectKnown(changed.map(({ playback }) => playback.openWhilePlaying), LOAD_MODES, 'open while playing');
+    expectAll(changed.map(({ playback }) => playback.openWhilePlaying), LOAD_MODES, 'open while playing');
+  });
+
+  test('structs have exactly the fields of their types, nested ones too', () => {
+    // What the UI sends.
+    expectShape(
+      commandFixtures.glass_set_regions.flatMap(({ rects }) => rects),
+      GLASS_RECT,
+      'GlassRect',
+    );
+    // What Rust sends.
+    expectShape(eventFixtures['player:end-file'], END_FILE, 'EndFile');
+    expectShape(eventFixtures['player:log'], LOG_LINE, 'LogLine');
+    expectShape(eventFixtures['player:message'], PLAYER_MESSAGE, 'PlayerMessage');
+    expectShape(eventFixtures['player:state'], PLAYER_STATE_BATCH, 'PlayerStateBatch');
+    expectShape(eventFixtures['player:thumb'], THUMB_READY, 'ThumbReady');
+    expectShape(eventFixtures['system:open-request'], OPEN_REQUEST, 'OpenRequest');
+    expectShape(eventFixtures['glass:state'], GLASS_STATE, 'GlassState');
+    expectShape(eventFixtures['settings:changed'], SETTINGS, 'Settings');
+    for (const channel of ['player:file-loaded', 'system:paste-empty'] as const) {
+      for (const payload of eventFixtures[channel]) expect(Object.keys(payload), channel).toEqual([]);
+    }
+    // What commands resolve or reject with.
+    expectShape(returnFixtures.settings_bindings.flat(), BINDING, 'Binding');
+    expectShape(returnFixtures.settings_audio_devices.flat(), AUDIO_DEVICE, 'AudioDevice');
+    expectShape(returnFixtures.system_licenses.flat(), LICENSE, 'License');
+    expectShape(
+      [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text],
+      LOAD_ISSUE,
+      'LoadIssue',
+    );
   });
 
   test('what commands resolve with', () => {
@@ -368,7 +516,12 @@ describe('fixtures type-check against the IPC types', () => {
 
 // --- The wrappers and the events ---------------------------------------------------------------
 
-/** What each wrapper does with its fixture's arguments. */
+/**
+ * What each wrapper does with its fixture's arguments. The names of the arguments (`newKey`) are
+ * the Rust parameters' in camelCase. Tauri gives no way to read them, so they are copied by hand:
+ * into `commands.ts`, into the fixtures and into the Rust test (`check_command`); this test
+ * and that one hold the three together.
+ */
 const wrappers = {
   glass_set_regions: ({ rects }) => commands.glassSetRegions(rects),
   glass_state: () => commands.glassState(),

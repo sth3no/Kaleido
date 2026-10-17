@@ -5,7 +5,9 @@ use serde::Deserialize;
 
 /// Where the video surface should be, in CSS px of the window (the UI's coordinates, before the
 /// display scale).
+// `Serialize` only for the IPC contract test, which writes what it read back.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Layout {
     /// The whole client area (the player page).

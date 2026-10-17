@@ -35,6 +35,8 @@ pub use store::{
     Appearance, Language, Playback, ReduceTransparency, Settings, SettingsStore, ThemeMode,
 };
 
+/// The event that tells the UI the settings changed; its payload is all of [`Settings`].
+pub const CHANGED_EVENT: &str = "settings:changed";
 /// Kaleido's settings file in `config_dir` (spec 4.3).
 pub const SETTINGS_FILE: &str = "settings.json";
 /// mpv's config file in `config_dir`.

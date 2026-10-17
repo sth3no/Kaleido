@@ -35,6 +35,8 @@ const play = (changes: PlayerProps = {}) => {
     speed: 1,
     ...changes,
   });
+  // As in the player: mpv says the file is loaded.
+  usePlayerStore.getState().fileLoaded();
 };
 
 beforeEach(() => {
@@ -99,6 +101,67 @@ test('a change of speed runs the time at the new speed', () => {
   apply({ speed: 4, 'time-pos': 11 });
   advance(500);
   expect(result.current).toBeCloseTo(13, 6);
+});
+
+test('a change of speed alone does not take the time back to the last time-pos', () => {
+  play();
+  const { result } = renderHook(() => useInterpolatedTime());
+  advance(600);
+  expect(result.current).toBeCloseTo(10.6, 6);
+
+  apply({ speed: 2 });
+  // Still where it had run to, not at the 10 of the last time-pos.
+  expect(result.current).toBeCloseTo(10.6, 6);
+  advance(200);
+  expect(result.current).toBeCloseTo(11, 6);
+});
+
+test('a pause without a time-pos freezes the time where it had run to', () => {
+  play({ speed: 2 });
+  const { result } = renderHook(() => useInterpolatedTime());
+  advance(500);
+  expect(result.current).toBeCloseTo(11, 6);
+
+  // The pause comes alone: the last time-pos is still the 10 from before.
+  apply({ pause: true });
+  expect(result.current).toBeCloseTo(11, 6);
+  expect(frames.size).toBe(0);
+  advance(2000);
+  expect(result.current).toBeCloseTo(11, 6);
+
+  // Until the player says where it is.
+  apply({ 'time-pos': 11.02 });
+  expect(result.current).toBe(11.02);
+});
+
+test('resuming with the same time-pos starts from the frozen time, not from the old one', () => {
+  play({ speed: 2 });
+  const { result } = renderHook(() => useInterpolatedTime());
+  advance(500);
+  apply({ pause: true });
+  expect(result.current).toBeCloseTo(11, 6);
+
+  apply({ pause: false });
+  // The first frame after the resume shows the frozen time, not the 10 of the last time-pos.
+  expect(result.current).toBeCloseTo(11, 6);
+  expect(frames.size).toBe(1);
+  advance(250);
+  expect(result.current).toBeCloseTo(11.5, 6);
+});
+
+test('a time-pos that arrives after the file ended does not start the loop again', () => {
+  play();
+  const { result } = renderHook(() => useInterpolatedTime());
+  advance(500);
+
+  act(() => {
+    usePlayerStore.getState().endFile({ reason: 'eof', error: null });
+  });
+  // end-file comes before idle-active turns true, and a late time-pos can follow it.
+  apply({ 'time-pos': 42 });
+  expect(frames.size).toBe(0);
+  advance(1000);
+  expect(result.current).toBe(42);
 });
 
 test('the time does not run past the end of the file', () => {
