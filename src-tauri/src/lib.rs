@@ -91,6 +91,7 @@ pub fn run() {
             commands::system_open_logs,
             commands::system_licenses,
             commands::system_appearance,
+            commands::system_locale,
         ])
         .setup(|app| {
             let paths = paths::AppPaths::resolve(app.handle())?;

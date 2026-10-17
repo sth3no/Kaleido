@@ -403,6 +403,8 @@ export interface CommandTable {
   system_open_logs: { args: undefined; result: Nothing };
   system_licenses: { args: undefined; result: License[] };
   system_appearance: { args: undefined; result: SystemAppearance };
+  /** The system's language as a BCP 47 tag (`cs-CZ`); `en-US` where the system names none. */
+  system_locale: { args: undefined; result: string };
 }
 
 /**

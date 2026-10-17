@@ -164,3 +164,9 @@ export const systemLicenses = () => call('system_licenses');
  * (`onSystemAppearanceChanged`) comes only on a change.
  */
 export const systemAppearance = () => call('system_appearance');
+
+/**
+ * The system's language as a BCP 47 tag (`cs-CZ`), for the language setting "system"
+ * (`resolveLanguage`). `en-US` where Windows names none.
+ */
+export const systemLocale = () => call('system_locale');

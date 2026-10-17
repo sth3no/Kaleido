@@ -12,8 +12,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.3",
+    "i18next": "^26.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "react-i18next": "^17.1.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

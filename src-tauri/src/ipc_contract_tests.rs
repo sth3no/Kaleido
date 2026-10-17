@@ -218,7 +218,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 17] = [
+const WITHOUT_ARGUMENTS: [&str; 18] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -236,6 +236,7 @@ const WITHOUT_ARGUMENTS: [&str; 17] = [
     "system_open_logs",
     "system_licenses",
     "system_appearance",
+    "system_locale",
 ];
 
 // ---------------------------------------------------------------------------------------------

@@ -166,6 +166,25 @@ pub fn system_appearance(app: AppHandle) -> SystemAppearance {
     themes::current(&app)
 }
 
+/// What `system_locale` answers where the system names no language.
+const DEFAULT_LOCALE: &str = "en-US";
+
+/// What `system_locale` answers for the language `sys-locale` found, if any.
+fn locale_or_default(found: Option<String>) -> String {
+    found
+        .map(|locale| locale.trim().to_owned())
+        .filter(|locale| !locale.is_empty())
+        .unwrap_or_else(|| DEFAULT_LOCALE.to_owned())
+}
+
+/// The system's language as a BCP 47 tag (`cs-CZ`), which the UI turns into Czech or English when
+/// the language setting is "system" (spec 8.8). `en-US` where the system gives none. Synchronous:
+/// it reads one system setting and never waits for mpv.
+#[tauri::command]
+pub fn system_locale() -> String {
+    locale_or_default(sys_locale::get_locale())
+}
+
 /// Kaleido's own settings (settings.json). Reads the store only.
 #[tauri::command]
 pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
@@ -364,4 +383,22 @@ pub async fn system_licenses(app: AppHandle) -> Vec<License> {
     })
     .await
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_system_locale_is_passed_on_as_it_is() {
+        assert_eq!(locale_or_default(Some("cs-CZ".to_owned())), "cs-CZ");
+        assert_eq!(locale_or_default(Some("sk-SK".to_owned())), "sk-SK");
+    }
+
+    #[test]
+    fn a_missing_or_blank_locale_is_english() {
+        assert_eq!(locale_or_default(None), "en-US");
+        assert_eq!(locale_or_default(Some(String::new())), "en-US");
+        assert_eq!(locale_or_default(Some("  ".to_owned())), "en-US");
+    }
 }

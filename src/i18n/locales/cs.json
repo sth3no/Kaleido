@@ -1,0 +1,30 @@
+{
+  "shell": {
+    "appName": "Kaleido"
+  },
+  "home": {
+    "openFile": "Otevřít soubor",
+    "pasteLink": "Vložit odkaz"
+  },
+  "player": {
+    "play": "Přehrát",
+    "pause": "Pozastavit"
+  },
+  "panels": {
+    "playlist": "Seznam k přehrání",
+    "quickSettings": "Rychlé nastavení"
+  },
+  "settings": {
+    "title": "Nastavení",
+    "language": {
+      "label": "Jazyk",
+      "system": "Podle systému",
+      "cs": "Čeština",
+      "en": "English"
+    }
+  },
+  "errors": {
+    "generic": "Něco se nepovedlo.",
+    "details": "Podrobnosti"
+  }
+}

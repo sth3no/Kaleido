@@ -54,6 +54,7 @@ import systemCopyDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system
 import systemDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_diagnostics.json';
 import systemFontsJson from '../../src-tauri/tests/fixtures/ipc/system_fonts.json';
 import systemLicensesJson from '../../src-tauri/tests/fixtures/ipc/system_licenses.json';
+import systemLocaleJson from '../../src-tauri/tests/fixtures/ipc/system_locale.json';
 import systemOpenDialogJson from '../../src-tauri/tests/fixtures/ipc/system_open_dialog.json';
 import systemOpenLogsJson from '../../src-tauri/tests/fixtures/ipc/system_open_logs.json';
 import systemOpenRequestEventJson from '../../src-tauri/tests/fixtures/ipc/system.open-request.json';
@@ -154,6 +155,7 @@ const commandFixtures = {
   system_diagnostics: systemDiagnosticsJson,
   system_fonts: systemFontsJson,
   system_licenses: systemLicensesJson,
+  system_locale: systemLocaleJson,
   system_open_dialog: systemOpenDialogJson,
   system_open_logs: systemOpenLogsJson,
   system_open_roadmap: systemOpenRoadmapJson,
@@ -570,6 +572,7 @@ const wrappers = {
   system_diagnostics: () => commands.systemDiagnostics(),
   system_fonts: () => commands.systemFonts(),
   system_licenses: () => commands.systemLicenses(),
+  system_locale: () => commands.systemLocale(),
   system_open_dialog: ({ purpose }) => commands.systemOpenDialog(purpose),
   system_open_logs: () => commands.systemOpenLogs(),
   system_open_roadmap: () => commands.systemOpenRoadmap(),

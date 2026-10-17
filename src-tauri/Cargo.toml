@@ -28,6 +28,8 @@ anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The system's language for the "system" language setting (system_locale in commands.rs).
+sys-locale = "0.3.2"
 # The dates of the archived mpv logs; tracing-appender uses it too.
 time = "0.3"
 tracing = "0.1"

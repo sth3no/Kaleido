@@ -1,0 +1,30 @@
+{
+  "shell": {
+    "appName": "Kaleido"
+  },
+  "home": {
+    "openFile": "Open file",
+    "pasteLink": "Paste link"
+  },
+  "player": {
+    "play": "Play",
+    "pause": "Pause"
+  },
+  "panels": {
+    "playlist": "Playlist",
+    "quickSettings": "Quick settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": {
+      "label": "Language",
+      "system": "Follow the system",
+      "cs": "Čeština",
+      "en": "English"
+    }
+  },
+  "errors": {
+    "generic": "Something went wrong.",
+    "details": "Details"
+  }
+}

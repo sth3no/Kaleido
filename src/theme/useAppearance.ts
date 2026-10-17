@@ -12,7 +12,8 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 
 import { settingsGet, systemAppearance } from '../ipc/commands';
-import { onSettingsChanged, onSystemAppearanceChanged, type UnlistenFn } from '../ipc/events';
+import { onSettingsChanged, onSystemAppearanceChanged } from '../ipc/events';
+import { listenTo } from '../ipc/listen';
 import type { Appearance, SystemAppearance } from '../ipc/types';
 import { useUiStore } from '../state/uiStore';
 import {
@@ -105,36 +106,6 @@ function usePrefersDark(): boolean {
     };
   }, []);
   return dark;
-}
-
-/**
- * Listens with `on` and returns the function that stops it. Stopping works before the listener is
- * in place too (`on` resolves later; React runs an effect twice in development): the callback
- * hears nothing from then on, and the listener is removed as soon as it exists.
- */
-function listenTo<T>(
-  on: (callback: (payload: T) => void) => Promise<UnlistenFn>,
-  callback: (payload: T) => void,
-  what: string,
-): () => void {
-  let stopped = false;
-  let unlisten: UnlistenFn | undefined;
-  void on((payload) => {
-    if (!stopped) callback(payload);
-  }).then(
-    (stop) => {
-      if (stopped) stop();
-      else unlisten = stop;
-    },
-    (error: unknown) => {
-      console.warn(`cannot listen to ${what}`, error);
-    },
-  );
-  return () => {
-    stopped = true;
-    unlisten?.();
-    unlisten = undefined;
-  };
 }
 
 /**
