@@ -76,6 +76,12 @@ fn main() {
                 ) {
                     surface.apply(size.width, size.height, scale);
                 }
+                // The UI's CSS rects do not change with DPI, so it pushes nothing (spec 8.2).
+                if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = event
+                    && let Some(engine) = window.try_state::<Arc<Engine>>()
+                {
+                    let _ = engine.set_glass_scale(*scale_factor);
+                }
             }
             WindowEvent::CloseRequested { api, .. } => {
                 // mpv shuts down first; the event thread exits the app on SHUTDOWN.

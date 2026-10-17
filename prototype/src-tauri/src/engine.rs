@@ -201,6 +201,13 @@ impl Engine {
         self.apply_glass(&glass)
     }
 
+    /// DPI change: same CSS rects, new physical size.
+    pub fn set_glass_scale(&self, scale: f64) -> mpv_ffi::Result<()> {
+        let mut glass = self.glass.lock().unwrap();
+        glass.scale = scale;
+        self.apply_glass(&glass)
+    }
+
     fn apply_glass(&self, glass: &GlassState) -> mpv_ffi::Result<()> {
         let opts = glass::shader_opts(&glass.rects, glass.scale, glass.origin);
         self.mpv.set_property("glsl-shader-opts", &opts)
@@ -311,6 +318,42 @@ mod tests {
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
+
+    /// Moving the window to a monitor with another DPI keeps the CSS rects, so the UI pushes
+    /// nothing; the regions mpv blurs must still follow the new scale (spec 8.2).
+    #[test]
+    fn a_new_scale_reapplies_the_glass_regions() {
+        let mpv = Mpv::create(load_api(&locate_libmpv()).unwrap()).unwrap();
+        for (name, value) in [("vo", "null"), ("ao", "null"), ("terminal", "no")] {
+            mpv.set_option(name, value).unwrap();
+        }
+        mpv.initialize().unwrap();
+        let engine = Engine {
+            mpv,
+            glass: Mutex::new(GlassState {
+                scale: 1.0,
+                ..GlassState::default()
+            }),
+            thumb: Mutex::new(Vec::new()),
+        };
+        let rect = GlassRect {
+            x: 10.0,
+            y: 20.0,
+            w: 100.0,
+            h: 40.0,
+            r: 8.0,
+            a: 1.0,
+        };
+        engine.set_glass(vec![rect], 1.0).unwrap();
+        engine.set_glass_scale(1.5).unwrap();
+        let opts = engine.mpv.get_string("glsl-shader-opts").unwrap();
+        for expected in ["r0x=15.0", "r0y=30.0", "r0w=150.0", "r0h=60.0", "r0r=12.0"] {
+            assert!(
+                opts.contains(&format!("kaleido-glass/{expected}")),
+                "{opts}"
+            );
+        }
+    }
 
     #[test]
     fn first_value_goes_out_immediately() {
