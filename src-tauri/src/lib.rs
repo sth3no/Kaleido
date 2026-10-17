@@ -71,6 +71,7 @@ pub fn run() {
             commands::system_open_text,
             commands::system_open_roadmap,
             commands::surface_set_layout,
+            commands::surface_set_caption_buttons,
             commands::glass_set_regions,
             commands::glass_state,
             commands::thumb_request,
@@ -156,6 +157,11 @@ pub fn run() {
             // Without it only dropping files fails; the dialog still opens them.
             if let Err(error) = system::drop::install(window.as_ref()) {
                 tracing::error!("dropped files will not open: {error:#}");
+            }
+            // WebView2's own caption for the islands (CSS app-region), for the Snap Layouts
+            // spike. Without it the islands still move the window (data-tauri-drag-region).
+            if let Err(error) = surface::caption::install(window.as_ref()) {
+                tracing::warn!("the islands are no WebView2 caption: {error:#}");
             }
             // The queued command lines (this launch's first) are checked from now on.
             app.state::<OpenThread>().attach(app.handle().clone());

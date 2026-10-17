@@ -1,0 +1,12 @@
+/*
+ * The whole client area, where mpv's window is, and transparent: the video under the WebView shows
+ * through it. Nothing may move or scale it: the pointer's position is measured against it.
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* The pointer belongs to mpv here: no text selection or touch panning of the page. */
+  user-select: none;
+  touch-action: none;
+}

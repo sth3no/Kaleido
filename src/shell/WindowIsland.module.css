@@ -1,0 +1,58 @@
+/*
+ * The window buttons at the top right (spec 8.4; key-screens-v2.html). Over the video a glass
+ * capsule; on a page the bare buttons. It comes after theme/glass.module.css, so its radius and
+ * padding win over the glass' own.
+ */
+.island {
+  position: absolute;
+  top: var(--k-space-l);
+  right: var(--k-space-l);
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-xs);
+  border-radius: var(--k-radius-pill);
+  pointer-events: auto;
+}
+
+/* Between the buttons the capsule is title bar too, as in TitleIsland.module.css. */
+.caption {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+/* No video: on the page, in the page's text colour, as the mockups' start screen has them. */
+.plain {
+  color: var(--k-color-text-muted);
+}
+
+.button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color var(--k-motion-fast) ease,
+    color var(--k-motion-fast) ease;
+}
+
+.button:hover {
+  background: var(--k-color-hover);
+  color: var(--k-color-text);
+}
+
+.island:not(.plain) .button:hover {
+  color: inherit;
+}
+
+/* Closing is the one that ends something: red, as Windows' own. */
+.close:hover {
+  background: var(--k-color-danger);
+}

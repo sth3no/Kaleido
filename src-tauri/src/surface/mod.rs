@@ -1,7 +1,9 @@
 //! The video surface (spec 5.1): mpv's own window inside the main window, placed for the UI's
 //! layout (whole window, mini-player animation, anchored mini player, hidden), and fullscreen and
-//! always-on-top kept the same in mpv and the Tauri window.
+//! always-on-top kept the same in mpv and the Tauri window. Also the window buttons Windows
+//! hit-tests itself, for Snap Layouts (`caption`).
 
+pub mod caption;
 pub mod layout;
 pub mod win32;
 
@@ -11,6 +13,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use serde_json::Value;
 use tauri::{AppHandle, Manager, WebviewWindow, Window};
 
+pub use caption::CaptionButton;
 pub use layout::{Layout, PxRect, to_physical};
 
 use crate::player::{Engine, Request};
@@ -35,6 +38,10 @@ pub struct Surface {
     main: isize,
     layout: Mutex<Layout>,
     client: Mutex<(u32, u32, f64)>,
+    /// The window buttons Windows hit-tests itself, as the UI measured them (CSS px).
+    caption: Mutex<Vec<CaptionButton>>,
+    /// The windows over them; made and moved on the main thread only.
+    caption_windows: Mutex<win32::CaptionWindows>,
 }
 
 impl Surface {
@@ -44,11 +51,13 @@ impl Surface {
             main,
             layout: Mutex::new(Layout::Full),
             client: Mutex::new((0, 0, 1.0)),
+            caption: Mutex::new(Vec::new()),
+            caption_windows: Mutex::new(win32::CaptionWindows::default()),
         }
     }
 
-    /// Places mpv's window for a client area of `client_w`×`client_h` physical px at `scale`.
-    /// Call it on every resize and DPI change.
+    /// Places mpv's window, and the windows over the window buttons, for a client area of
+    /// `client_w`×`client_h` physical px at `scale`. Call it on every resize and DPI change.
     pub fn apply(&self, client_w: u32, client_h: u32, scale: f64) {
         *lock(&self.client) = (client_w, client_h, scale);
         let layout = *lock(&self.layout);
@@ -64,12 +73,30 @@ impl Surface {
             win32::pin(mpv, pinned);
             win32::place(mpv, rect);
         }
+        // The UI's rectangles stay the same CSS px through a DPI change; the windows over them
+        // must still follow the new scale.
+        self.place_caption_buttons(client_w, client_h, scale);
     }
 
     pub fn set_layout(&self, layout: Layout) {
         *lock(&self.layout) = layout;
         let (w, h, scale) = *lock(&self.client);
         self.apply(w, h, scale);
+    }
+
+    /// The window buttons the UI drew that Windows hit-tests itself (Snap Layouts, see
+    /// `caption`); an empty list for none. Main thread only. With the spike off the UI sends
+    /// none, and the UI's own buttons take every click.
+    pub fn set_caption_buttons(&self, buttons: Vec<CaptionButton>) {
+        *lock(&self.caption) = buttons;
+        let (w, h, scale) = *lock(&self.client);
+        self.place_caption_buttons(w, h, scale);
+    }
+
+    fn place_caption_buttons(&self, client_w: u32, client_h: u32, scale: f64) {
+        let rects = caption::to_physical_rects(&lock(&self.caption), client_w, client_h, scale);
+        // Placing sends messages to the windows (on this thread), whose procedure takes no lock.
+        lock(&self.caption_windows).place(self.main, &rects);
     }
 }
 

@@ -1,0 +1,7 @@
+/* An icon of the shell: the text colour of whatever it sits in, also in high contrast. */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: currentColor;
+}

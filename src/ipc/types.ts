@@ -121,6 +121,13 @@ export type GlassRect = {
   a?: number;
 };
 
+/**
+ * A window button the UI draws and Windows hit-tests itself (src-tauri/src/surface/caption.rs):
+ * CSS px in window coordinates, like a glass rectangle. Today only the maximise/restore button,
+ * whose `HTMAXBUTTON` opens Windows 11's Snap Layouts (spec 5.1).
+ */
+export type CaptionButton = { x: number; y: number; w: number; h: number };
+
 export type GlassReason =
   /** The user turned transparency off. */
   | 'user'
@@ -381,6 +388,7 @@ export interface CommandTable {
   system_open_text: { args: { text: string }; result: Nothing };
   system_open_roadmap: { args: undefined; result: Nothing };
   surface_set_layout: { args: { layout: Layout }; result: Nothing };
+  surface_set_caption_buttons: { args: { rects: CaptionButton[] }; result: Nothing };
   glass_set_regions: { args: { rects: GlassRect[] }; result: Nothing };
   glass_state: { args: undefined; result: GlassState };
   thumb_request: { args: { seconds: number }; result: Nothing };

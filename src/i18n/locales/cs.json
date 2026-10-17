@@ -1,6 +1,18 @@
 {
   "shell": {
-    "appName": "Kaleido"
+    "appName": "Kaleido",
+    "menu": "Nabídka",
+    "sidebar": {
+      "label": "Stránky",
+      "player": "Přehrávač",
+      "settings": "Nastavení"
+    },
+    "window": {
+      "minimize": "Minimalizovat",
+      "maximize": "Maximalizovat",
+      "restore": "Obnovit",
+      "close": "Zavřít"
+    }
   },
   "home": {
     "openFile": "Otevřít soubor",

@@ -1,3 +1,5 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
+
 import { playerInput } from '../ipc/commands';
 import type { InputEvent } from '../ipc/types';
 import { toMpvKey } from './keys';
@@ -70,6 +72,18 @@ export function shouldForward(e: KeyboardEvent): boolean {
     ownsTyping(e.target)
   );
 }
+
+/**
+ * Spread on the buttons and sliders of the UI (ported from M0): after a click with the pointer the
+ * control gives the focus back, so that Space and Enter go to mpv again instead of pressing the
+ * control once more (a focused control keeps them, see `activatesControl`). Focus that came with
+ * the keyboard (Tab) stays where it is: no pointer was released on the control.
+ */
+export const blurAfterPointer = {
+  onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+    e.currentTarget.blur();
+  },
+};
 
 /**
  * Sends mpv what the UI does not handle: the mouse, its buttons and the wheel over `el` (the

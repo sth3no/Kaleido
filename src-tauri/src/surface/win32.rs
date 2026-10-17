@@ -1,15 +1,21 @@
 //! The Win32 calls behind the surface: finding mpv's window, moving it, and keeping it where
-//! Kaleido put it against libmpv, which moves it back (spec 5.1).
+//! Kaleido put it against libmpv, which moves it back (spec 5.1); and the windows over the
+//! window buttons the UI draws, which answer Windows' hit test for them (`caption.rs`).
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::{Mutex, Once, PoisonError};
 
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, DefWindowProcW, GW_CHILD, GW_HWNDNEXT, GWLP_WNDPROC, GetClassNameW, GetWindow,
-    GetWindowLongPtrW, HWND_BOTTOM, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_NCDESTROY,
-    WM_WINDOWPOSCHANGED, WNDPROC,
+    CallWindowProcW, CreateWindowExW, DefWindowProcW, GA_ROOT, GW_CHILD, GW_HWNDNEXT,
+    GWLP_HINSTANCE, GWLP_WNDPROC, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW,
+    HTMAXBUTTON, HWND_BOTTOM, HWND_TOP, IsZoomed, MA_NOACTIVATE, PostMessageW, RegisterClassW,
+    SC_MAXIMIZE, SC_RESTORE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_MOUSEACTIVATE, WM_NCDESTROY,
+    WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_SYSCOMMAND,
+    WM_WINDOWPOSCHANGED, WNDCLASSW, WNDPROC, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_NOPARENTNOTIFY,
 };
+use windows::core::{PCWSTR, w};
 
 use super::layout::PxRect;
 
@@ -141,6 +147,159 @@ pub fn place(window: isize, rect: Option<PxRect>) {
             ),
         }
     };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The window buttons Windows hit-tests itself (caption.rs explains why it is a window of ours)
+
+/// The window class of the windows over the window buttons.
+pub const CAPTION_WINDOW_CLASS: &str = "KaleidoCaptionButton";
+/// [`CAPTION_WINDOW_CLASS`] as Win32 takes it.
+const CAPTION_CLASS: PCWSTR = w!("KaleidoCaptionButton");
+
+static REGISTER_CAPTION_CLASS: Once = Once::new();
+
+/// The window the left button went down on (0 for none): only a release on the same window is a
+/// click.
+static PRESSED: AtomicIsize = AtomicIsize::new(0);
+
+/// Kaleido's own windows over the window buttons the UI draws: one per button, children of the
+/// main window above WebView2, answering Windows' hit test for the button (`HTMAXBUTTON`, the
+/// only kind there is today). They draw nothing; the button under them stays the UI's.
+#[derive(Debug, Default)]
+pub struct CaptionWindows {
+    windows: Vec<isize>,
+}
+
+impl CaptionWindows {
+    /// Puts a window over each of `rects` (client px of `parent`), above every other child, and
+    /// hides the rest. Main thread only: a window belongs to the thread that makes it, and that
+    /// thread's message loop runs its procedure.
+    pub fn place(&mut self, parent: isize, rects: &[PxRect]) {
+        while self.windows.len() < rects.len() {
+            match create_caption_window(parent) {
+                Some(window) => self.windows.push(window),
+                None => break,
+            }
+        }
+        for (index, &window) in self.windows.iter().enumerate() {
+            // Failures only mean the window is gone (app shutting down); nothing to recover.
+            // SAFETY: plain Win32 calls on a window handle.
+            let _ = unsafe {
+                match rects.get(index) {
+                    // Above WebView2's window, which covers the whole client area.
+                    Some(r) => SetWindowPos(
+                        hwnd(window),
+                        Some(HWND_TOP),
+                        r.x,
+                        r.y,
+                        r.w,
+                        r.h,
+                        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    ),
+                    None => SetWindowPos(
+                        hwnd(window),
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_HIDEWINDOW,
+                    ),
+                }
+            };
+        }
+    }
+}
+
+/// A hidden window of [`CAPTION_WINDOW_CLASS`] inside `parent`, or None if Windows refuses one.
+fn create_caption_window(parent: isize) -> Option<isize> {
+    // SAFETY: plain Win32 calls; the class's procedure has the WNDPROC signature.
+    unsafe {
+        // The module that made the main window (Kaleido.exe), without another windows feature.
+        let instance = HINSTANCE(GetWindowLongPtrW(hwnd(parent), GWLP_HINSTANCE) as *mut _);
+        REGISTER_CAPTION_CLASS.call_once(|| {
+            let class = WNDCLASSW {
+                lpfnWndProc: Some(caption_proc),
+                hInstance: instance,
+                lpszClassName: CAPTION_CLASS,
+                // No background brush: it paints nothing.
+                ..Default::default()
+            };
+            if RegisterClassW(&class) == 0 {
+                tracing::warn!("cannot register the caption button window class");
+            }
+        });
+        match CreateWindowExW(
+            WS_EX_NOPARENTNOTIFY,
+            CAPTION_CLASS,
+            PCWSTR::null(),
+            WS_CHILD | WS_CLIPSIBLINGS,
+            0,
+            0,
+            0,
+            0,
+            Some(hwnd(parent)),
+            None,
+            Some(instance),
+            None,
+        ) {
+            Ok(window) => Some(window.0 as isize),
+            Err(error) => {
+                tracing::warn!("cannot make the window over the maximise button: {error}");
+                None
+            }
+        }
+    }
+}
+
+unsafe extern "system" fn caption_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let on_button = wp.0 == HTMAXBUTTON as usize;
+    match msg {
+        // All of the window is the button: Windows sees its maximise button here and opens Snap
+        // Layouts when the pointer rests on it (spec 5.1).
+        WM_NCHITTEST => LRESULT(HTMAXBUTTON as isize),
+        // Pressing and releasing are a click; Windows' own handling of a caption button in a child
+        // window would draw a classic one. A double click is two clicks, as on Windows' button.
+        WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if on_button => {
+            PRESSED.store(h.0 as isize, Ordering::Relaxed);
+            LRESULT(0)
+        }
+        WM_NCLBUTTONUP if on_button => {
+            if PRESSED.swap(0, Ordering::Relaxed) == h.0 as isize {
+                toggle_maximized(h);
+            }
+            LRESULT(0)
+        }
+        // The click must not take the focus from WebView2.
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // Hovering (WM_NCMOUSEMOVE, WM_NCMOUSEHOVER) goes to Windows, which shows Snap Layouts.
+        // SAFETY: the default procedure for this window's own messages.
+        _ => unsafe { DefWindowProcW(h, msg, wp, lp) },
+    }
+}
+
+/// What Windows' maximise button does: maximise, or restore a maximised window. Posted to the
+/// main window as the system command, so that its procedure (tao) sees it as it sees the
+/// system's own button.
+fn toggle_maximized(button: HWND) {
+    // SAFETY: plain Win32 calls on window handles; a window that is gone makes them fail.
+    unsafe {
+        let window = GetAncestor(button, GA_ROOT);
+        let command = if IsZoomed(window).as_bool() {
+            SC_RESTORE
+        } else {
+            SC_MAXIMIZE
+        };
+        if let Err(error) = PostMessageW(
+            Some(window),
+            WM_SYSCOMMAND,
+            WPARAM(command as usize),
+            LPARAM(0),
+        ) {
+            tracing::warn!("cannot maximise or restore the window: {error}");
+        }
+    }
 }
 
 /// Real windows for the tests, owned by the test's thread.
@@ -292,8 +451,97 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GW_CHILD, GWL_STYLE, GetWindow, GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetWindowPos, WM_NCHITTEST, WS_VISIBLE,
+    };
+
     use super::testing::{destroy, test_windows, window_rect};
-    use super::{PxRect, find_child, place};
+    use super::{CAPTION_WINDOW_CLASS, CaptionWindows, PxRect, find_child, hwnd, place};
+
+    /// The lParam of a hit test: screen coordinates, x in the low word, y in the high word.
+    fn screen_point(x: i32, y: i32) -> LPARAM {
+        LPARAM(((y as isize) << 16) | (x as isize & 0xffff))
+    }
+
+    /// Windows hit-tests the window under the pointer, which over the client area is WebView2's (a
+    /// child of the main window, placed first, like the test child here). The window over the
+    /// maximise button has to be above it and answer `HTMAXBUTTON` itself (caption.rs).
+    #[test]
+    fn caption_windows_cover_the_button_above_the_webview_and_answer_htmaxbutton() {
+        // The parent's client area is at (100, 100); its child stands in for WebView2.
+        let (parent, webview) = test_windows("KaleidoTestWebView");
+        let mut windows = CaptionWindows::default();
+        windows.place(
+            parent,
+            &[PxRect {
+                x: 300,
+                y: 10,
+                w: 40,
+                h: 30,
+            }],
+        );
+
+        let button = find_child(parent, CAPTION_WINDOW_CLASS).expect("a window over the button");
+        assert_eq!(window_rect(button), (400, 110, 40, 30));
+        assert!(has_visible_style(button));
+        let hit = unsafe {
+            SendMessageW(
+                hwnd(button),
+                WM_NCHITTEST,
+                None,
+                Some(screen_point(420, 125)),
+            )
+        };
+        assert_eq!(hit.0, HTMAXBUTTON as isize);
+
+        // The webview comes to the top (as wry puts it there); placing the button again puts the
+        // window back above it, and moves the same window with the button.
+        unsafe {
+            SetWindowPos(
+                hwnd(webview),
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        }
+        .expect("SetWindowPos");
+        assert_eq!(top_child(parent), webview);
+        windows.place(
+            parent,
+            &[PxRect {
+                x: 200,
+                y: 10,
+                w: 40,
+                h: 30,
+            }],
+        );
+        assert_eq!(top_child(parent), button, "above the webview");
+        assert_eq!(window_rect(button), (300, 110, 40, 30));
+        assert_eq!(find_child(parent, CAPTION_WINDOW_CLASS), Some(button));
+
+        // No buttons shown: nothing answers for them.
+        windows.place(parent, &[]);
+        assert!(!has_visible_style(button));
+        destroy(parent);
+    }
+
+    /// The topmost direct child of `parent`.
+    fn top_child(parent: isize) -> isize {
+        unsafe { GetWindow(hwnd(parent), GW_CHILD) }
+            .expect("a child")
+            .0 as isize
+    }
+
+    /// Whether the window itself is shown (its parent, a test window, never is).
+    fn has_visible_style(window: isize) -> bool {
+        let style = unsafe { GetWindowLongPtrW(hwnd(window), GWL_STYLE) };
+        style & WS_VISIBLE.0 as isize != 0
+    }
 
     /// mpv creates its own child window (class "mpv") inside `wid`; we find and move that one.
     #[test]

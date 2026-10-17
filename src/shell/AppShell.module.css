@@ -1,0 +1,72 @@
+/*
+ * The layers of the window (AppShell.tsx), bottom to top: the video layer (0), the page (1), the
+ * title-bar strip of a docked page (2), the islands (3), the sidebar (4). The layers above the
+ * page let the pointer through where they have nothing (pointer-events: none); what is in them
+ * takes it again (pointer-events: auto in its own module).
+ */
+.shell {
+  /* The sidebar's width (Sidebar.module.css), which a docked page leaves free. */
+  --shell-sidebar-width: 200px;
+  /* The strip at the top of a docked page that moves the window. */
+  --shell-titlebar-height: 48px;
+  --shell-page-left: calc(var(--shell-sidebar-width) + 2 * var(--k-space-l));
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.page {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/* Over the video the page is the player's controls on transparent ground: the rest is the video's. */
+.page[data-view='player'] {
+  pointer-events: none;
+}
+
+/* Beside the docked sidebar. */
+.page[data-view='home'],
+.page[data-view='settings'] {
+  left: var(--shell-page-left);
+}
+
+.dragStrip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--shell-page-left);
+  z-index: 2;
+  height: var(--shell-titlebar-height);
+}
+
+/* The strip as WebView2's own caption, with the Snap Layouts spike on (captionButtons.ts). */
+.caption {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.islands,
+.sidebar {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.islands {
+  z-index: 3;
+}
+
+.sidebar {
+  z-index: 4;
+}
+
+/*
+ * While a video is shown the page background is transparent: mpv's window is under the WebView
+ * (spec 5.1). AppShell sets the attribute; --k-backdrop is what html, body and the root paint.
+ */
+:global(:root[data-video]) {
+  --k-backdrop: transparent;
+}

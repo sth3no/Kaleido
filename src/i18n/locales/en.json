@@ -1,6 +1,18 @@
 {
   "shell": {
-    "appName": "Kaleido"
+    "appName": "Kaleido",
+    "menu": "Menu",
+    "sidebar": {
+      "label": "Pages",
+      "player": "Player",
+      "settings": "Settings"
+    },
+    "window": {
+      "minimize": "Minimize",
+      "maximize": "Maximize",
+      "restore": "Restore",
+      "close": "Close"
+    }
   },
   "home": {
     "openFile": "Open file",

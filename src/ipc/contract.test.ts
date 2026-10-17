@@ -47,6 +47,7 @@ import settingsRebindJson from '../../src-tauri/tests/fixtures/ipc/settings_rebi
 import settingsResetBindingJson from '../../src-tauri/tests/fixtures/ipc/settings_reset_binding.json';
 import settingsSetJson from '../../src-tauri/tests/fixtures/ipc/settings_set.json';
 import settingsSetMpvJson from '../../src-tauri/tests/fixtures/ipc/settings_set_mpv.json';
+import surfaceSetCaptionButtonsJson from '../../src-tauri/tests/fixtures/ipc/surface_set_caption_buttons.json';
 import surfaceSetLayoutJson from '../../src-tauri/tests/fixtures/ipc/surface_set_layout.json';
 import systemAppearanceEventJson from '../../src-tauri/tests/fixtures/ipc/system.appearance-changed.json';
 import systemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/system_appearance.json';
@@ -73,6 +74,7 @@ import type {
   AudioDevice,
   Binding,
   BindingSource,
+  CaptionButton,
   CommandErrors,
   CommandTable,
   DialogPurpose,
@@ -149,6 +151,7 @@ const commandFixtures = {
   settings_reset_binding: settingsResetBindingJson,
   settings_set: settingsSetJson,
   settings_set_mpv: settingsSetMpvJson,
+  surface_set_caption_buttons: surfaceSetCaptionButtonsJson,
   surface_set_layout: surfaceSetLayoutJson,
   system_appearance: systemAppearanceJson,
   system_copy_diagnostics: systemCopyDiagnosticsJson,
@@ -283,6 +286,9 @@ type Shape<T> = { fields: Fields<T>; inside?: { [K in keyof T]?: Shape<NonNullab
 // the Rust test holds to the serde types in both directions.
 const GLASS_RECT: Shape<GlassRect> = {
   fields: { x: 'required', y: 'required', w: 'required', h: 'required', r: 'required', a: 'optional' },
+};
+const CAPTION_BUTTON: Shape<CaptionButton> = {
+  fields: { x: 'required', y: 'required', w: 'required', h: 'required' },
 };
 const END_FILE: Shape<EndFile> = { fields: { reason: 'required', error: 'required' } };
 const LOG_LINE: Shape<LogLine> = {
@@ -496,6 +502,11 @@ describe('fixtures type-check against the IPC types', () => {
       GLASS_RECT,
       'GlassRect',
     );
+    expectShape(
+      commandFixtures.surface_set_caption_buttons.flatMap(({ rects }) => rects),
+      CAPTION_BUTTON,
+      'CaptionButton',
+    );
     // What Rust sends.
     expectShape(eventFixtures['player:end-file'], END_FILE, 'EndFile');
     expectShape(eventFixtures['player:log'], LOG_LINE, 'LogLine');
@@ -566,6 +577,7 @@ const wrappers = {
   settings_reset_binding: ({ key }) => commands.settingsResetBinding(key),
   settings_set: ({ patch }) => commands.settingsSet(patch),
   settings_set_mpv: ({ key, value }) => commands.settingsSetMpv(key, value),
+  surface_set_caption_buttons: ({ rects }) => commands.surfaceSetCaptionButtons(rects),
   surface_set_layout: ({ layout }) => commands.surfaceSetLayout(layout),
   system_appearance: () => commands.systemAppearance(),
   system_copy_diagnostics: () => commands.systemCopyDiagnostics(),

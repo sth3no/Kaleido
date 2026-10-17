@@ -1,0 +1,97 @@
+/*
+ * The sidebar (spec 8.3; key-screens-v2.html, screens 1 and 4): a glass panel down the left side.
+ * Its width is the shell's (--shell-sidebar-width, AppShell.module.css), which also moves a docked
+ * page out of its way. It comes after theme/glass.module.css, so its own rules win.
+ */
+.panel {
+  position: absolute;
+  top: var(--k-space-l);
+  bottom: var(--k-space-l);
+  left: var(--k-space-l);
+  width: var(--shell-sidebar-width);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-m) var(--k-space-s);
+  pointer-events: auto;
+  transition:
+    opacity var(--k-motion-fast) ease,
+    translate var(--k-motion-base) var(--k-motion-spring);
+}
+
+/*
+ * Over the video and closed: faded out and a little to the left, and out of the way of the pointer
+ * (inert also takes it out of the focus order). With reduced motion only the fade is left
+ * (global.css).
+ */
+.panel[data-state='closed'] {
+  opacity: 0;
+  translate: calc(-1 * var(--k-space-l)) 0;
+  pointer-events: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-s) var(--k-space-m);
+  font-size: var(--k-font-size-m);
+  font-weight: 600;
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--k-accent-gradient);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  width: 100%;
+  padding: var(--k-space-s);
+  border: 0;
+  border-radius: var(--k-radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.item:hover {
+  background: var(--k-color-hover);
+}
+
+.item[aria-current='page'] {
+  background: var(--k-color-selected);
+  font-weight: 600;
+}
+
+/* Beside the open sidebar over the video: takes the click that closes it. */
+.scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+
+/* High contrast: the selected item is painted Highlight (global.css), its text HighlightText. */
+@media (forced-colors: active) {
+  .item[aria-current='page'] {
+    color: HighlightText;
+  }
+}

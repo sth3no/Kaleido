@@ -44,7 +44,7 @@ use crate::settings::{
     self, Appearance, AudioDevice, Binding, BindingSource, Language, Playback, ReduceTransparency,
     Settings, SettingsError, SettingsStore, ThemeMode,
 };
-use crate::surface::Layout;
+use crate::surface::{CaptionButton, Layout};
 use crate::system::clipboard::PasteOutcome;
 use crate::system::diagnostics::License;
 use crate::system::dialog::DialogPurpose;
@@ -632,6 +632,20 @@ fn check_command(command: &str, calls: &[Value]) {
             );
             covers("Layout", &layouts, layout_name, LAYOUT_NAMES, Some("kind"));
         }
+        "surface_set_caption_buttons" => assert_eq!(
+            column::<Vec<CaptionButton>>(command, calls, "rects"),
+            [
+                // The maximise button at the top right of a 1280×720 window.
+                vec![CaptionButton {
+                    x: 1196.5,
+                    y: 16.0,
+                    w: 36.0,
+                    h: 32.25
+                }],
+                // None shown (hidden controls, fullscreen).
+                Vec::new(),
+            ]
+        ),
         "glass_set_regions" => assert_eq!(
             column_spelled::<Vec<GlassRect>>(command, calls, "rects", with_default_opacity),
             [

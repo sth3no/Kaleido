@@ -13,7 +13,7 @@ use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
-use crate::surface::{Layout, Surface};
+use crate::surface::{CaptionButton, Layout, Surface};
 use crate::system::diagnostics::{self, License};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 use crate::themes::{self, SystemAppearance};
@@ -104,6 +104,14 @@ pub async fn system_open_roadmap() {
 #[tauri::command]
 pub fn surface_set_layout(surface: State<'_, Surface>, layout: Layout) {
     surface.set_layout(layout);
+}
+
+/// The window buttons the UI drew that Windows hit-tests itself (CSS px of the window): today the
+/// maximise button, for Snap Layouts (`surface::caption`). An empty list while none is shown.
+/// Synchronous, so it runs on the main thread, which owns the windows it places over them.
+#[tauri::command]
+pub fn surface_set_caption_buttons(surface: State<'_, Surface>, rects: Vec<CaptionButton>) {
+    surface.set_caption_buttons(rects);
 }
 
 /// The glass elements the UI measured (CSS px), nothing for no glass. Synchronous: it only

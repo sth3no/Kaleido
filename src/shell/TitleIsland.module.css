@@ -1,0 +1,82 @@
+/*
+ * The capsule at the top left over the video (spec 8.4; key-screens-v2.html, screen 2). It comes
+ * after theme/glass.module.css, so its radius and padding win over the glass' own.
+ */
+.island {
+  position: absolute;
+  top: var(--k-space-l);
+  left: var(--k-space-l);
+  /* Room for the window buttons on the right. */
+  max-width: calc(100% - 2 * var(--k-space-l) - 200px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-l) var(--k-space-xs) var(--k-space-xs);
+  border-radius: var(--k-radius-pill);
+  pointer-events: auto;
+}
+
+/*
+ * The title bar as WebView2's own caption (drag, double-click, the window menu), with the Snap
+ * Layouts spike on (SNAP_LAYOUTS, captionButtons.ts); else data-tauri-drag-region moves the window.
+ */
+.caption {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.menu {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.menu:hover {
+  background: var(--k-color-hover);
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--k-accent-gradient);
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--k-font-size-m);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 4K HDR, 1080p: of the same colour as the text, faint. */
+.badge {
+  flex: none;
+  padding: 2px var(--k-space-s);
+  border-radius: var(--k-radius-s);
+  background: color-mix(in srgb, var(--k-color-on-glass) 22%, transparent);
+  font-size: var(--k-font-size-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (forced-colors: active) {
+  .badge {
+    border: 1px solid CanvasText;
+  }
+}

@@ -8,6 +8,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type {
+  CaptionButton,
   CommandTable,
   DialogPurpose,
   GlassRect,
@@ -56,6 +57,13 @@ export const systemUiReady = () => call('system_ui_ready');
 // --- The video surface and the glass ---------------------------------------------------------
 
 export const surfaceSetLayout = (layout: Layout) => call('surface_set_layout', { layout });
+
+/**
+ * The window buttons Windows hit-tests itself (CSS px of the window): today the maximise/restore
+ * button, for Snap Layouts. An empty list while none is shown (hidden controls, fullscreen).
+ */
+export const surfaceSetCaptionButtons = (rects: CaptionButton[]) =>
+  call('surface_set_caption_buttons', { rects });
 
 /** The glass elements the UI measured (CSS px); an empty list for no glass. */
 export const glassSetRegions = (rects: GlassRect[]) => call('glass_set_regions', { rects });
