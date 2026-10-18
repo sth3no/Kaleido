@@ -282,12 +282,15 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
         // The window follows mpv's fullscreen and ontop (spec 5.1); the UI gets the batch too.
         PlayerEvent::State { changes } => {
             surface::follow_mpv(app, changes);
-            // Where the picture starts in the window (letterbox bars): the glass regions are
-            // measured from there.
-            if let Some(osd) = changes.get("osd-dimensions")
-                && let Some(glass) = app.try_state::<GlassController>()
-            {
-                glass.set_origin(osd);
+            if let Some(osd) = changes.get("osd-dimensions") {
+                // mpv says it once it has made its window: a new one gets the layout, hidden
+                // while no file is open (Ruling R52).
+                surface::mpv_window_reported(app);
+                // Where the picture starts in the window (letterbox bars): the glass regions are
+                // measured from there.
+                if let Some(glass) = app.try_state::<GlassController>() {
+                    glass.set_origin(osd);
+                }
             }
             false
         }

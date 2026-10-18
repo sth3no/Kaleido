@@ -127,6 +127,77 @@ test('the player page has the whole window, and says so once at start', async ()
   expect(layouts()).toEqual([{ kind: 'full' }]);
 });
 
+const HIDDEN = { phase: 'hidden', rect: null, fade: false };
+
+/** Mpv is idle: nothing is open. */
+const IDLE: Partial<PlayerState> = { loaded: false, props: { 'idle-active': true } };
+
+test('with no file open mpv’s window is hidden, on every page (Ruling R52)', async () => {
+  usePlayerStore.setState(IDLE);
+  const { result } = renderHook(() => useSurfaceLayout());
+  await settle();
+  expect(result.current).toEqual(HIDDEN);
+  expect(layouts()).toEqual([{ kind: 'hidden' }]);
+
+  // The settings without a video: still hidden, and nothing more is sent.
+  await toPage('settings');
+  await toPage('player');
+  expect(result.current).toEqual(HIDDEN);
+  expect(layouts()).toEqual([{ kind: 'hidden' }]);
+  expect(await framesAsked()).toBe(0);
+});
+
+test('before mpv has said whether it is idle, mpv’s window stays hidden', async () => {
+  // The UI starts (or reloads) before the snapshot: nothing is known to be open.
+  usePlayerStore.setState(usePlayerStore.getInitialState(), true);
+  const { result } = renderHook(() => useSurfaceLayout());
+  await settle();
+  expect(result.current).toEqual(HIDDEN);
+  expect(layouts()).toEqual([{ kind: 'hidden' }]);
+
+  // The snapshot says a file plays: the whole window, at once.
+  await setPlayer({ loaded: true, props: PLAYING });
+  expect(result.current).toEqual({ phase: 'full', rect: null, fade: false });
+  expect(layouts()).toEqual([{ kind: 'hidden' }, { kind: 'full' }]);
+});
+
+test('a file that opens on the player page has the whole window while it loads, before its first frame', async () => {
+  usePlayerStore.setState(IDLE);
+  const { result } = renderHook(() => useSurfaceLayout());
+  await settle();
+
+  // Loading: mpv is no longer idle, nothing is loaded yet.
+  await setPlayer({ loaded: false, props: { 'idle-active': false } });
+  expect(result.current).toEqual({ phase: 'full', rect: null, fade: false });
+  expect(layouts()).toEqual([{ kind: 'hidden' }, { kind: 'full' }]);
+  // No animation for it.
+  expect(await framesAsked()).toBe(0);
+
+  // Loaded: nothing changes.
+  await setPlayer({ loaded: true, props: PLAYING });
+  expect(layouts()).toHaveLength(2);
+
+  // It ends (or fails): hidden again.
+  await setPlayer(IDLE);
+  expect(result.current).toEqual(HIDDEN);
+  expect(layouts().at(-1)).toEqual({ kind: 'hidden' });
+});
+
+test('a file that closes while the video moves into the corner is hidden at once', async () => {
+  const { result } = renderHook(() => useSurfaceLayout());
+  await toPage('settings');
+  await wait(100);
+  expect(result.current.phase).toBe('shrinking');
+
+  await setPlayer(IDLE);
+  expect(result.current).toEqual(HIDDEN);
+  expect(layouts().at(-1)).toEqual({ kind: 'hidden' });
+  // The animation stopped: no frame after it.
+  const count = layouts().length;
+  expect(await framesAsked()).toBe(0);
+  expect(layouts()).toHaveLength(count);
+});
+
 test('another page shrinks the video into the corner, a frame at a time, and docks it there', async () => {
   const { result } = renderHook(() => useSurfaceLayout());
   await toPage('settings');
@@ -341,10 +412,10 @@ test('a file that closes on the page leaves at once, and one that opens there co
   await toPage('settings');
   await wait(MINI_MOTION_MS + 50);
 
-  // Stop: idle. The page is opaque again over the whole-window video.
+  // Stop: idle. mpv's window is hidden, and the page is the page again (Ruling R52).
   await setPlayer({ loaded: false, props: { 'idle-active': true } });
-  expect(layouts().at(-1)).toEqual({ kind: 'full' });
-  expect(result.current).toEqual({ phase: 'full', rect: null, fade: false });
+  expect(layouts().at(-1)).toEqual({ kind: 'hidden' });
+  expect(result.current).toEqual({ phase: 'hidden', rect: null, fade: false });
   expect(await framesAsked()).toBe(0);
 
   // A file opened while the page is shown: there was no big picture to shrink.

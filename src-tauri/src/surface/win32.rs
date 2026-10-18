@@ -343,10 +343,10 @@ pub mod testing {
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GW_CHILD, GetClassNameW,
-        GetWindow, GetWindowRect, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SWP_NOACTIVATE,
-        SWP_NOZORDER, SetWindowPos, TranslateMessage, WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD,
-        WS_POPUP,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GW_CHILD, GWL_STYLE,
+        GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowRect, MSG, PM_REMOVE, PeekMessageW,
+        RegisterClassW, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, TranslateMessage,
+        WINDOW_EX_STYLE, WNDCLASSW, WS_CHILD, WS_POPUP, WS_VISIBLE,
     };
     use windows::core::{HSTRING, PCWSTR};
 
@@ -480,19 +480,25 @@ pub mod testing {
     pub fn destroy(window: isize) {
         let _ = unsafe { DestroyWindow(hwnd(window)) };
     }
+
+    /// Whether the window itself is shown (`WS_VISIBLE`); the test parents never are, so
+    /// `IsWindowVisible` would say no for every child.
+    pub fn has_visible_style(window: isize) -> bool {
+        let style = unsafe { GetWindowLongPtrW(hwnd(window), GWL_STYLE) };
+        style & WS_VISIBLE.0 as isize != 0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GW_CHILD, GWL_STYLE, GetWindow, GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, MSG, PM_REMOVE,
-        PeekMessageW, SC_MAXIMIZE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW,
-        SetWindowPos, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
-        WM_SYSCOMMAND, WS_VISIBLE,
+        GW_CHILD, GetWindow, HTMAXBUTTON, HWND_TOP, MSG, PM_REMOVE, PeekMessageW, SC_MAXIMIZE,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetWindowPos, WM_NCHITTEST,
+        WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_SYSCOMMAND,
     };
 
-    use super::testing::{destroy, test_windows, window_rect};
+    use super::testing::{destroy, has_visible_style, test_windows, window_rect};
     use super::{CAPTION_WINDOW_CLASS, CaptionWindows, PxRect, find_child, hwnd, place};
 
     /// The lParam of a hit test: screen coordinates, x in the low word, y in the high word.
@@ -630,12 +636,6 @@ mod tests {
         unsafe { GetWindow(hwnd(parent), GW_CHILD) }
             .expect("a child")
             .0 as isize
-    }
-
-    /// Whether the window itself is shown (its parent, a test window, never is).
-    fn has_visible_style(window: isize) -> bool {
-        let style = unsafe { GetWindowLongPtrW(hwnd(window), GWL_STYLE) };
-        style & WS_VISIBLE.0 as isize != 0
     }
 
     /// mpv creates its own child window (class "mpv") inside `wid`; we find and move that one.

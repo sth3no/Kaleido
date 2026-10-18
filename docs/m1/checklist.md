@@ -75,6 +75,13 @@ Oba hroty se zkoušejí v sekcích níže; výsledek zapsat sem.
   pozadí Mica (jemně probarvené tapetou), ne černé a ne průhledné na plochu. Nastavení → Vzhled →
   Mica vypnout: gradient. Zapsat, kdyby Mica nebyla vidět vůbec (Task 14: okno bez rámečku ji může
   potřebovat zapnout jinak, přes `DwmExtendFrameIntoClientArea`).
+- [ ] **Bez videa není pod stránkou okno mpv (Ruling R52):** s Mica ve světlém i tmavém režimu má
+  úvodní obrazovka hned po startu i Nastavení bez videa pozadí Mica, nikde černou plochu, a text je
+  čitelný. Video otevřené z úvodní obrazovky i z Nastavení (do mini přehrávače) ukáže hned první
+  snímek (nezůstane černo ani průhledno); po dohrání nebo Zastavit v mini přehrávači je pozadí
+  zase Mica. Kolečko a dvojklik do mezery kolem
+  lišty (vlevo od ní, nad ní, mezi ní a stránkou) na úvodní obrazovce a v Nastavení nemění
+  hlasitost ani nepřepnou okno na celou obrazovku.
 - [ ] **Windows 10 22H2** (jiný počítač nebo VM, pokud je po ruce): místo Mica neprůhledné pozadí
   s gradientem, nic neprosvítá (spec 11.1).
 - [ ] **Snížit průhlednost** ve Windows (Nastavení → Přizpůsobení → Barvy → Efekty průhlednosti
@@ -461,10 +468,10 @@ s letterboxem.
   video v playlistu s jiným poměrem mini přetvaruje a díra pořád sedí. Přechod na další video v
   playlistu mini nezavře ani nebliká na celé okno.
 - [ ] **Mini přežije restart výstupu videa (vo):** v mini režimu vypnout a zapnout video stopu
-  (`_` dvakrát) a pustit video s jiným rozlišením. mpv přitom své okno může vytvořit znovu, a Rust
-  mu rozvržení po vytvoření znovu nepošle (Task 6): zapsat sem, jestli video zůstane v rohu, nebo
-  skočí na celé okno (pak je v díře vidět jen jeho výřez nebo nic) a vrátí se až po změně
-  velikosti okna.
+  (`_` dvakrát) a pustit video s jiným rozlišením. mpv přitom své okno může vytvořit znovu; Rust
+  nové okno umístí, jakmile mpv nahlásí jeho velikost (`osd-dimensions`, Ruling R52): video má
+  zůstat v rohu. Zapsat sem, kdyby skočilo na celé okno (pak je v díře vidět jen jeho výřez nebo
+  nic) a vrátilo se až po změně velikosti okna.
 - [ ] **Měřítko UI** (Nastavení → Vzhled → Měřítko rozhraní) změněné při mini přehrávači: mini se
   zvětší nebo zmenší s UI (při 150 % je 540 px široké) a díra pořád sedí na video.
 - [ ] **Omezené animace** (Windows: Nastavení → Usnadnění → Vizuální efekty → Efekty animace

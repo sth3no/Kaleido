@@ -39,6 +39,8 @@ pub struct Surface {
     main: isize,
     layout: Mutex<Layout>,
     client: Mutex<(u32, u32, f64)>,
+    /// The window of mpv's that `apply` placed last; 0 before it found one.
+    placed: Mutex<isize>,
     /// The window buttons Windows hit-tests itself, as the UI measured them (CSS px).
     caption: Mutex<Vec<CaptionButton>>,
     /// The windows over them; made and moved on the main thread only.
@@ -46,12 +48,14 @@ pub struct Surface {
 }
 
 impl Surface {
-    /// `main` = the HWND mpv got as `wid`.
+    /// `main` = the HWND mpv got as `wid`. It starts hidden (Ruling R52): until a file opens there
+    /// is no video, and mpv's idle window (`force-window`) would be a black area under the page.
     pub fn new(main: isize) -> Surface {
         Surface {
             main,
-            layout: Mutex::new(Layout::Full),
+            layout: Mutex::new(Layout::Hidden),
             client: Mutex::new((0, 0, 1.0)),
+            placed: Mutex::new(0),
             caption: Mutex::new(Vec::new()),
             caption_windows: Mutex::new(win32::CaptionWindows::default()),
         }
@@ -62,8 +66,10 @@ impl Surface {
     pub fn apply(&self, client_w: u32, client_h: u32, scale: f64) {
         *lock(&self.client) = (client_w, client_h, scale);
         let layout = *lock(&self.layout);
-        // Until mpv has created its window there is nothing to place; it starts full-size.
+        // Until mpv has created its window there is nothing to place; it makes it shown and
+        // full-size, and `adopt_new_window` places it then.
         if let Some(mpv) = win32::find_child(self.main, MPV_WINDOW_CLASS) {
+            *lock(&self.placed) = mpv;
             let rect = to_physical(layout, client_w, client_h, scale);
             // mpv resizes its window to our whole client area whenever the main window moves or
             // resizes. That is right for Full; the mini player's rectangle is pinned against it.
@@ -83,6 +89,21 @@ impl Surface {
         *lock(&self.layout) = layout;
         let (w, h, scale) = *lock(&self.client);
         self.apply(w, h, scale);
+    }
+
+    /// mpv may have made its window since the last placement (main thread): when its idle loop
+    /// starts, after the setup has placed nothing, and when its video output starts again. A
+    /// window it has made shows itself over the whole client area; one that is not the window
+    /// placed last gets the layout, hidden on a page without a video (Ruling R52), in the corner
+    /// for the mini player. Returns whether it placed one.
+    pub fn adopt_new_window(&self) -> bool {
+        let found = win32::find_child(self.main, MPV_WINDOW_CLASS);
+        if found.is_none_or(|window| window == *lock(&self.placed)) {
+            return false;
+        }
+        let (w, h, scale) = *lock(&self.client);
+        self.apply(w, h, scale);
+        true
     }
 
     /// Where mpv's window is for the layout and the client area now, in CSS px of the window;
@@ -231,6 +252,20 @@ impl WindowSync {
     }
 }
 
+/// mpv reported the size of its window (`osd-dimensions`, event thread), as it does once it has
+/// made one: on the main thread, a window it has just made gets the layout
+/// ([`Surface::adopt_new_window`], Ruling R52). This thread only queues it.
+pub fn mpv_window_reported(app: &AppHandle) {
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if let Some(surface) = handle.try_state::<Surface>() {
+            surface.adopt_new_window();
+        }
+    }) {
+        tracing::warn!("cannot place a new window of mpv's: {error}");
+    }
+}
+
 /// The main window was resized or got another display scale (main thread): mpv's window is
 /// placed again (the mini player stays in its corner), the glass is told where it went, and a
 /// fullscreen or always-on-top change the window made on its own (e.g. the UI through Tauri's
@@ -322,13 +357,20 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    use super::win32::find_child;
     use super::win32::testing::{
-        class_name, destroy, pump, set_rect, test_parent, wait_for_child, window_rect,
+        class_name, destroy, has_visible_style, pump, set_rect, test_parent, wait_for_child,
+        window_rect,
     };
-    use super::{FullscreenSync, Layout, PxRect, Surface, SyncAction, to_physical, video_rect};
+    use super::{
+        FullscreenSync, Layout, MPV_WINDOW_CLASS, PxRect, Surface, SyncAction, to_physical,
+        video_rect,
+    };
     use crate::glass::VideoRect;
     use crate::player::testing::{NoEvents, temp_paths};
-    use crate::player::{Engine, EngineConfig};
+    use crate::player::{
+        Engine, EngineConfig, EventLoop, EventSink, PlayerEvent, Request, StateLoop, observe_all,
+    };
 
     /// What the glass is told (Ruling R45): the rectangle mpv's window is placed at, overscan
     /// included (Ruling R47), in CSS px.
@@ -426,7 +468,16 @@ mod tests {
 
     impl MpvInside {
         fn start(dir: &std::path::Path) -> MpvInside {
-            let parent = test_parent();
+            let mut mpv = MpvInside::start_in(dir, test_parent(), NoEvents);
+            // Found without find_child: the parent's only child is whatever mpv created. A
+            // failure here is a panic the guard already covers.
+            mpv.video = wait_for_child(mpv.parent, Duration::from_secs(15))
+                .expect("libmpv created no direct child window inside wid");
+            mpv
+        }
+
+        /// The engine in `parent` with `events`, without waiting for its window (`video` is 0).
+        fn start_in(dir: &std::path::Path, parent: isize, events: impl EventLoop) -> MpvInside {
             let engine = Engine::start(
                 EngineConfig {
                     paths: temp_paths(dir),
@@ -435,19 +486,18 @@ mod tests {
                     vo: "gpu-next".into(),
                     ao: Some("null".into()),
                 },
-                NoEvents,
+                events,
             )
             .expect("start libmpv");
-            let mut mpv = MpvInside {
+            MpvInside {
                 engine: Some(engine),
                 parent,
                 video: 0,
-            };
-            // Found without find_child: the parent's only child is whatever mpv created. A
-            // failure here is a panic the guard already covers.
-            mpv.video = wait_for_child(parent, Duration::from_secs(15))
-                .expect("libmpv created no direct child window inside wid");
-            mpv
+            }
+        }
+
+        fn engine(&self) -> &Engine {
+            self.engine.as_ref().expect("the engine runs")
         }
     }
 
@@ -538,5 +588,80 @@ mod tests {
         surface.apply(600, 450, 1.0);
         pump(Duration::from_millis(500));
         assert_eq!(window_rect(video), (150, 150, 600, 450), "full again");
+    }
+
+    /// What `route` reacts to (lib.rs): the batches in which mpv reports `osd-dimensions`.
+    struct OsdReports(mpsc::Sender<()>);
+
+    impl EventSink for OsdReports {
+        fn emit(&self, event: PlayerEvent) {
+            if let PlayerEvent::State { changes } = event
+                && changes.contains_key("osd-dimensions")
+            {
+                let _ = self.0.send(());
+            }
+        }
+    }
+
+    /// Ruling R52, the way the app starts: the surface is hidden and placed before mpv has made its
+    /// window (mpv makes it, shown and full-size, when its idle loop starts: `force-window`). mpv
+    /// reports the window's size, and the window is hidden then and stays hidden. A file that
+    /// opens on the player page shows it over the whole window.
+    #[test]
+    fn the_window_mpv_makes_while_nothing_is_open_is_hidden() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = test_parent();
+        let surface = Surface::new(parent);
+        // What the setup does before the engine starts: there is nothing to place yet.
+        surface.apply(400, 300, 1.0);
+        assert!(
+            !surface.adopt_new_window(),
+            "a window of mpv's before mpv runs"
+        );
+        let (reported, reports) = mpsc::channel();
+        let mpv = MpvInside::start_in(tmp.path(), parent, StateLoop::new(OsdReports(reported)));
+        mpv.engine().request(Request::Call(Box::new(|mpv| {
+            observe_all(mpv).expect("observe the player state");
+        })));
+
+        // What `route` has done at each report, on the thread that owns the windows.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut adopted = None;
+        while adopted.is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "mpv's window was never placed: no osd-dimensions after mpv made it"
+            );
+            pump(Duration::from_millis(20));
+            while reports.try_recv().is_ok() {
+                if surface.adopt_new_window() {
+                    adopted = find_child(parent, MPV_WINDOW_CLASS);
+                }
+            }
+        }
+        let video = adopted.expect("mpv's window");
+        pump(Duration::from_millis(500));
+        assert!(!has_visible_style(video), "mpv's idle window is shown");
+        assert!(!surface.adopt_new_window(), "the same window placed twice");
+
+        surface.set_layout(Layout::Full);
+        pump(Duration::from_millis(200));
+        assert!(
+            has_visible_style(video),
+            "the whole-window video is not shown"
+        );
+        assert_eq!(window_rect(video), (100, 100, 400, 300));
+    }
+
+    /// The surface starts hidden: nothing is open when Kaleido starts (Ruling R52).
+    #[test]
+    fn the_surface_starts_hidden() {
+        let parent = test_parent();
+        let surface = Surface::new(parent);
+        surface.apply(1280, 720, 1.0);
+        assert_eq!(surface.video_rect(), None);
+        surface.set_layout(Layout::Full);
+        assert!(surface.video_rect().is_some());
+        destroy(parent);
     }
 }

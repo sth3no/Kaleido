@@ -1,9 +1,15 @@
 /**
- * Where mpv's window is (spec 8.3, 8.6): the whole window on the player page, the mini player in
- * the bottom-right corner on any other page while a file is open, and the animation between the
- * two. It sends Rust the layout (`surfaceSetLayout`) and tells the shell where the video is, so
- * that the shell cuts its hole in the page and draws the mini player's frame on the same numbers.
+ * Where mpv's window is (spec 8.3, 8.6): nowhere while no file is open, the whole window on the
+ * player page, the mini player in the bottom-right corner on any other page while a file is open,
+ * and the animation between the two. It sends Rust the layout (`surfaceSetLayout`) and tells the
+ * shell where the video is, so that the shell cuts its hole in the page and draws the mini
+ * player's frame on the same numbers.
  *
+ * - No file open or loading (the start screen, the settings without a video): `hidden` (Ruling
+ *   R52). mpv keeps its window while it is idle (`force-window`), and its black swapchain would
+ *   fill the window under the page, which is transparent under Mica. Rust starts with it hidden too
+ *   and hides a window mpv makes later. A file that opens on the player page (it loads) gets
+ *   `full` at once, before its first frame; one that opens on another page comes up in the corner.
  * - Into the mini player: a `rect` frame every animation frame for `--k-motion-slow` (250 ms),
  *   eased, from the whole window to the corner; then the docked `mini` layout, which Rust keeps in
  *   its corner while the window is resized. Back to the player: the same frames the other way,
@@ -12,8 +18,7 @@
  *   a cover over the video fades out while the frame fades in (spec 8.6; also the M0 fallback for
  *   point 6). Back: `hidden`, then `full`, and a cover over the whole window fades out.
  * - A file that opens while another page is shown has no big picture to shrink from: it comes up
- *   in the corner the reduced-motion way. One that closes is gone at once: `full`, which the opaque
- *   page covers.
+ *   in the corner the reduced-motion way. One that closes is gone at once: `hidden`.
  * - The layouts go to Rust one at a time: while one is on its way, the frames of the animation
  *   that come behind it are replaced by the newest, so that a slow answer never piles them up.
  * - The animation's frames are asked for only while it runs. At rest nothing runs per frame (spec
@@ -38,17 +43,24 @@ export const MINI_MOTION_MS = defaultTokens('dark').motion.slow;
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 
 /**
+ * - `hidden`: no file is open, and mpv's window is not shown (Ruling R52).
  * - `full`: mpv's window fills the window.
  * - `shrinking`, `growing`: the animation into the corner, and back.
  * - `mini`: docked in the corner.
  */
-export type SurfacePhase = 'full' | 'shrinking' | 'mini' | 'growing';
+export type SurfacePhase = 'hidden' | 'full' | 'shrinking' | 'mini' | 'growing';
+
+/** The phases of the mini player and of the animation to it: the video is in a box of its own. */
+export type BoxedPhase = Exclude<SurfacePhase, 'hidden' | 'full'>;
+
+export const isBoxed = (phase: SurfacePhase): phase is BoxedPhase =>
+  phase !== 'hidden' && phase !== 'full';
 
 export interface SurfaceState {
   phase: SurfacePhase;
   /**
-   * Where the video is, in CSS px of the window; `null` while it fills the window, and while
-   * docked in a window too small for any mini player.
+   * Where the video is, in CSS px of the window; `null` while it fills the window or is hidden,
+   * and while docked in a window too small for any mini player.
    */
   rect: Rect | null;
   /**
@@ -60,6 +72,14 @@ export interface SurfaceState {
 }
 
 const FULL: SurfaceState = { phase: 'full', rect: null, fade: false };
+const HIDDEN: SurfaceState = { phase: 'hidden', rect: null, fade: false };
+
+/**
+ * Where mpv's window is by the layouts sent: hidden for no file, the whole window (or about to be:
+ * `full` is on its way), or away from it (the mini player and the animation). `null` before the
+ * first layout.
+ */
+type Placed = 'hidden' | 'full' | 'away' | null;
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia(REDUCED_MOTION).matches;
@@ -150,11 +170,11 @@ export function useSurfaceLayout(): SurfaceState {
   const open = usePlayerStore(selectVideoOpen);
   const aspect = usePlayerStore((state) => videoAspect(state.props['video-params']));
   const mini = onOtherPage && open;
-  const [state, setState] = useState<SurfaceState>(FULL);
+  const [state, setState] = useState<SurfaceState>(HIDDEN);
   const [send] = useState(() => createLayoutSender());
 
-  /** mpv's window fills the window (or is about to: `full` is on its way). */
-  const full = useRef(true);
+  /** Where mpv's window is by the layouts sent (see `Placed`). */
+  const placed = useRef<Placed>(null);
   /** Where mpv's window is now, when it does not fill the window. */
   const shown = useRef<Rect | null>(null);
   /** The docked layout Rust has. */
@@ -163,31 +183,29 @@ export function useSurfaceLayout(): SurfaceState {
   const stop = useRef<(() => void) | null>(null);
   /** Ends the fade of reduced motion. */
   const fading = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Whether a file was open the last time the page or the file changed. */
-  const wasOpen = useRef(open);
   /** The video's shape now, for the transitions (which do not run again when it changes). */
   const shape = useRef(aspect);
   useLayoutEffect(() => {
     shape.current = aspect;
   }, [aspect]);
 
-  // Rust starts with the whole window, and a UI that reloads finds it however it was left: the
-  // whole window, as this starts. Before the transitions below, which may follow at once.
-  useLayoutEffect(() => {
-    send({ kind: 'full' });
-    return () => {
+  useLayoutEffect(
+    () => () => {
       stop.current?.();
       stop.current = null;
       if (fading.current !== null) clearTimeout(fading.current);
       fading.current = null;
-    };
-  }, [send]);
+    },
+    [],
+  );
 
   // Before the paint: the page that changed is never shown for a frame with the video where it
-  // was (an opaque page over it with no hole yet, or a hole where the video has gone).
+  // was (an opaque page over it with no hole yet, or a hole where the video has gone). It runs
+  // when the hook starts too: Rust starts with mpv's window hidden, and a UI that reloads finds it
+  // however it was left, so the first layout always goes.
   useLayoutEffect(() => {
-    const appeared = !wasOpen.current;
-    wasOpen.current = open;
+    // No big picture to shrink from: nothing was open (or nothing was sent yet).
+    const appeared = placed.current === null || placed.current === 'hidden';
     stop.current?.();
     stop.current = null;
     if (fading.current !== null) clearTimeout(fading.current);
@@ -209,8 +227,20 @@ export function useSurfaceLayout(): SurfaceState {
       }, ms);
     };
 
+    // Nothing open: on every page, mpv's window is not shown (Ruling R52).
+    if (!open) {
+      shown.current = null;
+      docked.current = null;
+      if (placed.current !== 'hidden') {
+        placed.current = 'hidden';
+        send({ kind: 'hidden' });
+      }
+      setState(HIDDEN);
+      return;
+    }
+
     if (mini) {
-      full.current = false;
+      placed.current = 'away';
       const layout = miniLayout(shape.current, view.zoom);
       const target = miniRect(layout, view.w, view.h);
       const dock = (fade: boolean) => {
@@ -236,16 +266,16 @@ export function useSurfaceLayout(): SurfaceState {
       return;
     }
 
-    if (full.current) return;
+    if (placed.current === 'full') return;
     const finish = (fade: boolean) => {
-      full.current = true;
+      placed.current = 'full';
       shown.current = null;
       docked.current = null;
       send({ kind: 'full' });
       setState({ ...FULL, fade });
     };
-    // The file closed: nothing to grow, and the page that stays is opaque again.
-    if (!open) {
+    // A file opens on the player page: the whole window, while it loads, before its first frame.
+    if (appeared) {
       finish(false);
       return;
     }
@@ -273,7 +303,7 @@ export function useSurfaceLayout(): SurfaceState {
     if (!atRest) return undefined;
     const update = () => {
       // The video is leaving the corner; these listeners go with the next render.
-      if (full.current || stop.current !== null) return;
+      if (placed.current !== 'away' || stop.current !== null) return;
       const view = readViewport();
       const layout = miniLayout(aspect, view.zoom);
       if (!sameLayout(layout, docked.current)) {

@@ -8,7 +8,9 @@
  * While mpv's window is somewhere else (the mini player and the animation to it,
  * surface/useSurfaceLayout.ts) the pointer is not passed on (`pointer`, Ruling R45): its place
  * here would be the wrong place in mpv's window, and the mini player takes the pointer over the
- * video itself. The keyboard goes to mpv either way.
+ * video itself. Nor while no video is shown (the start screen, the settings; Ruling R52): the
+ * wheel there would change the volume unseen, and a double click turn the start screen
+ * fullscreen. The keyboard goes to mpv either way.
  *
  * It stays mounted on every page: the keys of input.conf (Ctrl+V, Ctrl+O, …) work without a video
  * too. Anything above it that is not a control lets the pointer through to it (AppShell.module.css).
@@ -20,7 +22,7 @@ import { attachVideoInput } from '../input/forward';
 import styles from './VideoLayer.module.css';
 
 export interface VideoLayerProps {
-  /** Whether the pointer over the layer goes to mpv: while mpv's window fills the window. */
+  /** Whether the pointer over the layer goes to mpv: while mpv's window fills the player page. */
   pointer?: boolean;
 }
 

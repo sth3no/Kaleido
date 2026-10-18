@@ -2,7 +2,8 @@
  * The app's window (spec 8.3, 8.4). From the bottom up:
  *
  * 1. `VideoLayer`: transparent, where mpv's window is; it passes input to mpv. While mpv's window
- *    is the mini player (or on its way there) the pointer stays in the UI (Ruling R45).
+ *    is the mini player (or on its way there) the pointer stays in the UI (Ruling R45), and so it
+ *    does on a page without a video, where mpv's window is hidden (Ruling R52).
  * 2. The page layer, with the page in it: the start screen (`home`), the player (`player`) or the
  *    settings (`settings`), as the tasks that build them pass them in. Over the video the page
  *    lets the pointer through to the video: the player page gives its controls
@@ -41,7 +42,7 @@ import MiniPlayer, { holePath, MiniCover, useMiniBox } from '../mini/MiniPlayer'
 import { usePlayerBridge } from '../state/bridge';
 import { usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
-import { useSurfaceLayout } from '../surface/useSurfaceLayout';
+import { isBoxed, useSurfaceLayout } from '../surface/useSurfaceLayout';
 import styles from './AppShell.module.css';
 import { SNAP_LAYOUTS } from './captionButtons';
 import Sidebar, { type SidebarMode, type SidebarOpener } from './Sidebar';
@@ -96,11 +97,12 @@ export default function AppShell({ home, player, settings, notices }: AppShellPr
   const menuButton = useRef<HTMLButtonElement>(null);
 
   const overVideo = view === 'player';
-  // Where mpv's window is: the whole window, or the mini player and the animation to it.
+  // Where mpv's window is: nowhere (no file), the whole window, or the mini player and the
+  // animation to it.
   const surface = useSurfaceLayout();
   const miniBox = useMiniBox(surface.rect);
-  // The video is not the whole window, and there is room for it (else Rust shows none either).
-  const miniPhase = surface.phase !== 'full' && miniBox !== null ? surface.phase : null;
+  // The video is in a box of its own, and there is room for it (else Rust shows none either).
+  const miniPhase = isBoxed(surface.phase) && miniBox !== null ? surface.phase : null;
   // The page layer is clipped by it (Ruling R46).
   const hole = miniPhase !== null && miniBox !== null ? holePath(miniBox) : null;
   useVideoBackdrop((overVideo && loaded) || miniPhase !== null);
@@ -141,7 +143,10 @@ export default function AppShell({ home, player, settings, notices }: AppShellPr
       data-view={view}
       style={hole === null ? undefined : ({ '--mini-hole': hole } as CSSProperties)}
     >
-      <VideoLayer pointer={surface.phase === 'full'} />
+      {/* The pointer is mpv's only over the whole-window video of the player page (Ruling R52):
+          not on the start screen or the settings, where the layer shows through around the
+          docked sidebar and a wheel or a double click must not reach mpv. */}
+      <VideoLayer pointer={surface.phase === 'full' && overVideo} />
       <div className={styles.pageLayer} data-page-layer data-mini={hole !== null}>
         <main className={styles.page} data-view={view}>
           {content}

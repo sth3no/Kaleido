@@ -36,7 +36,7 @@ import { EXPAND, PAUSE, PLAY, STOP } from '../shell/Icon';
 import { selectPaused, usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
 import type { Rect } from '../surface/mini';
-import type { SurfacePhase } from '../surface/useSurfaceLayout';
+import type { BoxedPhase } from '../surface/useSurfaceLayout';
 import glass from '../theme/glass.module.css';
 import { readZoomFrame, toOwnLength, type ZoomFrame } from '../theme/zoom';
 import styles from './MiniPlayer.module.css';
@@ -145,8 +145,8 @@ export function MiniCover({ box }: MiniCoverProps) {
 
 export interface MiniPlayerProps {
   box: MiniBox;
-  /** Not `full`: the shell shows the mini player only while the video is not the whole window. */
-  phase: Exclude<SurfacePhase, 'full'>;
+  /** The shell shows the mini player only while the video is in a box of its own. */
+  phase: BoxedPhase;
   /** The mini player came up without moving: the frame fades in. */
   fade: boolean;
 }

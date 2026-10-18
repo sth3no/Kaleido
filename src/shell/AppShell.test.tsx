@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n } from '../i18n';
@@ -118,6 +118,81 @@ test('the page is transparent only while a video is shown', () => {
   });
   expect(shown()).toBe(false);
   expect(pageLayer()?.getAttribute('data-mini')).toBe('false');
+});
+
+/** The kinds of the layouts the shell sent Rust, in order. */
+const layoutKinds = () =>
+  vi
+    .mocked(invoke)
+    .mock.calls.filter(([command]) => command === 'surface_set_layout')
+    .map(([, args]) => (args as { layout: { kind: string } }).layout.kind);
+
+test('mpv’s window is hidden with no file, whole while one loads, and in the corner on the settings (Ruling R52)', async () => {
+  const last = () => layoutKinds().at(-1);
+  shell();
+  // The start screen: mpv's idle window would be black under the page (Mica shows through it).
+  await waitFor(() => {
+    expect(layoutKinds()).toEqual(['hidden']);
+  });
+
+  // A file loads on the player page: the whole window, before its first frame.
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': false } });
+  });
+  await waitFor(() => {
+    expect(last()).toBe('full');
+  });
+
+  // The settings while it plays: the mini player.
+  act(() => {
+    usePlayerStore.setState({ loaded: true, props: PLAYING });
+    useUiStore.getState().setPage('settings');
+  });
+  await waitFor(() => {
+    expect(last()).toBe('mini');
+  });
+
+  // Stopped there: hidden again, and the settings are the settings.
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': true } });
+  });
+  await waitFor(() => {
+    expect(last()).toBe('hidden');
+  });
+});
+
+test('the pointer reaches mpv only over the whole-window video of the player page (Ruling R52)', () => {
+  const layer = () => document.querySelector<HTMLElement>('[data-video-layer]');
+  const inputs = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'player_input');
+  const spin = () => {
+    const target = layer();
+    if (target) fireEvent.wheel(target, { deltaY: 100, deltaMode: 0 });
+  };
+  shell();
+
+  // The start screen: the layer shows through around the docked sidebar, and the wheel (the
+  // volume, unseen) and a double click (fullscreen) there are not mpv's.
+  expect(layer()?.getAttribute('data-pointer')).toBe('false');
+  spin();
+  expect(inputs()).toEqual([]);
+
+  // A file loads on the player page: the video has the whole window, and the pointer is mpv's.
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': false } });
+  });
+  expect(layer()?.getAttribute('data-pointer')).toBe('true');
+  spin();
+  expect(inputs()).toHaveLength(1);
+  expect(inputs()[0]?.[1]).toMatchObject({ event: { type: 'wheel' } });
+
+  // The settings while it plays: the mini player takes the pointer itself.
+  act(() => {
+    usePlayerStore.setState({ loaded: true, props: PLAYING });
+    useUiStore.getState().setPage('settings');
+  });
+  expect(layer()?.getAttribute('data-pointer')).toBe('false');
+  spin();
+  expect(inputs()).toHaveLength(1);
 });
 
 test('the shell starts the bridge to Rust, once', async () => {
