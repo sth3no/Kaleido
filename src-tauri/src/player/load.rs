@@ -86,9 +86,15 @@ impl LoadOptions {
     /// The value of `loadfile`'s options argument, if there is any option. Each value is
     /// written as `%N%value`, which mpv reads for exactly N bytes; nothing in it can end the
     /// option early or start another.
+    ///
+    /// With any option, the entry also gets `autocreate-playlist=no` (Ruling R55). Kaleido's
+    /// mpv.conf has `autocreate-playlist=filter`, which opens a file through its folder: mpv
+    /// replaces the entry with the folder's playlist, and the entry it then plays has lost the
+    /// per-file options, so `--start` gave way to the saved position or to 0. A launch that names a
+    /// time means this file at this time, so the folder is not opened around it.
     fn to_mpv(&self) -> Option<String> {
         let quoted = |name: &str, value: &str| format!("{name}=%{}%{value}", value.len());
-        let options: Vec<String> = [
+        let mut options: Vec<String> = [
             self.start.map(|start| quoted("start", &start.to_string())),
             self.format
                 .as_deref()
@@ -97,7 +103,11 @@ impl LoadOptions {
         .into_iter()
         .flatten()
         .collect();
-        (!options.is_empty()).then(|| options.join(","))
+        if options.is_empty() {
+            return None;
+        }
+        options.push("autocreate-playlist=no".to_owned());
+        Some(options.join(","))
     }
 }
 
@@ -553,7 +563,7 @@ mod tests {
                 "https://youtu.be/x",
                 "append-play",
                 "-1",
-                "start=%3%4.5,ytdl-format=%23%bv*[height<=?1080]+ba/b",
+                "start=%3%4.5,ytdl-format=%23%bv*[height<=?1080]+ba/b,autocreate-playlist=no",
             ])]
         );
     }
@@ -616,7 +626,7 @@ mod tests {
             format: Some("ž".into()),
         };
         let commands = load_commands(&[Source::File("a.mkv".into())], LoadMode::Append, &opts);
-        assert_eq!(commands[0][4], "ytdl-format=%2%ž");
+        assert_eq!(commands[0][4], "ytdl-format=%2%ž,autocreate-playlist=no");
     }
 
     /// mpv cannot open a path of 260 characters or more as it is (R5): it gets the `\\?\` form.
@@ -685,7 +695,7 @@ mod tests {
                     r"C:\Videa\a.mkv",
                     "append-play",
                     "-1",
-                    "start=%2%10"
+                    "start=%2%10,autocreate-playlist=no"
                 ]),
                 text(&["loadfile", r"C:\Videa\b.mkv", "append"]),
             ]
@@ -772,6 +782,86 @@ mod tests {
         };
         assert!(first >= 3.9, "playback started at {first}");
         assert!(first < 6.0, "playback started at {first}");
+    }
+
+    /// The first position mpv reports for the file that plays.
+    fn first_position(engine: &Engine) -> f64 {
+        loop {
+            if let Some(position) = engine.call(|mpv| mpv.get_f64("time-pos").ok()) {
+                return position;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn playlist_count(engine: &Engine) -> i64 {
+        engine.call(|mpv| mpv.get_i64("playlist-count").unwrap())
+    }
+
+    /// Ruling R55. With `autocreate-playlist=filter` (Kaleido's mpv.conf), a folder of two clips
+    /// and a position saved for the one opened: opened with a start (the command line's
+    /// `--start=3`) it plays from 3 s, on its own; not from the saved 7 s, nor from 0. Without
+    /// `autocreate-playlist=no` for the entry, mpv opened it through its folder, and the entry it
+    /// played had lost the start (it resumed at 7 s).
+    #[test]
+    fn a_start_wins_over_the_folder_playlist_and_the_saved_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(
+            paths.config_dir.join("mpv.conf"),
+            "autocreate-playlist=filter\nkeep-open=yes\n",
+        )
+        .unwrap();
+        let folder = tmp.path().join("Videa");
+        fs::create_dir(&folder).unwrap();
+        let file = clip(&folder, 10);
+        fs::copy(&file, folder.join("další díl.y4m")).unwrap();
+        let events = Recorded::default();
+        let engine = engine_with(tmp.path(), events.clone());
+
+        // Opened without options, the folder is the playlist; a position is saved at 7 s, as a
+        // quit of an earlier session leaves it.
+        let source = || vec![Source::File(file.clone())];
+        open_checked(
+            &engine,
+            &source(),
+            LoadMode::Replace,
+            &LoadOptions::default(),
+        );
+        events.wait_until("the file loaded", LOAD_TIMEOUT, is_file_loaded);
+        assert_eq!(
+            playlist_count(&engine),
+            2,
+            "the folder was not opened around the file"
+        );
+        engine.command(&["seek", "7", "absolute"]);
+        eventually(&engine, "the seek to 7 s", |mpv| {
+            mpv.get_f64("time-pos")
+                .is_ok_and(|position| position >= 6.9)
+        });
+        engine.command(&["write-watch-later-config"]);
+
+        let before = loaded(&events);
+        let start = LoadOptions {
+            start: Some(3.0),
+            format: None,
+        };
+        open_checked(&engine, &source(), LoadMode::Replace, &start);
+        events.wait_until("the file loaded again", LOAD_TIMEOUT, |events| {
+            events
+                .iter()
+                .filter(|event| **event == Event::FileLoaded)
+                .count()
+                > before
+        });
+
+        let first = first_position(&engine);
+        assert!((2.9..4.5).contains(&first), "playback started at {first}");
+        assert_eq!(
+            playlist_count(&engine),
+            1,
+            "this file at this time, on its own"
+        );
     }
 
     /// A new open request means play, even after pause (taken over from the prototype).

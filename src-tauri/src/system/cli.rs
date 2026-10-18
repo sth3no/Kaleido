@@ -1,5 +1,7 @@
 //! Kaleido's command line (spec 9.2): `Kaleido.exe [--append] [--start=<s>] [--format=<f>]
-//! <file|folder|url>…`, checked like everything else that is opened.
+//! <file|folder|url>…`, checked like everything else that is opened. A `--start` or `--format`
+//! goes with the first source, which then opens on its own, without the playlist of its folder
+//! (Ruling R55, `LoadOptions::to_mpv`).
 
 use std::ffi::OsString;
 use std::path::Path;

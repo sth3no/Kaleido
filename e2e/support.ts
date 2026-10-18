@@ -23,13 +23,14 @@ export const APP = path.join(ROOT, 'target', 'debug', 'Kaleido.exe');
 export const CLIP = path.join(ROOT, 'e2e', 'media', 'kaleido-e2e.mkv');
 
 /**
- * The clip's saved position (Kaleido's mpv.conf has `save-position-on-quit`): the file in mpv's
- * `watch_later` folder named by the MD5 of the clip's path. A run that closed the app at the end of
- * the clip leaves it there, and the next run would start at the end, paused. `--start=0` on the
- * command line does not prevent that: mpv opens the clip's folder as the playlist
- * (`autocreate-playlist`), and the entry it plays has lost the option. `onPrepare` removes it.
+ * What mpv saved for the clip when an earlier run, or a session of the user's with the clip, ended
+ * (Kaleido's mpv.conf has `save-position-on-quit`): the file in mpv's `watch_later` folder named by
+ * the MD5 of the clip's path. It holds the position, which the spec's `--start=0` now overrides
+ * (Ruling R55), and every other option that was changed: the volume, the tracks, a loop, the
+ * speed. A saved `vid=no` (video off) would leave no 720p badge, a loop or a speed would make the
+ * run another one. `onPrepare` removes it, so every run starts the clip as a first one does.
  */
-export const CLIP_POSITION = path.join(
+export const CLIP_SAVED_STATE = path.join(
   process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local'),
   'Kaleido',
   'state',

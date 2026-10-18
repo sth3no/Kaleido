@@ -17,7 +17,7 @@ import { existsSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import { SevereServiceError } from 'webdriverio';
 
-import { APP, CLIP, CLIP_POSITION, EDGE_DRIVER, kaleidoProcesses, TAURI_DRIVER } from './support';
+import { APP, CLIP, CLIP_SAVED_STATE, EDGE_DRIVER, kaleidoProcesses, TAURI_DRIVER } from './support';
 
 const PORT = 4444;
 const NATIVE_PORT = 4445;
@@ -100,8 +100,8 @@ export const config: WebdriverIO.Config = {
       const list = running.map((p) => `  ${p.path || '?'} (process ${String(p.pid)})`).join('\n');
       throw new SevereServiceError(`Close Kaleido first:\n${list}`);
     }
-    // The position the last run saved for the clip: the clip starts from its beginning.
-    rmSync(CLIP_POSITION, { force: true });
+    // What an earlier run or session saved for the clip: every run starts it as a first one.
+    rmSync(CLIP_SAVED_STATE, { force: true });
   },
 
   async beforeSession() {
