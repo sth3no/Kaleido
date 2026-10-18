@@ -74,6 +74,8 @@ jobs:
   # must match). Runners without a GPU play it through WARP.
   e2e:
     runs-on: windows-latest
+    # A run that hangs (a dialog nobody closes, a driver that never answers) ends here.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - name: Fetch pinned libmpv and thumbfast
@@ -93,3 +95,18 @@ jobs:
       # kaleido-mpv, `tauri build --debug --no-bundle` (target/debug/Kaleido.exe) and the clip.
       - run: npm run e2e:build
       - run: npm run e2e
+      # What the app wrote during a failed run (kaleido.log, mpv.log), copied into the workspace
+      # first: the upload takes no %LOCALAPPDATA%.
+      - name: Collect the app's logs
+        if: failure()
+        shell: pwsh
+        run: |
+          $logs = Join-Path $env:LOCALAPPDATA 'Kaleido\logs'
+          if (Test-Path $logs) { Copy-Item $logs e2e-logs -Recurse }
+      - name: Upload the app's logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e-logs
+          if-no-files-found: ignore

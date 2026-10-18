@@ -62,14 +62,17 @@ npm run build               # tsc and the Vite build
 The E2E test starts the built app under WebView2's WebDriver and plays a generated clip:
 
 ```powershell
-cargo install tauri-driver --locked
+cargo install tauri-driver --locked --version 2.1.0   # the version CI uses
 powershell -NoProfile -ExecutionPolicy Bypass -File e2e/fetch-driver.ps1   # msedgedriver of this WebView2
 npm run e2e:build           # kaleido-mpv, the debug app with the UI inside, e2e/media/kaleido-e2e.mkv
 npm run e2e
 ```
 
 Close Kaleido first: a running instance would take the clip over. Like any start of Kaleido, the
-run uses your own `%APPDATA%\Kaleido` and `%LOCALAPPDATA%\Kaleido`.
+run uses your own `%APPDATA%\Kaleido` and `%LOCALAPPDATA%\Kaleido`, so a `mpv.conf` there that
+starts files paused or loops them (`pause`, `loop-file`, `loop-playlist`) can make the smoke test
+fail. tauri-driver is looked for in `$KALEIDO_TAURI_DRIVER`, then `$CARGO_HOME\bin`, then `PATH`,
+then `~\.cargo\bin`.
 
 Performance against the targets of spec 13: `scripts/measure.ps1` (measures the local install).
 

@@ -5,9 +5,11 @@
  *     npm run e2e:build   (kaleido-mpv, the debug app with the UI inside, the clip)
  *     npm run e2e
  *
- * Needs `cargo install tauri-driver --locked` and an msedgedriver in the version of the WebView2
- * runtime (`e2e/fetch-driver.ps1`). Like any start of Kaleido, the run uses the user's own
- * %APPDATA%\Kaleido and %LOCALAPPDATA%\Kaleido.
+ * Needs `cargo install tauri-driver --locked --version 2.1.0` (the version CI uses) and an
+ * msedgedriver in the version of the WebView2 runtime (`e2e/fetch-driver.ps1`). Like any start of
+ * Kaleido, the run uses the user's own %APPDATA%\Kaleido and %LOCALAPPDATA%\Kaleido: a mpv.conf
+ * there that starts files paused or loops them (`pause`, `loop-file`, `loop-playlist`) can make
+ * the smoke test fail.
  */
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
@@ -85,7 +87,7 @@ export const config: WebdriverIO.Config = {
       [APP, 'npm run e2e:build (a debug build with the UI inside)'],
       [CLIP, 'powershell -File e2e/make-media.ps1'],
       [EDGE_DRIVER, 'powershell -File e2e/fetch-driver.ps1'],
-      [TAURI_DRIVER, 'cargo install tauri-driver --locked'],
+      [TAURI_DRIVER, 'cargo install tauri-driver --locked --version 2.1.0'],
     ].filter(([file]) => !existsSync(file));
     if (missing.length > 0) {
       const lines = missing.map(([file, remedy]) => `  ${file}\n    → ${remedy}`).join('\n');

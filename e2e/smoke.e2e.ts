@@ -56,8 +56,23 @@ async function waitForText(selector: string, text: string, timeout: number, what
   );
 }
 
+/** `promise`, or `timedOut` after `ms`. */
+async function within<T, U>(promise: Promise<T>, ms: number, timedOut: U): Promise<T | U> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<U>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(timedOut);
+    }, ms);
+  });
+  try {
+    return await Promise.race([promise, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 describe('Kaleido started with a clip', () => {
-  it('shows the clip in the title island within 5 s of `Kaleido.exe <clip>`', async () => {
+  it('a second `Kaleido.exe <clip>` hands the clip over and ends, and the clip is in the title island within 5 s', async () => {
     // tauri-driver started the app without the clip (wdio.conf.ts): this start hands its command
     // line to the running app (single instance), as opening a file from Explorer does, and ends.
     // `--start=0`: a position an earlier run saved must not move the clip towards its end.
@@ -73,11 +88,16 @@ describe('Kaleido started with a clip', () => {
     /** What is left of the 5 s. */
     const left = () => Math.max(0, 5_000 - (Date.now() - started));
 
-    await wakeControls();
-    await waitForText('[data-island] span[title]', path.basename(CLIP), left(), 'the title island');
-    // video-params came from mpv: the clip is decoded, not only named.
-    await waitForText('[data-island] span[title] + span', '720p', left(), 'the badge');
-    expect(await ended).toBe(0);
+    try {
+      await wakeControls();
+      await waitForText('[data-island] span[title]', path.basename(CLIP), left(), 'the title island');
+      // video-params came from mpv: the clip is decoded, not only named.
+      await waitForText('[data-island] span[title] + span', '720p', left(), 'the badge');
+      expect(await within(ended, 5_000, 'still running')).toBe(0);
+    } finally {
+      // A second start that did not end (it hung, or a wait above failed) must not outlive the run.
+      if (second.exitCode === null) second.kill();
+    }
   });
 
   it('play/pause switches between playing and paused', async () => {

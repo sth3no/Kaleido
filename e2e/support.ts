@@ -4,6 +4,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,9 +25,25 @@ export const CLIP = path.join(ROOT, 'e2e', 'media', 'kaleido-e2e.mkv');
 export const EDGE_DRIVER =
   process.env['KALEIDO_EDGE_DRIVER'] ?? path.join(ROOT, 'e2e', 'driver', 'msedgedriver.exe');
 
-/** Where `cargo install tauri-driver --locked` puts it. */
-export const TAURI_DRIVER =
-  process.env['KALEIDO_TAURI_DRIVER'] ?? path.join(os.homedir(), '.cargo', 'bin', 'tauri-driver.exe');
+/**
+ * tauri-driver: `$KALEIDO_TAURI_DRIVER`, else where `cargo install tauri-driver` put it
+ * (`$CARGO_HOME\bin`), else the first one on `PATH`, else Cargo's default `~\.cargo\bin`.
+ */
+function findTauriDriver(): string {
+  const chosen = process.env['KALEIDO_TAURI_DRIVER'];
+  if (chosen !== undefined && chosen !== '') return chosen;
+  const exe = 'tauri-driver.exe';
+  const cargoHome = process.env['CARGO_HOME'];
+  const onPath = (process.env['PATH'] ?? '')
+    .split(path.delimiter)
+    .map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
+    .filter((dir) => dir !== '')
+    .map((dir) => path.join(dir, exe));
+  const candidates = [...(cargoHome ? [path.join(cargoHome, 'bin', exe)] : []), ...onPath];
+  return candidates.find((file) => existsSync(file)) ?? path.join(os.homedir(), '.cargo', 'bin', exe);
+}
+
+export const TAURI_DRIVER = findTauriDriver();
 
 export interface AppProcess {
   pid: number;
