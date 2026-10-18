@@ -20,6 +20,29 @@ export function isSilenced(binding: Binding): boolean {
   return binding.command.trim() === SILENCED_COMMAND;
 }
 
+/**
+ * The command prefixes mpv puts in front of a binding by itself: a script's key binding that is not
+ * scalable is listed as `<key> nonscalable script-binding <script>/<name>` (mpv's defaults.lua). No
+ * one wrote it, and it says how the command runs, not what it does. The prefixes of a line of
+ * input.conf (`no-osd seek 5`) are what its author wrote, and are shown.
+ */
+const ADDED_PREFIXES: ReadonlySet<string> = new Set(['nonscalable']);
+
+/**
+ * A command as the page shows it: without the prefixes mpv added to it (`ADDED_PREFIXES`). Only the
+ * text is shortened: Rust keeps the command whole, so a moved shortcut is written with its prefixes
+ * and works the same on its new key. A command that is nothing but a prefix is shown as it is.
+ */
+export function displayCommand(command: string): string {
+  let rest = command.trim();
+  for (;;) {
+    const match = /^(\S+)\s+/.exec(rest);
+    const word = match?.[1];
+    if (match === null || word === undefined || !ADDED_PREFIXES.has(word)) return rest;
+    rest = rest.slice(match[0].length);
+  }
+}
+
 // --- Keys -------------------------------------------------------------------------------------------
 
 /** A key name in mpv's words, taken apart: `Ctrl+Shift+f` is `ctrl`, `shift` and `f`; `Ctrl++` ends in `+`. */

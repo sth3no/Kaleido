@@ -160,6 +160,24 @@ describe('the list', () => {
     expect(reset('m')).toBeTruthy();
   });
 
+  test('a plugin\'s binding is shown without the prefix mpv puts in front of it', async () => {
+    listed = [
+      ...START,
+      bind('Ctrl+j', 'nonscalable script-binding testbind/test-x', { type: 'plugin', name: 'testbind' }),
+    ];
+    rust();
+    await open();
+
+    expect(within(row('Ctrl+j')).getByText('script-binding testbind/test-x')).toBeTruthy();
+    expect(within(row('Ctrl+j')).queryByText(/nonscalable/)).toBeNull();
+    // The question about a key it has says it the same way.
+    fireEvent.click(change('m'));
+    press('j', { code: 'KeyJ', ctrlKey: true });
+    expect(within(row('m')).getByRole('alert').textContent).toBe(
+      'Ctrl+j already does this: script-binding testbind/test-x. Replace it?',
+    );
+  });
+
   test('every binding has a Reset, a plugin\'s too', async () => {
     await open();
     for (const key of ['RIGHT', 'Ctrl+f', 'f', 'i', 'Ctrl+h']) expect(reset(key)).toBeTruthy();

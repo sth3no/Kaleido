@@ -220,6 +220,22 @@ mod tests {
 
     const KALEIDO_S: &str = "script-message kaleido screenshot subtitles";
 
+    /// The prefixes mpv's input commands may start with (mpv's input/cmd.c).
+    const MPV_COMMAND_PREFIXES: [&str; 12] = [
+        "no-osd",
+        "osd-bar",
+        "osd-msg",
+        "osd-msg-bar",
+        "osd-auto",
+        "expand-properties",
+        "raw",
+        "repeatable",
+        "nonrepeatable",
+        "nonscalable",
+        "async",
+        "sync",
+    ];
+
     fn binding(key: &str, command: &str, source: BindingSource) -> Binding {
         Binding {
             key: key.to_owned(),
@@ -532,7 +548,7 @@ mod tests {
             "mp.add_key_binding(\"x\", \"test-x\", function() end)\n",
         )
         .unwrap();
-        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        let engine = Engine::start(headless(paths.clone()), NoEvents).unwrap();
         engine.command(&["load-script", &script.to_string_lossy()]);
 
         let listed = wait_for_bindings(&engine, "the script's binding is listed", |listed| {
@@ -547,9 +563,27 @@ mod tests {
                 name: "testbind".into()
             })
         );
-        assert_eq!(
-            command_of(&listed, "x").as_deref(),
-            Some("script-binding testbind/test-x")
+        // The command is mpv's as it holds it, with the input prefixes a script's binding gets
+        // (`nonscalable` in the pinned build): a rebind writes it to input.conf as it is, so the
+        // key behaves the same on its new place. The shortcuts page leaves mpv's own `nonscalable`
+        // out when it shows the command (src/settings/shortcuts.ts `displayCommand`).
+        let x = command_of(&listed, "x").unwrap();
+        let raw_x = engine.call(|mpv| {
+            let raw = parse_raw(&mpv.get_string("input-bindings").unwrap()).unwrap();
+            raw.into_iter()
+                .find(|entry| entry.key == "x" && entry.owner.as_deref() == Some("testbind"))
+                .map(|entry| entry.cmd)
+        });
+        assert_eq!(Some(x.as_str()), raw_x.as_deref());
+        let words: Vec<&str> = x.split_whitespace().collect();
+        assert!(words.len() >= 2, "{x}");
+        let (prefixes, rest) = words.split_at(words.len() - 2);
+        assert_eq!(rest, ["script-binding", "testbind/test-x"], "{x}");
+        assert!(
+            prefixes
+                .iter()
+                .all(|word| MPV_COMMAND_PREFIXES.contains(word)),
+            "{x}"
         );
         // Kaleido's line over mpv's own `s`.
         assert_eq!(source_of_key(&listed, "s"), Some(BindingSource::Kaleido));
@@ -562,6 +596,16 @@ mod tests {
         for key in ["s", "x", "SPACE", "F12"] {
             assert_eq!(listed.iter().filter(|b| b.key == key).count(), 1, "{key}");
         }
+
+        // Moved to another key, the script's binding keeps its prefixes, live and in input.conf.
+        rebind(&engine, &paths.config_dir, "x", "Ctrl+F11").unwrap();
+        let file =
+            InputConf::parse(&fs::read_to_string(paths.config_dir.join(INPUT_CONF)).unwrap());
+        assert_eq!(file.get("Ctrl+F11").as_deref(), Some(x.as_str()));
+        assert_eq!(
+            command_of(&player_bindings(&engine), "Ctrl+F11").as_deref(),
+            Some(x.as_str())
+        );
     }
 
     #[test]

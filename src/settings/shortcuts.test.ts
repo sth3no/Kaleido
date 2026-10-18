@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { Binding, BindingSource } from '../ipc/types';
 import {
+  displayCommand,
   filterBindings,
   groupBindings,
   isSilenced,
@@ -28,6 +29,31 @@ describe('isSilenced', () => {
     expect(isSilenced(binding('q', 'quit'))).toBe(false);
     // A command that merely mentions it is a command.
     expect(isSilenced(binding('q', 'no-osd ignore'))).toBe(false);
+  });
+});
+
+describe('displayCommand', () => {
+  test('leaves out the prefix mpv puts in front of a script\'s binding', () => {
+    // As mpv lists a script's own binding.
+    expect(displayCommand('nonscalable script-binding testbind/test-x')).toBe(
+      'script-binding testbind/test-x',
+    );
+    expect(displayCommand('  nonscalable   script-binding stats/display-stats  ')).toBe(
+      'script-binding stats/display-stats',
+    );
+  });
+
+  test('keeps what the author of a line wrote, and the inside of the rest, as they are', () => {
+    expect(displayCommand('cycle pause')).toBe('cycle pause');
+    // Kaleido's own lines say no-osd themselves.
+    expect(displayCommand('no-osd seek 5; script-message kaleido osd seek')).toBe(
+      'no-osd seek 5; script-message kaleido osd seek',
+    );
+    expect(displayCommand('nonscalable show-text "a  b"')).toBe('show-text "a  b"');
+    // A word that only starts like the prefix is the command.
+    expect(displayCommand('nonscalablex thing')).toBe('nonscalablex thing');
+    // A prefix with nothing after it is all there is to show.
+    expect(displayCommand('nonscalable')).toBe('nonscalable');
   });
 });
 

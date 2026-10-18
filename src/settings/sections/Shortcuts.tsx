@@ -39,6 +39,7 @@ import { blurAfterPointer } from '../../input/forward';
 import { settingsBindings, settingsRebind, settingsResetBinding } from '../../ipc/commands';
 import type { Binding, BindingSource } from '../../ipc/types';
 import {
+  displayCommand,
   filterBindings,
   groupBindings,
   isSilenced,
@@ -408,11 +409,11 @@ export default function Shortcuts() {
                         ) : (
                           <>
                             <span className={styles.name} title={binding.comment ?? binding.command}>
-                              {binding.comment ?? binding.command}
+                              {binding.comment ?? displayCommand(binding.command)}
                             </span>
                             {binding.comment !== null && (
                               <code className={styles.command} title={binding.command}>
-                                {binding.command}
+                                {displayCommand(binding.command)}
                               </code>
                             )}
                           </>
@@ -484,7 +485,7 @@ export default function Shortcuts() {
                           <p role="alert" className={styles.hint}>
                             {t('settings.shortcuts.conflict', {
                               key: asked.to,
-                              command: asked.taken.comment ?? asked.taken.command,
+                              command: asked.taken.comment ?? displayCommand(asked.taken.command),
                             })}
                           </p>
                           <button
