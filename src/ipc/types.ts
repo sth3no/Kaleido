@@ -437,6 +437,8 @@ export interface CommandTable {
   system_diagnostics: { args: undefined; result: string };
   system_copy_diagnostics: { args: undefined; result: Nothing };
   system_open_logs: { args: undefined; result: Nothing };
+  /** What the UI's error boundary caught, with its stacks, for kaleido.log. */
+  system_ui_error: { args: { message: string }; result: Nothing };
   system_licenses: { args: undefined; result: License[] };
   system_appearance: { args: undefined; result: SystemAppearance };
   /** The system's language as a BCP 47 tag (`cs-CZ`); `en-US` where the system names none. */

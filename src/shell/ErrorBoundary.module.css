@@ -1,0 +1,49 @@
+/* The recover view (ErrorBoundary.tsx): opaque over the whole window, because the app under it is
+   gone and the window is transparent; the video or the desktop must not show through. The page's
+   own colour, not the backdrop, which is transparent under Mica. */
+.recover {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--k-space-xl);
+  background: var(--k-color-bg);
+  color: var(--k-color-text);
+}
+
+.content {
+  display: grid;
+  justify-items: center;
+  gap: var(--k-space-m);
+  max-width: 480px;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-xl);
+  font-weight: 700;
+}
+
+.text {
+  margin: 0;
+  color: var(--k-color-text-muted);
+}
+
+.reload {
+  margin-top: var(--k-space-s);
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-text);
+  color: var(--k-color-bg);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (forced-colors: active) {
+  .reload {
+    border-color: ButtonText;
+  }
+}

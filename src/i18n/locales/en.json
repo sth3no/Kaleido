@@ -433,6 +433,11 @@
     },
     "pasteEmpty": "There is no link on the clipboard. Copy a web address (http:// or https://), then press Ctrl+V.",
     "dropLink": "The dropped link could not be opened. It has to be one complete web address that starts with http:// or https://.",
-    "internal": "Something went wrong inside Kaleido. It is written in the log; if the player stops responding, restart Kaleido."
+    "internal": "Something went wrong inside Kaleido. It is written in the log; if the player stops responding, restart Kaleido.",
+    "recover": {
+      "title": "Kaleido's window ran into a problem",
+      "text": "This view stopped working, and what happened is written in the log. Reload it to go on; what plays keeps playing.",
+      "reload": "Reload"
+    }
   }
 }

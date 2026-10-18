@@ -613,6 +613,13 @@ fn check_command(command: &str, calls: &[Value]) {
             column::<String>(command, calls, "text"),
             ["https://example.com/watch?v=abc", "  not a link  "]
         ),
+        "system_ui_error" => assert_eq!(
+            column::<String>(command, calls, "message"),
+            [
+                "TypeError: Cannot read properties of undefined (reading 'title')\n    at \
+                 PlayerPage (PlayerPage.tsx:12:7)\nin components:\n    at PlayerPage\n    at App"
+            ]
+        ),
         "system_open_source" => {
             let pages = column::<SourcePage>(command, calls, "which");
             assert_eq!(pages, [SourcePage::Kaleido, SourcePage::Libmpv]);

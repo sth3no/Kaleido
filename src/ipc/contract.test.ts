@@ -65,6 +65,7 @@ import systemOpenSourceJson from '../../src-tauri/tests/fixtures/ipc/system_open
 import systemOpenTextJson from '../../src-tauri/tests/fixtures/ipc/system_open_text.json';
 import systemPasteEventJson from '../../src-tauri/tests/fixtures/ipc/system.paste-empty.json';
 import systemPasteJson from '../../src-tauri/tests/fixtures/ipc/system_paste.json';
+import systemUiErrorJson from '../../src-tauri/tests/fixtures/ipc/system_ui_error.json';
 import systemUiReadyJson from '../../src-tauri/tests/fixtures/ipc/system_ui_ready.json';
 import thumbClearJson from '../../src-tauri/tests/fixtures/ipc/thumb_clear.json';
 import thumbGetJson from '../../src-tauri/tests/fixtures/ipc/thumb_get.json';
@@ -168,6 +169,7 @@ const commandFixtures = {
   system_open_source: systemOpenSourceJson,
   system_open_text: systemOpenTextJson,
   system_paste: systemPasteJson,
+  system_ui_error: systemUiErrorJson,
   system_ui_ready: systemUiReadyJson,
   thumb_clear: thumbClearJson,
   thumb_get: thumbGetJson,
@@ -616,6 +618,7 @@ const wrappers = {
   system_open_source: ({ which }) => commands.systemOpenSource(which),
   system_open_text: ({ text }) => commands.systemOpenText(text),
   system_paste: () => commands.systemPaste(),
+  system_ui_error: ({ message }) => commands.systemUiError(message),
   system_ui_ready: () => commands.systemUiReady(),
   thumb_clear: () => commands.thumbClear(),
   thumb_get: () => commands.thumbGet(),

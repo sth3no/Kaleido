@@ -400,6 +400,40 @@ pub async fn system_open_logs(app: AppHandle) {
     }
 }
 
+/// How much of a UI error goes to the log, in bytes: a message with its stacks is a few KB, and
+/// whatever the UI sends must not fill the log.
+const UI_ERROR_MAX: usize = 4 * 1024;
+
+/// The UI failed: its error boundary caught an error and shows the recover view (Ruling R53). The
+/// message, with its stacks, goes to kaleido.log (see [`ui_error_line`]). Synchronous: it only
+/// logs.
+#[tauri::command]
+pub fn system_ui_error(message: String) {
+    tracing::error!("the UI failed: {}", ui_error_line(&message));
+}
+
+/// `message` cut to [`UI_ERROR_MAX`] bytes at the edge of a character (`…` where it was cut), with
+/// its line breaks and other control characters escaped: one line of the log, so that nothing the
+/// UI sends can pass for lines of the log's own.
+fn ui_error_line(message: &str) -> String {
+    let mut end = message.len().min(UI_ERROR_MAX);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut line = String::with_capacity(end + 8);
+    for character in message[..end].chars() {
+        if character.is_control() {
+            line.extend(character.escape_default());
+        } else {
+            line.push(character);
+        }
+    }
+    if end < message.len() {
+        line.push('…');
+    }
+    line
+}
+
 /// The licenses of the third-party software Kaleido ships (spec 11.6). Reads two files from the
 /// installation, hence asynchronous and on a blocking thread.
 #[tauri::command]
@@ -428,5 +462,32 @@ mod tests {
         assert_eq!(locale_or_default(None), "en-US");
         assert_eq!(locale_or_default(Some(String::new())), "en-US");
         assert_eq!(locale_or_default(Some("  ".to_owned())), "en-US");
+    }
+
+    /// Ruling R53: what the UI's error boundary sends is one line of the log.
+    #[test]
+    fn a_ui_error_is_one_line_of_the_log() {
+        assert_eq!(
+            ui_error_line("TypeError: x is undefined\n    at PlayerPage\r\n\tat App\u{1b}[31m"),
+            "TypeError: x is undefined\\n    at PlayerPage\\r\\n\\tat App\\u{1b}[31m"
+        );
+        assert_eq!(
+            ui_error_line("Nelze přehrát: žluťoučký kůň"),
+            "Nelze přehrát: žluťoučký kůň"
+        );
+    }
+
+    /// At most 4 KB of it, cut between two characters.
+    #[test]
+    fn a_long_ui_error_is_cut_at_4_kb() {
+        // One byte, then two-byte characters: 4096 falls inside one of them.
+        let message = format!("a{}", "ž".repeat(3000));
+        let line = ui_error_line(&message);
+        let kept = line.strip_suffix('…').expect("the cut is marked");
+        assert_eq!(kept.len(), UI_ERROR_MAX - 1);
+        assert!(message.starts_with(kept));
+
+        let exact = "x".repeat(UI_ERROR_MAX);
+        assert_eq!(ui_error_line(&exact), exact, "nothing to cut");
     }
 }

@@ -433,6 +433,11 @@
     },
     "pasteEmpty": "Ve schránce není žádný odkaz. Zkopíruj webovou adresu (http:// nebo https://) a stiskni Ctrl+V.",
     "dropLink": "Přetažený odkaz se nepodařilo otevřít. Musí to být jedna úplná webová adresa, která začíná http:// nebo https://.",
-    "internal": "V Kaleidu se něco pokazilo. Je to zapsané v logu; když přehrávač přestane reagovat, spusť Kaleido znovu."
+    "internal": "V Kaleidu se něco pokazilo. Je to zapsané v logu; když přehrávač přestane reagovat, spusť Kaleido znovu.",
+    "recover": {
+      "title": "Okno Kaleida narazilo na chybu",
+      "text": "Zobrazení přestalo fungovat a co se stalo, je zapsané v logu. Načti ho znovu a pokračuj; co hraje, hraje dál.",
+      "reload": "Načíst znovu"
+    }
   }
 }

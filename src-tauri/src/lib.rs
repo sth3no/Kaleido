@@ -94,6 +94,7 @@ pub fn run() {
             commands::system_diagnostics,
             commands::system_copy_diagnostics,
             commands::system_open_logs,
+            commands::system_ui_error,
             commands::system_licenses,
             commands::system_appearance,
             commands::system_locale,

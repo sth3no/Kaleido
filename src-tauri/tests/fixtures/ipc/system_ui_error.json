@@ -1,0 +1,5 @@
+[
+  {
+    "message": "TypeError: Cannot read properties of undefined (reading 'title')\n    at PlayerPage (PlayerPage.tsx:12:7)\nin components:\n    at PlayerPage\n    at App"
+  }
+]

@@ -171,6 +171,12 @@ export const systemCopyDiagnostics = () => call('system_copy_diagnostics');
 
 export const systemOpenLogs = () => call('system_open_logs');
 
+/**
+ * What the UI's error boundary caught (`shell/ErrorBoundary.tsx`), for kaleido.log: the error and
+ * its stacks. Rust keeps the first 4 KB, on one line.
+ */
+export const systemUiError = (message: string) => call('system_ui_error', { message });
+
 /** The licenses of the third-party software Kaleido ships. */
 export const systemLicenses = () => call('system_licenses');
 
