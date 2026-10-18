@@ -62,15 +62,34 @@ pub fn replace_binary(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-/// Deletes the old files of earlier replaces in `dir` (`<name>.old-<digits>`) that can be deleted;
-/// the ones that still run stay. Returns those that stayed, sorted.
+/// Deletes the old files of earlier replaces in `dir` (`<name>.old-<digits>`, of any name) that
+/// can be deleted; the ones that still run stay. Returns those that stayed, sorted. For a time no
+/// replace runs (the start); during one, [`sweep_of`] its own name only.
 pub fn sweep(dir: &Path) -> Vec<PathBuf> {
+    sweep_where(dir, |file| {
+        file.rsplit_once(OLD_MARK)
+            .is_some_and(|(base, stamp)| !base.is_empty() && is_stamp(stamp))
+    })
+}
+
+/// [`sweep`] of the old files of `name` only (`<name>.old-<digits>`): what a replace of `name`
+/// may clear, while a replace of another tool may be between its two renames and need its old
+/// file back.
+pub fn sweep_of(dir: &Path, name: &str) -> Vec<PathBuf> {
+    sweep_where(dir, |file| {
+        file.strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix(OLD_MARK))
+            .is_some_and(is_stamp)
+    })
+}
+
+fn sweep_where(dir: &Path, old: impl Fn(&str) -> bool) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut kept = Vec::new();
     for entry in entries.flatten() {
-        if !entry.file_name().to_str().is_some_and(is_old) {
+        if !entry.file_name().to_str().is_some_and(&old) {
             continue;
         }
         let path = entry.path();
@@ -82,11 +101,9 @@ pub fn sweep(dir: &Path) -> Vec<PathBuf> {
     kept
 }
 
-/// Whether `name` is what [`replace_binary`] calls an old file.
-fn is_old(name: &str) -> bool {
-    name.rsplit_once(OLD_MARK).is_some_and(|(base, stamp)| {
-        !base.is_empty() && !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit())
-    })
+/// Whether `stamp` is the `<digits>` [`replace_binary`] puts after [`OLD_MARK`].
+fn is_stamp(stamp: &str) -> bool {
+    !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `bytes` into the new file `path`, through to the disk: the rename into place must not move a
@@ -175,6 +192,40 @@ mod tests {
         assert!(sweep(&dir.join("missing")).is_empty());
     }
 
+    /// A replace of one tool clears its own old files only: the other tool's may be the one its
+    /// replace needs to put back.
+    #[test]
+    fn sweep_of_a_name_takes_only_its_old_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for name in [
+            "yt-dlp.exe.old-1",
+            "yt-dlp.exe.old-2",
+            "deno.exe.old-3",
+            "yt-dlp.exe",
+            "yt-dlp.exe.old-x",
+            "xyt-dlp.exe.old-4",
+        ] {
+            fs::write(dir.join(name), name).unwrap();
+        }
+        assert!(sweep_of(dir, "yt-dlp.exe").is_empty());
+        assert_eq!(
+            names(dir),
+            [
+                "deno.exe.old-3",
+                "xyt-dlp.exe.old-4",
+                "yt-dlp.exe",
+                "yt-dlp.exe.old-x",
+            ]
+        );
+        assert!(sweep_of(dir, "deno.exe").is_empty());
+        assert_eq!(
+            names(dir),
+            ["xyt-dlp.exe.old-4", "yt-dlp.exe", "yt-dlp.exe.old-x"]
+        );
+        assert!(sweep_of(&dir.join("missing"), "deno.exe").is_empty());
+    }
+
     /// Review focus 3: yt-dlp.exe runs (ytdl_hook or a quality probe started it) while a new one
     /// comes. A copy of cmd.exe stands in for it, kept busy by `ping` for about four seconds.
     #[cfg(windows)]
@@ -235,7 +286,17 @@ mod tests {
         assert!(old.exists());
 
         assert!(running.0.wait().unwrap().success());
-        assert!(sweep(&dir).is_empty());
+        // Windows (or a virus scanner looking at the file) may let go of the image a moment
+        // after the process ends: the sweep is tried again for up to five seconds.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !sweep(&dir).is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{} is still there after the process ended",
+                old.display()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         assert_eq!(names(&dir), ["yt-dlp.exe"]);
         assert_eq!(fs::read(&exe).unwrap(), b"the new yt-dlp");
     }

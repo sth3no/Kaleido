@@ -11,47 +11,59 @@ use super::store::{ToolRecord, parse_time};
 /// one waits as long as the last (spec 10.7).
 pub const BACKOFF_S: [i64; 4] = [60, 300, 1800, 7200];
 
-/// Whether a check is due at `now`:
-/// - no record: at once (nothing was installed or tried);
-/// - after a failure, the backoff decides ([`backing_off`]), not the interval;
-/// - otherwise when `interval` has passed since the last check, or since the install when there
-///   was no check yet; a record that was never installed is due at once.
+/// When the next check is due, seen at `now`; `None` when it is due now. The later of:
+/// - the end of the backoff after a failure ([`retry_at`]);
+/// - `interval` after the last check, or after the install when there was no check yet; only
+///   for an installed tool.
 ///
-/// A time that cannot be read, or one in the future (the clock was set back), makes the check
-/// due, so that a tool is never left unchecked for longer than it should be.
-pub fn due(record: Option<&ToolRecord>, now: OffsetDateTime, interval: Duration) -> bool {
-    let Some(record) = record else {
-        return true;
+/// So no record, or a record of a tool that was never installed and is not backing off, is due
+/// at once. A time that cannot be read, or one in the future (the clock was set back), does not
+/// hold a check back, so that a tool is never left unchecked for longer than it should be.
+pub fn next_due(
+    record: Option<&ToolRecord>,
+    now: OffsetDateTime,
+    interval: Duration,
+) -> Option<OffsetDateTime> {
+    let record = record?;
+    let retry = retry_at(Some(record), now);
+    let last = if record.is_installed() {
+        record
+            .checked_at
+            .as_deref()
+            .and_then(parse_time)
+            .or_else(|| parse_time(&record.installed_at))
+    } else {
+        None
     };
-    if record.next_try.is_some() {
-        return !backing_off(Some(record), now);
-    }
-    if !record.is_installed() {
-        return true;
-    }
-    let last = record
-        .checked_at
-        .as_deref()
-        .and_then(parse_time)
-        .or_else(|| parse_time(&record.installed_at));
-    match last {
-        Some(last) if last <= now => last + interval <= now,
-        _ => true,
+    let regular = last
+        .filter(|last| *last <= now)
+        .map(|last| last + interval)
+        .filter(|at| *at > now);
+    match (retry, regular) {
+        (Some(retry), Some(regular)) => Some(retry.max(regular)),
+        (retry, regular) => retry.or(regular),
     }
 }
 
-/// Whether the record is waiting after a failure at `now`: its `next_try` is still to come. A
-/// `next_try` further away than the longest backoff (the clock was set back) is not waited for,
+/// Whether a check is due at `now`: [`next_due`] is now.
+pub fn due(record: Option<&ToolRecord>, now: OffsetDateTime, interval: Duration) -> bool {
+    next_due(record, now, interval).is_none()
+}
+
+/// The record's `next_try` while it is still to come at `now`, i.e. while it backs off after a
+/// failure. One further away than the longest backoff (the clock was set back) is not waited for,
 /// and neither is one that cannot be read.
-pub fn backing_off(record: Option<&ToolRecord>, now: OffsetDateTime) -> bool {
-    let Some(next) = record
+pub fn retry_at(record: Option<&ToolRecord>, now: OffsetDateTime) -> Option<OffsetDateTime> {
+    let next = record
         .and_then(|record| record.next_try.as_deref())
-        .and_then(parse_time)
-    else {
-        return false;
-    };
+        .and_then(parse_time)?;
     let longest = Duration::seconds(BACKOFF_S[BACKOFF_S.len() - 1]);
-    now < next && next <= now + longest
+    (now < next && next <= now + longest).then_some(next)
+}
+
+/// Whether the record backs off after a failure at `now` ([`retry_at`]).
+pub fn backing_off(record: Option<&ToolRecord>, now: OffsetDateTime) -> bool {
+    retry_at(record, now).is_some()
 }
 
 /// The failures in a row once one more check failed at `now`, and when the next may run.
@@ -121,18 +133,47 @@ mod tests {
             day
         ));
 
-        // After a failure, the backoff decides and the interval does not.
-        let mut failed = installed("2026-10-01T00:00:00Z", Some("2026-10-19T11:00:00Z"));
+        // When it is due, for a scheduler to wait for.
+        assert_eq!(next_due(None, now, day), None);
+        let record = installed("2026-10-01T00:00:00Z", Some("2026-10-18T12:01:00Z"));
+        assert_eq!(
+            next_due(Some(&record), now, day),
+            Some(at("2026-10-19T12:01:00Z"))
+        );
+        assert_eq!(
+            next_due(Some(&record), now, week),
+            Some(at("2026-10-25T12:01:00Z"))
+        );
+
+        // After a failure: the later of the backoff and the interval. A check that failed long
+        // after the last good one is tried again once the backoff is over.
+        let mut failed = installed("2026-10-01T00:00:00Z", Some("2026-10-18T06:00:00Z"));
         failed.failures = 1;
         failed.next_try = Some("2026-10-19T12:01:00Z".to_owned());
         assert!(!due(Some(&failed), now, day));
         assert!(backing_off(Some(&failed), now));
+        assert_eq!(
+            next_due(Some(&failed), now, day),
+            Some(at("2026-10-19T12:01:00Z"))
+        );
         assert!(due(Some(&failed), at("2026-10-19T12:01:00Z"), day));
-        // Also for a tool that was never installed: the failed download waits too.
+        // A forced check that failed an hour after a good one: that one's interval is later.
+        let mut recent = failed.clone();
+        recent.checked_at = Some("2026-10-19T11:00:00Z".to_owned());
+        assert_eq!(
+            next_due(Some(&recent), now, day),
+            Some(at("2026-10-20T11:00:00Z"))
+        );
+        assert!(!due(Some(&recent), at("2026-10-19T12:01:00Z"), day));
+        // A tool that was never installed: the failed download waits for the backoff only.
         let mut missing = ToolRecord::not_installed();
         missing.failures = 3;
         missing.next_try = Some("2026-10-19T12:30:00Z".to_owned());
         assert!(!due(Some(&missing), now, week));
+        assert_eq!(
+            next_due(Some(&missing), now, week),
+            Some(at("2026-10-19T12:30:00Z"))
+        );
         assert!(due(Some(&missing), at("2026-10-19T12:30:00Z"), week));
 
         // A clock set back, and times that cannot be read: due.

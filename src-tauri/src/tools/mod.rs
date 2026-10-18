@@ -14,9 +14,10 @@
 //!    beside the one that may run ([`replace`]), reads its version ([`Inspect`]) and records it;
 //! 5. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
 //!
-//! Nothing that does not have the release's checksum is ever put in place, so the tool Kaleido
-//! runs is always one the release published. One check of a tool runs at a time: another one that
-//! comes meanwhile waits for it and gets its result; the two tools are checked independently.
+//! Nothing is ever put in place unverified: a download must have the checksum the release lists
+//! for it, and a bundled copy the one the installer's `tools.json` beside it names (the installer
+//! takes it from the release). One check of a tool runs at a time: another one that comes
+//! meanwhile waits for it and gets its result; the two tools are checked independently.
 //!
 //! This module starts no process and knows nothing of Tauri: the version of a tool comes through
 //! [`Inspect`], and what runs the checks and tells the UI is the app's.
@@ -239,7 +240,8 @@ pub fn deno_from_zip(zip: &[u8]) -> Result<Vec<u8>, ToolError> {
     let mut file = archive
         .by_name(DENO_IN_ZIP)
         .map_err(|error| ToolError::Archive(format!("{DENO_IN_ZIP}: {error}")))?;
-    let mut exe = Vec::new();
+    // Room for all of it at once (about 120 MB): a growing buffer would copy it over and over.
+    let mut exe = Vec::with_capacity(usize::try_from(file.size().min(DENO_EXE_LIMIT)).unwrap_or(0));
     // The zip checks the CRC of what it unpacks as it reaches the end.
     file.by_ref()
         .take(DENO_EXE_LIMIT + 1)
@@ -324,11 +326,13 @@ impl Tools {
     }
 
     /// Checks `tool` (see the module) from `channel` (yt-dlp's; Deno ignores it) and returns its
-    /// state after. Without `force`, only when it is due ([`schedule::due`]; a missing tool at
-    /// once, unless its last attempt is still backing off); otherwise it returns the state as it
-    /// is. With `force` (the user asked, or a link needs a newer yt-dlp) also when not due. A check
-    /// of a tool that already runs waits for that one and returns its result, whatever `force`
-    /// says. Blocks for as long as the downloads take: not for the main thread.
+    /// state after. Without `force`, only when it is due ([`next_due`](Tools::next_due) is now: by
+    /// the schedule, at once for a missing tool or a yt-dlp from the other channel, but never
+    /// while a failed check backs off); otherwise it returns the state as it is. With `force` (the
+    /// user asked, or a link needs a newer yt-dlp) also when not due. A check of a tool that
+    /// already runs waits for that one and returns its result (or that of a later one that ended
+    /// first), whatever `force` says. Blocks for as long as the downloads take: not for the main
+    /// thread.
     pub fn check(
         &self,
         tool: ToolId,
@@ -342,18 +346,24 @@ impl Tools {
                 count_waiting(&mut state, true);
                 let mut state = self
                     .finished
+                    // Run numbers only grow: a later check that started and ended before this
+                    // one got the lock again ends the wait too, and its result is the newest.
                     .wait_while(state, |state| {
                         !state
                             .results
                             .get(&tool)
-                            .is_some_and(|(done, _)| *done == run)
+                            .is_some_and(|(done, _)| *done >= run)
                     })
                     .unwrap_or_else(PoisonError::into_inner);
                 count_waiting(&mut state, false);
                 return state.results[&tool].1.clone();
             }
             let record = state.file.tools.get(&tool).cloned();
-            if !force && !self.is_due(tool, record.as_ref(), OffsetDateTime::now_utc()) {
+            if !force
+                && self
+                    .next_due_of(tool, channel, record.as_ref(), OffsetDateTime::now_utc())
+                    .is_some()
+            {
                 return Ok(self.status_in(&state, tool));
             }
             state.runs += 1;
@@ -530,8 +540,9 @@ impl Tools {
                 &unpacked
             }
         };
-        // What earlier replaces left, now that it may be done with.
-        replace::sweep(&self.dir);
+        // What earlier replaces of this tool left, now that it may be done with. Only this
+        // tool's: a replace of the other one may need its old file back.
+        replace::sweep_of(&self.dir, tool.exe_name());
         fs::create_dir_all(&self.dir)
             .and_then(|()| replace::replace_binary(&self.dir, tool.exe_name(), exe))
             .map_err(|error| {
@@ -554,13 +565,37 @@ impl Tools {
         record.is_some_and(ToolRecord::is_installed) && self.exe(tool).is_file()
     }
 
-    /// Whether a check is due at `now`: by the schedule while the tool is there; at once when it
-    /// is not, unless its last attempt is still backing off.
-    fn is_due(&self, tool: ToolId, record: Option<&ToolRecord>, now: OffsetDateTime) -> bool {
-        if self.installed(tool, record) {
-            schedule::due(record, now, tool.interval())
+    /// When a check of `tool` from `channel` that is not forced is due, seen at `now`; `None` when
+    /// it is due now (see [`Tools::check`]). What a scheduler waits for: the backoff after a
+    /// failure (1 min, 5 min, 30 min, 2 h) as much as the tool's interval.
+    pub fn next_due(
+        &self,
+        tool: ToolId,
+        channel: Channel,
+        now: OffsetDateTime,
+    ) -> Option<OffsetDateTime> {
+        let state = self.lock();
+        self.next_due_of(tool, channel, state.file.tools.get(&tool), now)
+    }
+
+    /// [`next_due`](Tools::next_due) for `record`:
+    /// - a tool that is there: by the schedule ([`schedule::next_due`]); a yt-dlp from another
+    ///   channel than `channel` (the user switched) is due at once, unless a failed check still
+    ///   backs off, so that a failing switch is not tried again and again;
+    /// - a tool that is not there: at once, unless its last attempt still backs off.
+    fn next_due_of(
+        &self,
+        tool: ToolId,
+        channel: Channel,
+        record: Option<&ToolRecord>,
+        now: OffsetDateTime,
+    ) -> Option<OffsetDateTime> {
+        let switched =
+            tool == ToolId::YtDlp && record.is_some_and(|record| record.channel != Some(channel));
+        if self.installed(tool, record) && !switched {
+            schedule::next_due(record, now, tool.interval())
         } else {
-            !schedule::backing_off(record, now)
+            schedule::retry_at(record, now)
         }
     }
 
@@ -1175,6 +1210,97 @@ mod tests {
             setup.record(ToolId::YtDlp).unwrap().channel,
             Some(Channel::Nightly)
         );
+    }
+
+    /// What Task 9's scheduler waits for, and a switch of yt-dlp's channel, which is due at once
+    /// rather than a day later.
+    #[test]
+    fn next_due_follows_the_schedule_the_backoff_and_a_channel_switch() {
+        let setup = Setup::new();
+        let v1 = b"yt-dlp 2026.08.19";
+        let checked = now() - Duration::hours(1);
+        setup.installed(ToolId::YtDlp, v1, record(v1, "2026.08.19", &stamp(checked)));
+        // Deno has no channel, so no switch; its interval is a week.
+        setup.installed(
+            ToolId::Deno,
+            b"deno",
+            ToolRecord {
+                channel: None,
+                ..record(b"deno", "2.9.7", &stamp(checked))
+            },
+        );
+        let tools = setup.tools();
+        let at = now();
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Stable, at),
+            Some(checked + Duration::hours(24))
+        );
+        for channel in [Channel::Stable, Channel::Nightly] {
+            assert_eq!(
+                tools.next_due(ToolId::Deno, channel, at),
+                Some(checked + Duration::days(7))
+            );
+        }
+        assert_eq!(
+            tools
+                .check(ToolId::YtDlp, Channel::Stable, false)
+                .unwrap()
+                .state,
+            ToolState::Ready
+        );
+        tools.check(ToolId::Deno, Channel::Nightly, false).unwrap();
+        assert!(setup.web.calls().is_empty(), "nothing is due");
+
+        // Nightly chosen: due now.
+        assert_eq!(tools.next_due(ToolId::YtDlp, Channel::Nightly, at), None);
+        // Offline, the switch fails, and waits for the backoff instead of being tried at once.
+        let nightly = source(ToolId::YtDlp, Channel::Nightly);
+        setup
+            .web
+            .answer(&nightly.sums_url(), Err(FetchError::Offline));
+        let before = now();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Nightly, false),
+            Err(ToolError::Fetch(FetchError::Offline))
+        );
+        let next_try = time_of(&setup.record(ToolId::YtDlp).unwrap().next_try);
+        assert!(next_try >= before + Duration::seconds(60), "{next_try}");
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Nightly, now()),
+            Some(next_try)
+        );
+        let calls = setup.web.calls();
+        assert_eq!(calls, [nightly.sums_url()]);
+        tools.check(ToolId::YtDlp, Channel::Nightly, false).unwrap();
+        assert_eq!(setup.web.calls(), calls, "backing off");
+        // Staying on stable: the later of the backoff and a day after the last good check.
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Stable, now()),
+            Some(checked + Duration::hours(24))
+        );
+        // Once the backoff is over, the switch is due again; it goes through when online.
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Nightly, next_try),
+            None
+        );
+        let exe = b"yt-dlp 2026.10.10.233141";
+        setup.release(Channel::Nightly, &sha256_hex(exe), exe);
+        // Forced, so that the test does not wait the minute out.
+        tools.check(ToolId::YtDlp, Channel::Nightly, true).unwrap();
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(recorded.channel, Some(Channel::Nightly));
+        assert_eq!((recorded.failures, recorded.next_try), (0, None));
+        let switched = time_of(&recorded.checked_at);
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Nightly, now()),
+            Some(switched + Duration::hours(24))
+        );
+        // Back to stable is a switch as well.
+        assert_eq!(tools.next_due(ToolId::YtDlp, Channel::Stable, now()), None);
+        // A missing tool is due now.
+        fs::remove_file(setup.exe(ToolId::Deno)).unwrap();
+        assert_eq!(tools.next_due(ToolId::Deno, Channel::Stable, now()), None);
     }
 
     #[test]
