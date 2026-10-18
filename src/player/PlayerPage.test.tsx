@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { act, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi, type MockInstance } from 'vitest';
 
 import { initI18n } from '../i18n';
@@ -55,6 +55,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmounted while the timers are still the fake ones, and the frame that takes the glass regions
+  // away run: the shared glass list (glass/useGlassRegion.ts) is a module of its own and keeps the
+  // frame it asked for. A frame of a fake clock that is thrown away never comes, and the list would
+  // wait for it in every test after this one.
+  cleanup();
+  act(() => {
+    vi.runOnlyPendingTimers();
+  });
   measured.mockRestore();
   vi.useRealTimers();
   document.documentElement.style.cursor = '';
@@ -79,6 +87,11 @@ const margins = (): unknown[] =>
     .filter((cmd) => cmd.type === 'setSubMargin')
     .map((cmd) => cmd.margin);
 
+/**
+ * Moves the clock by `ms` in one `act`: React draws what the timers set only when it ends. A timer
+ * that an effect sets after such a draw (the fade-out after the hide) starts then, as in the browser,
+ * where the draw comes right after the timer that caused it; so a hide and its fade are two calls.
+ */
 const advance = (ms: number) => {
   act(() => {
     vi.advanceTimersByTime(ms);
@@ -151,8 +164,11 @@ test('a hidden island keeps no glass region, and the subtitles drop with it', ()
   expect(lifted).toHaveLength(1);
   expect(lifted[0]).toBeGreaterThan(0);
 
-  advance(AUTOHIDE_MS + FADE_OUT_MS + 50);
+  advance(AUTOHIDE_MS);
+  advance(FADE_OUT_MS);
   expect(island()).toBeNull();
+  // The frame that measures the list without it.
+  advance(50);
   expect(regions()).toEqual([]);
   expect(margins()).toEqual([lifted[0], 0]);
 });
@@ -219,7 +235,8 @@ test('the indicator works while the controls are hidden, and does not bring them
     usePlayerStore.getState().applyChanges({ volume: 52 });
   });
   render(<PlayerPage />);
-  advance(AUTOHIDE_MS + FADE_OUT_MS);
+  advance(AUTOHIDE_MS);
+  advance(FADE_OUT_MS);
   expect(island()).toBeNull();
   expect(useUiStore.getState().controlsHidden).toBe(true);
 
