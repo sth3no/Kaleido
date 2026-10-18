@@ -1,0 +1,204 @@
+/*
+ * The settings page (SettingsPage.tsx): a header with the title and the search, the list of
+ * sections on the left and the open section on a glass card. It lives in the page beside the docked
+ * sidebar (AppShell.module.css) on the opaque background, so the glass blurs the page's gradient.
+ * It comes after theme/glass.module.css, so its own rules win over the glass'.
+ */
+.page {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-l);
+  /*
+   * The top of a docked page is the window's title bar (AppShell.module.css): its drag strip is
+   * over the page, so nothing of ours goes there.
+   */
+  padding: var(--shell-titlebar-height) var(--k-space-xl) var(--k-space-xl);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-m);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-xl);
+  font-weight: 700;
+}
+
+.search {
+  box-sizing: border-box;
+  width: min(100%, 320px);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+}
+
+.search::placeholder {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  /* The one row is as high as the page leaves, so that the card scrolls and the page does not. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--k-space-l);
+}
+
+/* A narrow window: the sections go in a row over the card. */
+@media (max-width: 880px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.nav {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 0;
+  border-radius: var(--k-radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: nowrap;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.item:hover {
+  background: var(--k-color-hover);
+}
+
+.item[aria-current='true'] {
+  background: var(--k-color-selected);
+  font-weight: 600;
+}
+
+/* The card the open section is on; it scrolls, the page around it does not. */
+.content {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--k-space-l) var(--k-space-xl);
+}
+
+/*
+ * The mini player covers the bottom right corner of the window while a video plays (the shell
+ * clips the page around it, AppShell.module.css): the card keeps room at its end, so that the last
+ * rows can be scrolled clear of the video, and the focus is scrolled clear of it too.
+ */
+:global([data-page-layer][data-mini='true']) .content {
+  padding-bottom: calc(var(--k-space-l) + var(--settings-mini-reserve, 0px));
+  scroll-padding-bottom: var(--settings-mini-reserve, 0px);
+}
+
+.section + .section {
+  margin-top: var(--k-space-xl);
+}
+
+.heading {
+  margin: 0 0 var(--k-space-s);
+  font-size: var(--k-font-size-l);
+  font-weight: 700;
+}
+
+/* The heading takes the focus when its section opens; the ring is the global :focus-visible. */
+.heading:focus {
+  outline: none;
+}
+
+.heading:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+}
+
+.status {
+  margin: 0 0 var(--k-space-m);
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.status:empty {
+  margin: 0;
+}
+
+/* The settings could not be read. */
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  margin: 0 0 var(--k-space-m);
+  padding: var(--k-space-s) var(--k-space-m);
+  border-inline-start: 3px solid var(--k-color-danger);
+}
+
+.failureText {
+  margin: 0;
+}
+
+.retry {
+  padding: var(--k-space-xs) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.retry:hover {
+  background: var(--k-color-selected);
+}
+
+/* High contrast: the open section is painted Highlight (global.css), its text HighlightText. */
+@media (forced-colors: active) {
+  .item[aria-current='true'] {
+    color: HighlightText;
+  }
+
+  .search,
+  .retry {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .failure {
+    border-inline-start-color: CanvasText;
+  }
+}

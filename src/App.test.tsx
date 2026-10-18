@@ -57,6 +57,9 @@ test('with nothing open the app shows the start page with the sidebar and the wi
   fireEvent.click(nav.getByRole('button', { name: 'Settings' }));
   expect(useUiStore.getState().page).toBe('settings');
   expect(screen.getByRole('main').getAttribute('data-view')).toBe('settings');
+  // The settings page is what the shell shows there: its title and the first section.
+  expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 2, name: 'Playback' })).toBeTruthy();
 });
 
 /** What a drag carries; jsdom has no DataTransfer, and the hook reads these members only. */

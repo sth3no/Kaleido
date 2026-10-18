@@ -1,0 +1,57 @@
+/*
+ * A row of the settings page: the label and its hint, then the field, side by side; under a narrow
+ * window the field goes under the label. The rows sit on the page's glass card, so the text colour
+ * is the glass' own.
+ */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  align-items: center;
+  gap: var(--k-space-s) var(--k-space-xl);
+  padding: var(--k-space-m) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--k-font-size-m);
+}
+
+.hint {
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--k-space-xs);
+  min-width: 0;
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+@media (forced-colors: active) {
+  .error {
+    border-inline-start-color: CanvasText;
+  }
+}

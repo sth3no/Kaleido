@@ -1,0 +1,245 @@
+/*
+ * What the settings fields share (the switch, the dropdown, the text fields, the slider's readout,
+ * the list of shaders). The fields sit on the glass card of the settings page, so the text colour
+ * is the glass' own and the quieter tones are that colour at a lower strength. The slider and the
+ * list of options are the panels' (panels/Panel.module.css).
+ */
+
+/* Toggle: a switch. */
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-color-on-glass) 14%, transparent);
+  color: inherit;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--k-color-on-glass);
+  transition: translate var(--k-motion-fast) ease;
+}
+
+.switch[aria-checked='true'] {
+  border-color: transparent;
+  background: var(--k-accent-solid);
+}
+
+.switch[aria-checked='true']::after {
+  translate: 16px 0;
+  background: var(--k-color-on-accent);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+}
+
+/* Dropdown: a button that opens its list in the page, under itself. */
+.dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  width: 100%;
+  min-width: 0;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-s);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.trigger:hover:not(:disabled) {
+  background: var(--k-color-selected);
+}
+
+.trigger:disabled {
+  opacity: 0.5;
+}
+
+.trigger[data-invalid] {
+  border-color: var(--k-color-danger);
+}
+
+.triggerText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger[aria-expanded='true'] svg {
+  rotate: 180deg;
+}
+
+/* The open list, in the flow of the page: it pushes the rows below it down and floats over nothing. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-xs);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+  background: var(--k-color-hover);
+}
+
+.list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--k-space-s) var(--k-space-m);
+  font-size: var(--k-font-size-s);
+  opacity: 0.72;
+}
+
+/* Text fields. */
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+}
+
+.input::placeholder {
+  color: color-mix(in srgb, currentColor 60%, transparent);
+}
+
+.input:disabled {
+  opacity: 0.5;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--k-color-danger);
+}
+
+.color {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  width: 100%;
+}
+
+/* The colour over a chequerboard, so that a transparent one shows as transparent. */
+.swatch {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-s);
+  background:
+    linear-gradient(var(--swatch, transparent), var(--swatch, transparent)),
+    repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%) 0 0 / 10px 10px;
+}
+
+/* Slider: the panels' slider with its value beside it. */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  width: 100%;
+}
+
+.sliderValue {
+  flex: none;
+  min-width: 4em;
+  text-align: end;
+  white-space: nowrap;
+}
+
+/* Shaders: a checkbox for each file. */
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-radius: var(--k-radius-s);
+}
+
+.check:hover {
+  background: var(--k-color-hover);
+}
+
+.check input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--k-accent-solid);
+}
+
+.checkName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* High contrast: system colours; the state of a switch is told by its fill. */
+@media (forced-colors: active) {
+  .switch,
+  .trigger,
+  .input,
+  .panel {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .switch::after {
+    background: ButtonText;
+  }
+
+  .switch[aria-checked='true'] {
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .switch[aria-checked='true']::after {
+    background: HighlightText;
+  }
+
+  .trigger[data-invalid],
+  .input[aria-invalid='true'] {
+    border-width: 2px;
+  }
+
+  .swatch {
+    forced-color-adjust: none;
+  }
+}

@@ -107,6 +107,178 @@
       "system": "Podle systému",
       "cs": "Čeština",
       "en": "English"
+    },
+    "search": {
+      "label": "Hledat v nastavení",
+      "placeholder": "Hledat v nastavení",
+      "found": "Nalezeno: {{total}}",
+      "none": "Pro „{{query}}“ se v nastavení nic nenašlo."
+    },
+    "sections": {
+      "label": "Sekce nastavení",
+      "playback": "Přehrávání",
+      "subtitles": "Titulky",
+      "audio": "Zvuk",
+      "video": "Obraz",
+      "appearance": "Vzhled",
+      "shortcuts": "Zkratky",
+      "about": "O aplikaci"
+    },
+    "loading": "Načítání…",
+    "loadFailed": "Nastavení se nepodařilo přečíst.",
+    "retry": "Zkusit znovu",
+    "units": {
+      "percent": "{{value}} %"
+    },
+    "hints": {
+      "atStart": "Platí od příštího spuštění."
+    },
+    "errors": {
+      "invalid": "Tato hodnota není platná.",
+      "invalidLangList": "Zadej kódy jazyků o dvou nebo třech písmenech, například cs,en.",
+      "invalidColor": "Použij tvar #RRGGBB nebo #AARRGGBB.",
+      "notAllowed": "Kaleido tuto hodnotu nepřijme.",
+      "io": "Nastavení se nepodařilo uložit. Zkontroluj, že se do složky s nastavením dá zapisovat.",
+      "unavailable": "Přehrávač ještě neběží. Zkus to za chvíli znovu.",
+      "generic": "Nastavení se nepodařilo uložit."
+    },
+    "fields": {
+      "device": {
+        "none": "Nenalezeno žádné zvukové zařízení"
+      },
+      "font": {
+        "default": "Výchozí",
+        "filter": "Filtrovat písma",
+        "none": "Žádné písmo nevyhovuje"
+      },
+      "color": {
+        "placeholder": "#RRGGBB nebo #AARRGGBB"
+      },
+      "langList": {
+        "placeholder": "např. cs, en"
+      },
+      "shaders": {
+        "empty": "Ve složce se shadery zatím nejsou žádné soubory."
+      }
+    },
+    "items": {
+      "hwdec": {
+        "label": "Hardwarové dekódování",
+        "keywords": "gpu, grafická karta, akcelerace, dekodér, hwdec, procesor",
+        "options": {
+          "autoSafe": "Automaticky (bezpečné)",
+          "autoCopySafe": "Automaticky s kopií (bezpečné)",
+          "off": "Vypnuto (software)"
+        }
+      },
+      "playlistFromFolder": {
+        "label": "Playlist ze složky",
+        "keywords": "složka, adresář, další soubor, díly, seriál, automaticky"
+      },
+      "savePosition": {
+        "label": "Pamatovat pozici",
+        "keywords": "pokračovat, navázat, kde jsem skončil, uložit, později"
+      },
+      "openWhilePlaying": {
+        "label": "Při otevření souboru za běhu",
+        "keywords": "otevřít, přetažení, fronta, přidat, nahradit, playlist, druhý soubor",
+        "options": {
+          "replace": "Nahradit přehrávané",
+          "append": "Přidat do playlistu"
+        }
+      },
+      "subFont": {
+        "label": "Písmo titulků",
+        "keywords": "font, typ písma, rodina, text"
+      },
+      "subFontSize": {
+        "label": "Velikost titulků",
+        "keywords": "velikost, větší, menší, měřítko, text"
+      },
+      "subColor": {
+        "label": "Barva titulků",
+        "keywords": "barva, barva textu, hex, bílá, žlutá"
+      },
+      "subBorderColor": {
+        "label": "Barva okraje",
+        "keywords": "okraj, obrys, ohraničení, barva"
+      },
+      "subBorderSize": {
+        "label": "Šířka okraje",
+        "keywords": "okraj, obrys, ohraničení, tloušťka"
+      },
+      "subBackColor": {
+        "label": "Barva pozadí titulků",
+        "keywords": "pozadí, podklad, stín, barva, průhledné, průhlednost"
+      },
+      "subLanguages": {
+        "label": "Preferované jazyky titulků",
+        "keywords": "jazyk, slang, titulky, stopa, výchozí, cs, en"
+      },
+      "audioDevice": {
+        "label": "Zvukové zařízení",
+        "keywords": "výstup, reproduktory, sluchátka, zvuková karta, wasapi, hdmi"
+      },
+      "volume": {
+        "label": "Výchozí hlasitost",
+        "keywords": "hlasitost, zvuk, start, úroveň"
+      },
+      "volumeMax": {
+        "label": "Maximální hlasitost",
+        "keywords": "hlasitost, zesílení, limit, hlasitěji"
+      },
+      "audioLanguages": {
+        "label": "Preferované jazyky zvuku",
+        "keywords": "jazyk, alang, zvuková stopa, dabing, výchozí, cs, en"
+      },
+      "deinterlace": {
+        "label": "Odstranění prokládání",
+        "keywords": "prokládání, půlsnímky, televize, vysílání",
+        "options": {
+          "auto": "Automaticky",
+          "off": "Vypnuto",
+          "on": "Zapnuto"
+        }
+      },
+      "toneMapping": {
+        "label": "Tone mapping HDR",
+        "keywords": "hdr, jas, dynamický rozsah, tonemap, hable, reinhard, dolby vision",
+        "options": {
+          "auto": "Automaticky",
+          "clip": "Clip",
+          "mobius": "Mobius",
+          "reinhard": "Reinhard",
+          "hable": "Hable",
+          "bt2390": "BT.2390",
+          "bt2446a": "BT.2446a",
+          "spline": "Spline",
+          "st209440": "ST 2094-40",
+          "st209410": "ST 2094-10"
+        }
+      },
+      "hdrComputePeak": {
+        "label": "Detekce špičky HDR",
+        "keywords": "hdr, špička, jas, nity, dynamicky, tone mapping",
+        "options": {
+          "auto": "Automaticky",
+          "on": "Zapnuto",
+          "off": "Vypnuto"
+        }
+      },
+      "qualityPreset": {
+        "label": "Kvalitativní předvolba",
+        "keywords": "profil, předvolba, kvalita, gpu, rychlý, vysoká kvalita, škálování",
+        "options": {
+          "none": "Žádná",
+          "fast": "Rychlá",
+          "highQuality": "Vysoká kvalita"
+        }
+      },
+      "shaders": {
+        "label": "Shadery",
+        "keywords": "glsl, filtr, zvětšení, zostření, anime4k, fsr, ravu, hook",
+        "hint": "Použijí se v pořadí, v jakém je zapneš. Soubory patří do složky %APPDATA%\\Kaleido\\shaders."
+      }
     }
   },
   "errors": {

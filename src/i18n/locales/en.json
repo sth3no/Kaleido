@@ -107,6 +107,178 @@
       "system": "Follow the system",
       "cs": "Čeština",
       "en": "English"
+    },
+    "search": {
+      "label": "Search settings",
+      "placeholder": "Search settings",
+      "found": "Found: {{total}}",
+      "none": "No settings match “{{query}}”."
+    },
+    "sections": {
+      "label": "Settings sections",
+      "playback": "Playback",
+      "subtitles": "Subtitles",
+      "audio": "Audio",
+      "video": "Video",
+      "appearance": "Appearance",
+      "shortcuts": "Shortcuts",
+      "about": "About"
+    },
+    "loading": "Loading…",
+    "loadFailed": "The settings could not be read.",
+    "retry": "Try again",
+    "units": {
+      "percent": "{{value}}%"
+    },
+    "hints": {
+      "atStart": "Applies from the next start."
+    },
+    "errors": {
+      "invalid": "That value is not valid.",
+      "invalidLangList": "Use language codes of two or three letters, such as cs,en.",
+      "invalidColor": "Use #RRGGBB or #AARRGGBB.",
+      "notAllowed": "Kaleido does not accept that value.",
+      "io": "The setting could not be saved. Check that the settings folder can be written to.",
+      "unavailable": "The player is not running yet. Try again in a moment.",
+      "generic": "The setting could not be saved."
+    },
+    "fields": {
+      "device": {
+        "none": "No audio devices found"
+      },
+      "font": {
+        "default": "Default",
+        "filter": "Filter fonts",
+        "none": "No font matches"
+      },
+      "color": {
+        "placeholder": "#RRGGBB or #AARRGGBB"
+      },
+      "langList": {
+        "placeholder": "e.g. cs, en"
+      },
+      "shaders": {
+        "empty": "The shaders folder has no files yet."
+      }
+    },
+    "items": {
+      "hwdec": {
+        "label": "Hardware decoding",
+        "keywords": "gpu, graphics card, acceleration, decoder, hwdec, cpu",
+        "options": {
+          "autoSafe": "Automatic (safe)",
+          "autoCopySafe": "Automatic with copy-back (safe)",
+          "off": "Off (software)"
+        }
+      },
+      "playlistFromFolder": {
+        "label": "Playlist from folder",
+        "keywords": "folder, directory, next file, episodes, series, autocreate"
+      },
+      "savePosition": {
+        "label": "Remember position",
+        "keywords": "resume, continue, watch later, where I stopped, save"
+      },
+      "openWhilePlaying": {
+        "label": "When a file is opened during playback",
+        "keywords": "open, drop, queue, append, replace, playlist, second file",
+        "options": {
+          "replace": "Replace what is playing",
+          "append": "Add to the playlist"
+        }
+      },
+      "subFont": {
+        "label": "Subtitle font",
+        "keywords": "font, typeface, family, text, face"
+      },
+      "subFontSize": {
+        "label": "Subtitle size",
+        "keywords": "size, bigger, smaller, scale, text"
+      },
+      "subColor": {
+        "label": "Subtitle color",
+        "keywords": "colour, text color, hex, white, yellow"
+      },
+      "subBorderColor": {
+        "label": "Outline color",
+        "keywords": "border, outline, stroke, colour, edge"
+      },
+      "subBorderSize": {
+        "label": "Outline width",
+        "keywords": "border, outline, stroke, thickness, edge"
+      },
+      "subBackColor": {
+        "label": "Subtitle background color",
+        "keywords": "background, box, shadow, colour, transparent, opacity"
+      },
+      "subLanguages": {
+        "label": "Preferred subtitle languages",
+        "keywords": "language, slang, subtitles, track, default, cs, en"
+      },
+      "audioDevice": {
+        "label": "Audio device",
+        "keywords": "output, speakers, headphones, sound card, wasapi, hdmi"
+      },
+      "volume": {
+        "label": "Default volume",
+        "keywords": "volume, loudness, start, level, sound"
+      },
+      "volumeMax": {
+        "label": "Maximum volume",
+        "keywords": "volume, boost, amplify, limit, louder"
+      },
+      "audioLanguages": {
+        "label": "Preferred audio languages",
+        "keywords": "language, alang, audio track, dub, default, cs, en"
+      },
+      "deinterlace": {
+        "label": "Deinterlacing",
+        "keywords": "interlaced, fields, combing, tv, broadcast",
+        "options": {
+          "auto": "Automatic",
+          "off": "Off",
+          "on": "On"
+        }
+      },
+      "toneMapping": {
+        "label": "HDR tone mapping",
+        "keywords": "hdr, brightness, dynamic range, tonemap, hable, reinhard, dolby vision",
+        "options": {
+          "auto": "Automatic",
+          "clip": "Clip",
+          "mobius": "Mobius",
+          "reinhard": "Reinhard",
+          "hable": "Hable",
+          "bt2390": "BT.2390",
+          "bt2446a": "BT.2446a",
+          "spline": "Spline",
+          "st209440": "ST 2094-40",
+          "st209410": "ST 2094-10"
+        }
+      },
+      "hdrComputePeak": {
+        "label": "HDR peak detection",
+        "keywords": "hdr, peak, brightness, nits, dynamic, tone mapping",
+        "options": {
+          "auto": "Automatic",
+          "on": "On",
+          "off": "Off"
+        }
+      },
+      "qualityPreset": {
+        "label": "Quality preset",
+        "keywords": "profile, preset, quality, gpu, fast, high-quality, scaling",
+        "options": {
+          "none": "None",
+          "fast": "Fast",
+          "highQuality": "High quality"
+        }
+      },
+      "shaders": {
+        "label": "Shaders",
+        "keywords": "glsl, filter, upscale, sharpen, anime4k, fsr, ravu, hook",
+        "hint": "Applied in the order you turn them on. Put the files in %APPDATA%\\Kaleido\\shaders."
+      }
     }
   },
   "errors": {
