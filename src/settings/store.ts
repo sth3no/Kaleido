@@ -9,10 +9,12 @@
  * replace it (`kaleidoVersion` for Kaleido's settings, `mpvStamp` for each mpv option).
  */
 
+import { useMemo } from 'react';
 import { create } from 'zustand';
 
 import { settingsGet, settingsGetMpv } from '../ipc/commands';
 import type { Settings } from '../ipc/types';
+import { isMpvTarget, type SettingTarget } from './descriptors';
 
 export type SettingsStatus = 'idle' | 'loading' | 'ready' | 'failed';
 
@@ -95,3 +97,30 @@ export const useSettingsStore = create<SettingsData>()((set, get) => ({
     });
   },
 }));
+
+// --- What can be shown ------------------------------------------------------------------------------
+
+/** Which of the two sources of settings have answered. */
+export interface SourcesLoaded {
+  /** Rust gave values for the mpv options (`mpvLoaded`). */
+  mpv: boolean;
+  /** Kaleido's own settings are read. */
+  kaleido: boolean;
+}
+
+/**
+ * The setting's row is for showing once its own source has answered: Kaleido's rows when Kaleido's
+ * settings are read, the rows of mpv options when the mpv map has its values. Until then there is no
+ * value to show, and a row with a fallback (a slider at its minimum, a list with nothing chosen) would
+ * pass for one: the row is not drawn at all, and a field that is not drawn cannot be changed either.
+ */
+export function useSourcesLoaded(): SourcesLoaded {
+  const mpv = useSettingsStore((state) => state.mpvLoaded);
+  const kaleido = useSettingsStore((state) => state.kaleido !== null);
+  return useMemo(() => ({ mpv, kaleido }), [mpv, kaleido]);
+}
+
+/** Whether the source of a setting with this `target` has answered. */
+export function isLoaded(sources: SourcesLoaded, target: SettingTarget): boolean {
+  return isMpvTarget(target) ? sources.mpv : sources.kaleido;
+}

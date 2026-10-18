@@ -255,9 +255,12 @@ describe('the page', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('The settings could not be read.');
-    // Nothing is shown as a value that Rust has not given.
+    // Nothing is shown as a value that Rust has not given: not the mpv rows, nor Kaleido's own.
     expect(screen.queryByRole('switch', { name: 'Remember position' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^When a file is opened during playback/ })).toBeNull();
     expect(shownIds()).toEqual([]);
+    // The section is still there, to read again in.
+    expect(sectionHeadings()).toEqual(['Playback']);
 
     rust();
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
@@ -277,7 +280,8 @@ describe('the page', () => {
     // No slider at its minimum, no list with nothing chosen: the rows of the mpv options are not there.
     expect(screen.queryByRole('switch', { name: 'Remember position' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Hardware decoding/ })).toBeNull();
-    // Kaleido's own setting does not need the player.
+    // Kaleido's own setting does not need the player: its source has answered, so its row shows.
+    expect(shownIds()).toEqual(['playback.openWhilePlaying']);
     expect(picker('When a file is opened during playback').disabled).toBe(false);
     fireEvent.click(sectionButton('Audio'));
     expect(shownIds()).toEqual([]);
@@ -290,6 +294,92 @@ describe('the page', () => {
     });
     expect(screen.queryByRole('alert')).toBeNull();
     expect(picker('Hardware decoding').textContent).toBe('Automatic (safe)');
+  });
+
+  test('no row is shown before its source has answered, so that no fallback passes for a value', async () => {
+    let answerSettings: (value: unknown) => void = () => undefined;
+    let answerMpv: (value: unknown) => void = () => undefined;
+    rust({
+      settings_get: () =>
+        new Promise((resolve) => {
+          answerSettings = resolve;
+        }),
+      settings_get_mpv: () =>
+        new Promise((resolve) => {
+          answerMpv = resolve;
+        }),
+    });
+    render(<SettingsPage />);
+    await settle();
+
+    // Both reads are out: the section is there, with nothing in it.
+    expect(sectionHeadings()).toEqual(['Playback']);
+    expect(shownIds()).toEqual([]);
+    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // The search has nothing to show either, and does not say that nothing matches.
+    fireEvent.change(searchField(), { target: { value: 'volume' } });
+    expect(shownIds()).toEqual([]);
+    expect(sectionHeadings()).toEqual([]);
+    expect(searchStatus()?.textContent).toBe('');
+    fireEvent.change(searchField(), { target: { value: '' } });
+
+    answerMpv(MPV);
+    answerSettings(SETTINGS);
+    await waitFor(() => {
+      expect(shownIds()).toEqual([
+        'hwdec',
+        'autocreate-playlist',
+        'save-position-on-quit',
+        'playback.openWhilePlaying',
+      ]);
+    });
+    // Every row that is there can be changed.
+    expect((screen.getByRole('switch', { name: 'Remember position' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(picker('When a file is opened during playback').disabled).toBe(false);
+  });
+
+  test('with the mpv options not shown, the search counts and enters only the rows that are there', async () => {
+    rust({ settings_get_mpv: () => ({}) });
+    render(<SettingsPage />);
+    await screen.findByRole('alert');
+
+    // Only an mpv option matches: nothing to show, which is not "no match" either (the banner says why).
+    fireEvent.change(searchField(), { target: { value: 'remember' } });
+    expect(shownIds()).toEqual([]);
+    expect(sectionHeadings()).toEqual([]);
+    expect(searchStatus()?.textContent).toBe('');
+    // Nothing to go into: the keys are not the field's.
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true);
+    expect(fireEvent.keyDown(searchField(), { key: 'Enter', code: 'Enter' })).toBe(true);
+
+    // Both kinds match: one row is there, one is counted, and the key goes into it.
+    fireEvent.change(searchField(), { target: { value: 'playlist' } });
+    expect(shownIds()).toEqual(['playback.openWhilePlaying']);
+    expect(sectionHeadings()).toEqual(['Playback']);
+    expect(searchStatus()?.textContent).toBe('Found: 1');
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false);
+    expect(document.activeElement).toBe(picker('When a file is opened during playback'));
+
+    // The player comes up: the other row joins, and is counted.
+    rust();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(shownIds()).toEqual(['autocreate-playlist', 'playback.openWhilePlaying']);
+    });
+    expect(searchStatus()?.textContent).toBe('Found: 2');
+  });
+
+  test('a section that has matches only among rows that are not there shows no heading', async () => {
+    rust({ settings_get_mpv: () => ({}) });
+    render(<SettingsPage />);
+    await screen.findByRole('alert');
+
+    // Every setting of Subtitles matches, and every one of them is an mpv option that has no value yet.
+    fireEvent.change(searchField(), { target: { value: 'subtitle' } });
+    expect(sectionHeadings()).toEqual([]);
+    expect(shownIds()).toEqual([]);
   });
 });
 
@@ -963,6 +1053,93 @@ describe('the search', () => {
     // A list opens from its label too.
     fireEvent.click(screen.getByText('Hardware decoding'));
     expect(screen.getByRole('listbox')).toBeTruthy();
+  });
+
+  test('a pointer click on a label does not leave its control focused, so that Space goes to mpv', async () => {
+    await open();
+    const detach = attachVideoInput(document.createElement('div'));
+    try {
+      const remember = screen.getByRole('switch', { name: 'Remember position' });
+      act(() => {
+        remember.focus();
+      });
+      const label = screen.getByText('Remember position');
+
+      // The press is not stopped (the focus moves as it does, and a list that is open closes), the
+      // click is the pointer's (detail 1).
+      expect(fireEvent.mouseDown(label)).toBe(true);
+      fireEvent.click(label, { detail: 1 });
+
+      expect(mpvWrites()).toEqual([{ key: 'save-position-on-quit', value: 'no' }]);
+      expect(document.activeElement).not.toBe(remember);
+      // Space is nobody's control now: it goes to mpv, and does not press the switch again.
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: ' ', code: 'Space' });
+      expect(forwarded()).toHaveLength(1);
+      expect(mpvWrites()).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  test('a click on a label that is not a pointer\'s (a screen reader) leaves the focus where it was', async () => {
+    await open();
+    const remember = screen.getByRole('switch', { name: 'Remember position' });
+    act(() => {
+      remember.focus();
+    });
+
+    fireEvent.click(screen.getByText('Remember position'), { detail: 0 });
+
+    expect(mpvWrites()).toEqual([{ key: 'save-position-on-quit', value: 'no' }]);
+    expect(document.activeElement).toBe(remember);
+  });
+
+  test('a click on the label of a text field puts the cursor there, a slider is not focused by a pointer', async () => {
+    await open();
+    fireEvent.click(sectionButton('Subtitles'));
+
+    fireEvent.click(screen.getByText('Subtitle color'), { detail: 1 });
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Subtitle color' }));
+
+    fireEvent.click(screen.getByText('Subtitle size'), { detail: 1 });
+    expect(document.activeElement).not.toBe(screen.getByRole('slider', { name: 'Subtitle size' }));
+    // A click that is not a pointer's does focus it.
+    fireEvent.click(screen.getByText('Subtitle size'), { detail: 0 });
+    expect(document.activeElement).toBe(screen.getByRole('slider', { name: 'Subtitle size' }));
+  });
+
+  test('a click on the label of an open list closes it, as a click on its button does, and the next opens it', async () => {
+    await open();
+    const label = screen.getByText('Hardware decoding');
+
+    fireEvent.click(picker('Hardware decoding'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    // Pointer down on the label records that the list was open; the click then closes it.
+    fireEvent.mouseDown(label);
+    fireEvent.click(label, { detail: 1 });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).not.toBe(picker('Hardware decoding'));
+
+    fireEvent.mouseDown(label);
+    fireEvent.click(label, { detail: 1 });
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    expect(picker('Hardware decoding').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('a list that the press on the label has already closed (the focus left it) is not opened again by the click', async () => {
+    await open();
+    const label = screen.getByText('Hardware decoding');
+    fireEvent.click(picker('Hardware decoding'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    // What a browser does between the press and the click: the focus leaves the list, which closes it.
+    fireEvent.mouseDown(label);
+    fireEvent.blur(document.activeElement as Element, { relatedTarget: document.body });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    fireEvent.click(label, { detail: 1 });
+
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 
   test('typing in the search field is not forwarded to mpv', async () => {

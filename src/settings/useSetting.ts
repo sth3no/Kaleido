@@ -16,7 +16,7 @@ import {
   type FieldKind,
   type SettingDescriptor,
 } from './descriptors';
-import { useSettingsStore } from './store';
+import { isLoaded, useSettingsStore, useSourcesLoaded } from './store';
 import { decodeKaleido, decodeMpv, encodeMpv, type FieldValue } from './values';
 
 const ERROR_TYPES = ['notAllowed', 'invalid', 'io', 'unavailable'];
@@ -97,10 +97,9 @@ export function useSetting(descriptor: SettingDescriptor): SettingControl {
       ? state.mpv[target.mpv]
       : getPath(state.kaleido, target.kaleido),
   );
-  // An mpv option is not for showing before Rust had its values (the player may not be up yet).
-  const ready = useSettingsStore(
-    (state) => state.status === 'ready' && (!isMpvTarget(target) || state.mpvLoaded),
-  );
+  // Not for changing before its own source has answered (an mpv option waits for the player). The
+  // page does not draw the row before that (`SettingsList`).
+  const ready = isLoaded(useSourcesLoaded(), target);
   /** The value being saved: shown in place of the stored one until Rust has answered. */
   const [pending, setPending] = useState<{ value: FieldValue } | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -15,8 +15,10 @@
  *   reach mpv (input/forward.ts leaves the keys of a text field alone).
  *
  * The values come from Rust when the page opens (`store.ts`), and Kaleido's own settings follow
- * `settings:changed`, so that a change made elsewhere shows here. While the player is not up Rust has
- * no values for the mpv options: the page says so and offers to read again, and those fields wait.
+ * `settings:changed`, so that a change made elsewhere shows here. A row is not drawn until its own
+ * source has answered (Kaleido's settings are read; Rust has values for the mpv options, which it does
+ * not while the player is not up): no row shows a fallback for a value, and the page says why rows are
+ * missing and offers to read again. The search counts and enters only the rows that are drawn.
  *
  * Appearance, Shortcuts and About are in the list but have no body yet (Task 23): `BODIES` is
  * where they are added, and their descriptors go in `descriptors.ts`.
@@ -53,7 +55,7 @@ import type { SectionProps } from './sections/SettingsList';
 import Subtitles from './sections/Subtitles';
 import Video from './sections/Video';
 import styles from './SettingsPage.module.css';
-import { useSettingsStore } from './store';
+import { isLoaded, useSettingsStore, useSourcesLoaded } from './store';
 
 /** What the first control of a result is found by (the ones that can take the focus now). */
 const CONTROLS = 'button:not(:disabled), input:not(:disabled)';
@@ -101,7 +103,7 @@ export default function SettingsPage() {
   const items = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
   const searchField = useRef<HTMLInputElement>(null);
   const card = useRef<HTMLDivElement>(null);
-  const mpvLoaded = useSettingsStore((state) => state.mpvLoaded);
+  const sources = useSourcesLoaded();
 
   // Subscribed before the values are read: a change in between is not lost.
   useEffect(
@@ -126,16 +128,21 @@ export default function SettingsPage() {
 
   const searching = query.trim() !== '';
   const matches = useMemo(() => (searching ? searchSettings(query, t) : null), [searching, query, t]);
-  /** The sections that have a match, each with the ids of its matches. */
+  /** The matches that are on the page: a setting whose source has not answered has no row (yet). */
+  const shown = useMemo(
+    () => (matches === null ? null : matches.filter((match) => isLoaded(sources, match.target))),
+    [matches, sources],
+  );
+  /** The sections that have a row to show, each with the ids of its matches. */
   const groups = useMemo(
     () =>
-      matches === null
+      shown === null
         ? null
         : SECTIONS.map((id) => ({
             id,
-            only: new Set(matches.filter((match) => match.section === id).map((match) => match.id)),
+            only: new Set(shown.filter((match) => match.section === id).map((match) => match.id)),
           })).filter((group) => group.only.size > 0),
-    [matches],
+    [shown],
   );
 
   const open = (id: SectionId) => {
@@ -161,10 +168,20 @@ export default function SettingsPage() {
     items.current[SECTIONS[next]]?.focus();
   };
 
-  /** Down arrow or Enter in the search field: into the results, to the control of the first one. */
-  const enterResults = () => {
-    const first = card.current?.querySelector('[data-setting]');
-    first?.querySelector<HTMLElement>(CONTROLS)?.focus();
+  /**
+   * Down arrow or Enter in the search field: into the results, to the control of the first row that has
+   * one. Says whether it went anywhere (the rows that are drawn are the ones that matched and have
+   * their values).
+   */
+  const enterResults = (): boolean => {
+    for (const row of card.current?.querySelectorAll('[data-setting]') ?? []) {
+      const control = row.querySelector<HTMLElement>(CONTROLS);
+      if (control) {
+        control.focus();
+        return true;
+      }
+    }
+    return false;
   };
 
   const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -174,13 +191,12 @@ export default function SettingsPage() {
       setQuery('');
     } else if (
       (e.key === 'ArrowDown' || e.key === 'Enter') &&
-      matches !== null &&
-      matches.length > 0 &&
-      !e.nativeEvent.isComposing
+      !e.nativeEvent.isComposing &&
+      enterResults()
     ) {
-      // Handled: mpv does not get the arrow.
+      // Handled, once the focus is in a result: mpv does not get the arrow. With nothing to go into
+      // the key is not the field's.
       e.preventDefault();
-      enterResults();
     }
   };
 
@@ -194,16 +210,20 @@ export default function SettingsPage() {
   const notRead =
     status === 'failed'
       ? 'settings.loadFailed'
-      : status === 'ready' && !mpvLoaded
+      : status === 'ready' && !sources.mpv
         ? 'settings.playerNotReady'
         : null;
 
+  // The count is of the rows on the page. Matches whose rows wait for their values are not counted,
+  // and are not "no match" either: the banner (or the read still on its way) says why they are not there.
   const statusText =
     matches === null
       ? ''
       : matches.length === 0
         ? t('settings.search.none', { query: query.trim() })
-        : t('settings.search.found', { total: matches.length });
+        : shown !== null && shown.length > 0
+          ? t('settings.search.found', { total: shown.length })
+          : '';
 
   return (
     <div

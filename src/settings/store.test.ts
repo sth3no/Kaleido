@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { Settings } from '../ipc/types';
 import { DEFAULT_APPEARANCE } from '../theme/tokens';
-import { useSettingsStore } from './store';
+import { isLoaded, useSettingsStore } from './store';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -146,6 +146,20 @@ describe('the settings store', () => {
     rust({ mpv: { hwdec: 'auto-copy-safe', volume: '100' }, settings: SETTINGS });
     await useSettingsStore.getState().load();
     expect(useSettingsStore.getState().mpv).toEqual({ hwdec: 'auto-copy-safe', volume: '100' });
+  });
+
+  test('a setting is there when its own source has answered', () => {
+    const mpv = { mpv: 'hwdec' };
+    const own = { kaleido: 'playback.openWhilePlaying' };
+    expect(isLoaded({ mpv: false, kaleido: false }, mpv)).toBe(false);
+    expect(isLoaded({ mpv: false, kaleido: false }, own)).toBe(false);
+    // The player is not up: Kaleido's settings are read, the mpv options have no values.
+    expect(isLoaded({ mpv: false, kaleido: true }, mpv)).toBe(false);
+    expect(isLoaded({ mpv: false, kaleido: true }, own)).toBe(true);
+    expect(isLoaded({ mpv: true, kaleido: false }, mpv)).toBe(true);
+    expect(isLoaded({ mpv: true, kaleido: false }, own)).toBe(false);
+    expect(isLoaded({ mpv: true, kaleido: true }, mpv)).toBe(true);
+    expect(isLoaded({ mpv: true, kaleido: true }, own)).toBe(true);
   });
 
   test('a value Rust took replaces the old one and leaves the rest', () => {
