@@ -85,13 +85,11 @@ test('the whole window takes a dropped link, and the start screen lights its zon
 
   fireEvent.drop(window, { dataTransfer: dragged({ 'text/uri-list': 'https://example.com/v' }) });
   expect(zone.getAttribute('data-dragging')).toBe('false');
-  expect(invoke).toHaveBeenCalledWith('player_load', {
-    sources: ['https://example.com/v'],
-    mode: 'replace',
-  });
+  // Through Rust's open queue, as a pasted link (Ruling R54).
+  expect(invoke).toHaveBeenCalledWith('system_open_text', { text: 'https://example.com/v' });
 });
 
-test('a drop on the settings page is cancelled as well, and a link dropped there plays', async () => {
+test('a drop on the settings page is cancelled as well, and a link dropped there opens', async () => {
   render(<App />);
   await waitFor(() => {
     expect(usePlayerStore.getState().props['idle-active']).toBe(true);
@@ -105,9 +103,8 @@ test('a drop on the settings page is cancelled as well, and a link dropped there
   expect(notCancelled).toBe(false);
 
   fireEvent.drop(window, { dataTransfer: dragged({ 'text/plain': 'https://example.com/v' }) });
-  await waitFor(() => {
-    expect(useUiStore.getState().page).toBe('player');
-  });
+  // Rust plays it and says so (`system:open-request`), which shows the player (state/bridge.ts).
+  expect(invoke).toHaveBeenCalledWith('system_open_text', { text: 'https://example.com/v' });
 });
 
 test('a file that fails to open leaves its card on the start screen, where mpv is idle again', async () => {
@@ -143,8 +140,8 @@ test('a dropped link that Rust refuses says so on a card', async () => {
   vi.mocked(invoke).mockImplementation(((command: string) => {
     if (command === 'system_ui_ready') return Promise.resolve({ 'idle-active': true, pause: true });
     if (command === 'glass_state') return Promise.resolve({ enabled: true, reason: null });
-    if (command === 'player_load') {
-      return Promise.reject([{ source: 'https://example.com/v', kind: 'invalid' }]);
+    if (command === 'system_open_text') {
+      return Promise.reject({ source: 'https://example.com/v', kind: 'invalid' });
     }
     return Promise.resolve(null);
   }) as unknown as typeof invoke);

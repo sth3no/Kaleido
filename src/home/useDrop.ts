@@ -6,7 +6,8 @@
  *   navigation to it, which would replace the app; the drop then does not happen at all.
  * - Files are handed to WebView2 (`postMessageWithAdditionalObjects`), and Rust reads their
  *   paths (src-tauri/src/system/drop.rs): the UI never sees a path.
- * - A link (`text/uri-list`, or text that is one http(s) link) plays at once, like Ctrl+V.
+ * - A link (`text/uri-list`, or text that is one http(s) link) opens like a pasted one: through
+ *   Rust's open queue (Ruling R54).
  * - While something is dragged over the window the hook says so, for the start screen to show
  *   its drop zone.
  *
@@ -15,9 +16,8 @@
 
 import { useEffect, useState } from 'react';
 
-import { playerLoad } from '../ipc/commands';
+import { systemOpenText } from '../ipc/commands';
 import { pushAppNotice } from '../state/noticeStore';
-import { useUiStore } from '../state/uiStore';
 
 /**
  * The message posted with dropped files. A JSON object, not a string: Tauri's IPC also hears every
@@ -77,20 +77,18 @@ function handOverFiles(files: ArrayLike<File>): void {
 }
 
 /**
- * Plays the dropped link in place of what is open; the player is the page to show for it. A link
- * that Rust refuses is logged and says so on a card (the stack of notices, any page): a drop that
- * does nothing would look like one that was not seen.
+ * Opens the dropped link as a pasted one opens (Ruling R54, spec 9.3): through Rust's open queue,
+ * like the files dropped with it, so the open-while-playing setting applies (replace or add to the
+ * playlist) and a link dropped right after files joins their playlist. Rust says when it hands it
+ * to the player (`system:open-request`), and the bridge shows the player for it. A link that Rust
+ * refuses is logged and says so on a card (Ruling R40, any page): a drop that does nothing would
+ * look like one that was not seen.
  */
 function openLink(link: string): void {
-  playerLoad([link], 'replace').then(
-    () => {
-      useUiStore.getState().setPage('player');
-    },
-    (issues: unknown) => {
-      console.warn('cannot open the dropped link', link, issues);
-      pushAppNotice('errors.dropLink');
-    },
-  );
+  systemOpenText(link).catch((issue: unknown) => {
+    console.warn('cannot open the dropped link', link, issue);
+    pushAppNotice('errors.dropLink');
+  });
 }
 
 /** Takes drops on the whole window. Returns whether something is being dragged over it. */

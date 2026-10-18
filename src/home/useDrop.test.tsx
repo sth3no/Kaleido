@@ -88,7 +88,7 @@ describe('dropping', () => {
     expect(other.dropEffect).toBe('none');
   });
 
-  test('dropping a link plays it', async () => {
+  test('a dropped link goes to Rust as a pasted one does, through its open queue (Ruling R54)', async () => {
     useUiStore.setState({ page: 'settings' });
     render(<Probe />);
 
@@ -97,26 +97,29 @@ describe('dropping', () => {
     });
 
     expect(wasCancelled(notCancelled)).toBe(true);
-    expect(sent('player_load')).toEqual([['player_load', { sources: [LINK], mode: 'replace' }]]);
-    // The player is the page to show for it, also from the settings.
-    await waitFor(() => {
-      expect(useUiStore.getState().page).toBe('player');
-    });
-    // A link that plays has nothing to report.
+    // The queue decides: the open-while-playing setting, the playlist of files dropped just before.
+    expect(sent('system_open_text')).toEqual([['system_open_text', { text: LINK }]]);
+    // Never a load of its own that replaces what plays.
+    expect(sent('player_load')).toEqual([]);
+    // Rust says when it plays it (`system:open-request`), and the bridge shows the player then;
+    // the answer to the command changes no page.
+    await Promise.resolve();
+    expect(useUiStore.getState().page).toBe('settings');
+    // A link that opens has nothing to report.
     expect(useNoticeStore.getState().notices).toEqual([]);
   });
 
-  test('a link that is only text plays too', () => {
+  test('a link that is only text goes to Rust too', () => {
     render(<Probe />);
 
     fireEvent.drop(window, { dataTransfer: transfer({ data: { 'text/plain': `  ${LINK}\n` } }) });
 
-    expect(sent('player_load')).toEqual([['player_load', { sources: [LINK], mode: 'replace' }]]);
+    expect(sent('system_open_text')).toEqual([['system_open_text', { text: LINK }]]);
   });
 
   test('a link Rust refuses is logged, shown on a card, and leaves the page as it is', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.mocked(invoke).mockRejectedValue([{ source: LINK, kind: 'invalid' }]);
+    vi.mocked(invoke).mockRejectedValue({ source: LINK, kind: 'invalid' });
     useUiStore.setState({ page: 'settings' });
     render(<Probe />);
 
@@ -150,7 +153,7 @@ describe('dropping', () => {
     }
     fireEvent.drop(window, { dataTransfer: transfer() });
 
-    expect(sent('player_load')).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   test('dropping files hands them to WebView2', () => {
@@ -194,7 +197,7 @@ describe('dropping', () => {
     });
 
     expect(post).toHaveBeenCalledTimes(1);
-    expect(sent('player_load')).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   test('without WebView2 a drop of files is logged and nothing else happens', () => {
@@ -289,7 +292,7 @@ describe('the listeners', () => {
 
     fireEvent.drop(window, { dataTransfer: transfer({ data: { 'text/uri-list': LINK } }) });
 
-    expect(sent('player_load')).toHaveLength(1);
+    expect(sent('system_open_text')).toHaveLength(1);
   });
 
   test('they are gone once the hook is unmounted', () => {

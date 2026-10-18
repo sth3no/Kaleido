@@ -329,8 +329,10 @@ s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten hraje jen s 
   ukazatel myši při tažení ukáže „nelze pustit“ a nic se nestane.
 - [ ] **Odkaz z prohlížeče:** přetáhnout adresu z adresního řádku (Edge, Chrome, Firefox) a odkaz
   přímo ze stránky na okno: hraje hned (přímý `.mp4`, s `yt-dlp` i YouTube); na přehrávané video i
-  z Nastavení také, a okno se přepne na přehrávač. Přetažený odkaz `file://…` nebo text bez odkazu
-  nic neotevře.
+  z Nastavení také, a okno se přepne na přehrávač. S Nastavení → Přehrávání → Při otevření souboru
+  za běhu → Přidat do playlistu se odkaz přetažený na přehrávané video přidá na konec playlistu a
+  přehrávání se nepřeruší, jako u souborů (Ruling R54). Přetažený odkaz `file://…` nebo text bez
+  odkazu nic neotevře.
 - [ ] Tažení přes okno a zpět ven bez pustění, i zrušené klávesou Esc, zruší zvýraznění zóny.
 - [ ] **Vložit odkaz** (tlačítko) s odkazem ve schránce (zkopírovat adresu videa): hraje bez dalšího
   kroku, pole se neukáže. Bez odkazu (prázdná schránka, nebo zkopírovaný obyčejný text, nebo

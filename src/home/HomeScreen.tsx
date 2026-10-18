@@ -9,8 +9,8 @@
  * - "Continue watching" is on the roadmap (M4): the card says so, and so does "What we are
  *   building →"; both open the public roadmap.
  *
- * What opens switches the app to the player: the bridge listens to `system:open-request`, and a
- * link dropped on the window does it itself (`useDrop`).
+ * What opens switches the app to the player: the bridge listens to `system:open-request`, which
+ * Rust sends for whatever it hands the player, a link dropped on the window too (`useDrop`).
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
