@@ -51,7 +51,17 @@ pub trait EventLoop: Send + 'static {
     /// Returns how long to wait for the next event before calling it again; `None` waits
     /// until an event comes.
     fn on_idle(&mut self, mpv: &Mpv) -> Option<Duration>;
+
+    /// `on_event` or `on_idle` panicked. The panic hook has logged it, and the event thread goes
+    /// on with the next event (see [`PANICS_LET_PASS`]).
+    fn on_panic(&mut self, _mpv: &Mpv) {}
 }
+
+/// How many panics of the [`EventLoop`] the event thread lets pass. Each one has been logged by the
+/// panic hook and told to the loop (`on_panic`), and the thread goes on with the next event: one
+/// bad event must not cut the UI off from the player (Ruling R53). A loop that panics at every
+/// event would only fill the log, so after these the thread gives up.
+pub const PANICS_LET_PASS: u32 = 10;
 
 /// Work for the request thread, done in the order it was sent.
 pub enum Request {
@@ -288,10 +298,44 @@ fn run_requests(mpv: &Mpv, queue: mpsc::Receiver<Request>) {
     }
 }
 
+/// The event loop panicked once more than [`PANICS_LET_PASS`]: the event thread stops.
+struct GaveUp;
+
+/// Runs `step` of the event loop. A panic in it has been logged by the panic hook: the loop is told
+/// (`on_panic`) and `None` comes back, so that the thread goes on; [`GaveUp`] once
+/// [`PANICS_LET_PASS`] have passed, or when telling the loop panics too.
+fn survive<E: EventLoop, T>(
+    events: &mut E,
+    mpv: &Mpv,
+    panics: &mut u32,
+    step: impl FnOnce(&mut E) -> T,
+) -> Result<Option<T>, GaveUp> {
+    if let Ok(value) = panic::catch_unwind(AssertUnwindSafe(|| step(&mut *events))) {
+        return Ok(Some(value));
+    }
+    *panics += 1;
+    if *panics > PANICS_LET_PASS {
+        tracing::error!(
+            "the mpv event thread stops after {PANICS_LET_PASS} panics: the UI hears no more of \
+             the player"
+        );
+        return Err(GaveUp);
+    }
+    match panic::catch_unwind(AssertUnwindSafe(|| events.on_panic(mpv))) {
+        Ok(()) => Ok(None),
+        Err(_) => Err(GaveUp),
+    }
+}
+
 fn run_events(mpv: &Mpv, mut events: impl EventLoop, enforcer: &Enforcer, status: &Status) {
+    let mut panics = 0;
     loop {
-        let timeout = events
-            .on_idle(mpv)
+        let Ok(timeout) = survive(&mut events, mpv, &mut panics, |events| events.on_idle(mpv))
+        else {
+            return;
+        };
+        let timeout = timeout
+            .flatten()
             .map_or(-1.0, |timeout| timeout.as_secs_f64());
         let mut event = mpv.wait_event(timeout);
         let mut drifted = false;
@@ -301,7 +345,10 @@ fn run_events(mpv: &Mpv, mut events: impl EventLoop, enforcer: &Enforcer, status
                     drifted |= enforcer.drifted(id, value);
                 }
                 Event::Shutdown => {
-                    events.on_event(mpv, Event::Shutdown);
+                    // The engine hears of the shutdown even if the loop fails on it.
+                    let _ = survive(&mut events, mpv, &mut panics, |events| {
+                        events.on_event(mpv, Event::Shutdown);
+                    });
                     *status
                         .shut_down
                         .lock()
@@ -309,7 +356,14 @@ fn run_events(mpv: &Mpv, mut events: impl EventLoop, enforcer: &Enforcer, status
                     status.changed.notify_all();
                     return;
                 }
-                event => events.on_event(mpv, event),
+                event => {
+                    let handled = survive(&mut events, mpv, &mut panics, |events| {
+                        events.on_event(mpv, event);
+                    });
+                    if handled.is_err() {
+                        return;
+                    }
+                }
             }
             event = mpv.wait_event(0.0);
         }
@@ -447,6 +501,65 @@ mod tests {
                 Event::PropertyChange { id, .. } if *id >= ENGINE_OBSERVE_BASE
             )),
             "{seen:#?}"
+        );
+    }
+
+    /// Panics at a `script-message panic`, keeps every other message, counts its panics.
+    struct Fragile {
+        messages: Arc<Mutex<Vec<String>>>,
+        panics: Arc<AtomicUsize>,
+    }
+
+    impl EventLoop for Fragile {
+        fn on_event(&mut self, _mpv: &Mpv, event: Event) {
+            if let Event::ClientMessage { args } = event {
+                assert_ne!(args, ["panic"], "a deliberate panic in the event loop");
+                self.messages.lock().unwrap().push(args.join(" "));
+            }
+        }
+
+        fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
+            None
+        }
+
+        fn on_panic(&mut self, _mpv: &Mpv) {
+            self.panics.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Ruling R53: a panic in the event loop (on the mpv event thread) is told to the loop, which
+    /// tells the UI, and the events after it still arrive; the engine still shuts down.
+    #[test]
+    fn a_panic_in_the_event_loop_is_told_and_the_events_go_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let panics = Arc::new(AtomicUsize::new(0));
+        let engine = Engine::start(
+            headless(temp_paths(tmp.path())),
+            Fragile {
+                messages: Arc::clone(&messages),
+                panics: Arc::clone(&panics),
+            },
+        )
+        .unwrap();
+
+        engine.command(&["script-message", "before"]);
+        engine.command(&["script-message", "panic"]);
+        engine.command(&["script-message", "after"]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !messages.lock().unwrap().contains(&"after".to_owned()) {
+            assert!(
+                Instant::now() < deadline,
+                "the events stopped after the panic"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert_eq!(*messages.lock().unwrap(), ["before", "after"]);
+        assert_eq!(panics.load(Ordering::SeqCst), 1);
+        assert!(
+            engine.quit(Duration::from_secs(2)),
+            "no shutdown after the panic"
         );
     }
 

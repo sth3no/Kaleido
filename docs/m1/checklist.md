@@ -201,6 +201,17 @@ Po místní instalaci (Příprava):
   hlasitost, rychlost) se správnou hodnotou, i se skrytým ovládáním; rozmazání pod ním sedí; v
   Nastavení a v mini přehrávači se neukazuje.
 
+### Nepovedený start (Ruling R53)
+
+- [ ] V místní instalaci (Příprava) přejmenovat `libmpv-2.dll` vedle `Kaleido.exe` (třeba na
+  `libmpv-2.dll.off`) a Kaleido spustit: ukáže se okno se zprávou „Kaleido se nepodařilo spustit.“
+  (anglicky „Kaleido could not start.“), důvodem (libmpv nejde načíst) a složkou
+  `%LOCALAPPDATA%\Kaleido\logs`; po OK aplikace skončí a v nejnovějším `kaleido.*.log` je řádek
+  `ERROR … Kaleido could not start: cannot start the player: cannot load libmpv: …`. Po
+  přejmenování zpět se Kaleido spustí jako dřív. (Ve vývojovém buildu, který si libmpv jinak najde
+  ve `vendor\`, totéž udělá `$env:KALEIDO_LIBMPV = 'C:\neni\libmpv-2.dll'` před
+  `npm run tauri dev`.)
+
 ### Panely: Rychlé nastavení a Playlist (Task 20)
 
 - [ ] Tlačítko Titulky otevře nad sebou Rychlé nastavení (záložky Titulky a Zvuk), tlačítko

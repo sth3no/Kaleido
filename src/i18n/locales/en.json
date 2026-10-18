@@ -432,6 +432,7 @@
       "continues": "Playback continues with the next file."
     },
     "pasteEmpty": "There is no link on the clipboard. Copy a web address (http:// or https://), then press Ctrl+V.",
-    "dropLink": "The dropped link could not be opened. It has to be one complete web address that starts with http:// or https://."
+    "dropLink": "The dropped link could not be opened. It has to be one complete web address that starts with http:// or https://.",
+    "internal": "Something went wrong inside Kaleido. It is written in the log; if the player stops responding, restart Kaleido."
   }
 }

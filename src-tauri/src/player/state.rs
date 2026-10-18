@@ -132,6 +132,9 @@ impl PlayerEvent {
 /// Where [`StateLoop`] delivers its events (on the mpv event thread).
 pub trait EventSink: Send + Sync + 'static {
     fn emit(&self, event: PlayerEvent);
+
+    /// Handling an event panicked (the panic hook logged it); the events after it still come.
+    fn failed(&self) {}
 }
 
 /// At most one value per `interval` (spec 4.4: `time-pos` max 10×/s) without losing the latest:
@@ -406,6 +409,11 @@ impl<S: EventSink> EventLoop for StateLoop<S> {
     fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
         self.flush(Instant::now())
     }
+
+    /// The changes collected so far stay (each is a value mpv reported); the sink is told.
+    fn on_panic(&mut self, _mpv: &Mpv) {
+        self.sink.failed();
+    }
 }
 
 /// Starts the observations the [`StateLoop`] reports and asks for warnings and errors in the log
@@ -452,6 +460,55 @@ mod tests {
     use crate::player::testing::{NoEvents, clip, headless, temp_paths};
 
     const MS: Duration = Duration::from_millis(1);
+
+    /// Panics at `script-message kaleido panic`, keeps the other messages, counts its failures.
+    struct Breaks {
+        messages: Arc<Mutex<Vec<Vec<String>>>>,
+        failures: Arc<Mutex<usize>>,
+    }
+
+    impl EventSink for Breaks {
+        fn emit(&self, event: PlayerEvent) {
+            if let PlayerEvent::Message { args } = event {
+                assert_ne!(args, ["panic"], "a deliberate panic in a handler");
+                self.messages.lock().unwrap().push(args);
+            }
+        }
+
+        fn failed(&self) {
+            *self.failures.lock().unwrap() += 1;
+        }
+    }
+
+    /// Ruling R53: a handler that panics on the event thread (in the app, Rust's own handlers or
+    /// the send to the UI) is told to the sink, which shows the UI a notice, and the events after
+    /// it still come.
+    #[test]
+    fn a_handler_that_panics_is_told_to_the_sink_and_the_events_go_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let failures = Arc::new(Mutex::new(0));
+        let engine = Engine::start(
+            headless(temp_paths(tmp.path())),
+            StateLoop::new(Breaks {
+                messages: Arc::clone(&messages),
+                failures: Arc::clone(&failures),
+            }),
+        )
+        .unwrap();
+
+        engine.command(&["script-message", "kaleido", "panic"]);
+        engine.command(&["script-message", "kaleido", "after"]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !messages.lock().unwrap().contains(&vec!["after".to_owned()]) {
+            assert!(
+                Instant::now() < deadline,
+                "the events stopped after the panic"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*failures.lock().unwrap(), 1);
+    }
 
     #[test]
     fn first_value_goes_out_immediately() {

@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod diagnostics;
 pub mod dialog;
 pub mod drop;
+pub mod fatal;
 pub mod instance;
 pub mod logs;
 pub mod open_queue;
@@ -74,6 +75,9 @@ pub type Snapshot = BTreeMap<String, Value>;
 pub const OPEN_REQUEST_EVENT: &str = "system:open-request";
 /// The event that tells the UI Ctrl+V found no link on the clipboard; its payload is `{}`.
 pub const PASTE_EMPTY_EVENT: &str = "system:paste-empty";
+/// The event that tells the UI something inside Kaleido failed, a panic on the mpv event thread
+/// (Ruling R53); its payload is `{}`. The UI shows a notice, the log says what happened.
+pub const ERROR_EVENT: &str = "system:error";
 
 /// The payload of `system:open-request`: Rust has handed the player `count` sources.
 #[derive(Debug, Clone, Serialize)]

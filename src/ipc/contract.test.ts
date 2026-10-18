@@ -53,6 +53,7 @@ import systemAppearanceEventJson from '../../src-tauri/tests/fixtures/ipc/system
 import systemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/system_appearance.json';
 import systemCopyDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_copy_diagnostics.json';
 import systemDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_diagnostics.json';
+import systemErrorEventJson from '../../src-tauri/tests/fixtures/ipc/system.error.json';
 import systemFontsJson from '../../src-tauri/tests/fixtures/ipc/system_fonts.json';
 import systemLicensesJson from '../../src-tauri/tests/fixtures/ipc/system_licenses.json';
 import systemLocaleJson from '../../src-tauri/tests/fixtures/ipc/system_locale.json';
@@ -184,6 +185,7 @@ const eventFixtures = {
   'player:thumb': playerThumbEventJson,
   'settings:changed': settingsChangedEventJson,
   'system:appearance-changed': systemAppearanceEventJson,
+  'system:error': systemErrorEventJson,
   'system:open-request': systemOpenRequestEventJson,
   'system:paste-empty': systemPasteEventJson,
 } satisfies { [K in keyof EventTable]: Fixture<EventTable[K]> };
@@ -540,7 +542,7 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(eventFixtures['glass:state'], GLASS_STATE, 'GlassState');
     expectShape(eventFixtures['settings:changed'], SETTINGS, 'Settings');
     expectShape(eventFixtures['system:appearance-changed'], SYSTEM_APPEARANCE, 'SystemAppearance');
-    for (const channel of ['player:file-loaded', 'system:paste-empty'] as const) {
+    for (const channel of ['player:file-loaded', 'system:paste-empty', 'system:error'] as const) {
       for (const payload of eventFixtures[channel]) expect(Object.keys(payload), channel).toEqual([]);
     }
     // What commands resolve or reject with.
@@ -631,6 +633,7 @@ const subscribers = {
   'player:thumb': events.onThumb,
   'settings:changed': events.onSettingsChanged,
   'system:appearance-changed': events.onSystemAppearanceChanged,
+  'system:error': events.onSystemError,
   'system:open-request': events.onOpenRequest,
   'system:paste-empty': events.onPasteEmpty,
 } satisfies { [K in keyof EventTable]: (callback: (payload: EventTable[K]) => void) => Promise<unknown> };

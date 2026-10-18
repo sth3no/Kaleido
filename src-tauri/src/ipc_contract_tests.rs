@@ -841,8 +841,9 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             &OpenRequestEvent { count },
         );
     }
-    // lib.rs sends `json!({})`.
+    // lib.rs sends `json!({})` for both.
     serialized(out, &fixture_name(system::PASTE_EMPTY_EVENT), &json!({}));
+    serialized(out, &fixture_name(system::ERROR_EVENT), &json!({}));
     let glass_states = [
         GlassState {
             enabled: true,

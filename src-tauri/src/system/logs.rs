@@ -1,10 +1,14 @@
 //! The logs (spec 10.8): `kaleido.<date>.log` from Rust's `tracing`, one file a day and the last
-//! seven kept, and mpv's `mpv.log`, which is renamed at every start and kept for seven days.
+//! seven kept, and mpv's `mpv.log`, which is renamed at every start and kept for seven days. Every
+//! panic is written to the log too (`install_panic_hook`, spec 10.1).
 
+use std::any::Any;
 use std::fs;
 use std::io;
+use std::panic::{self, Location};
 use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, Once, PoisonError};
+use std::thread;
 use std::time::{Duration, SystemTime};
 
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time};
@@ -33,11 +37,59 @@ pub struct LogGuard(Mutex<Option<WorkerGuard>>);
 
 impl LogGuard {
     /// Writes what is still queued and ends the writer. The process ends without dropping the
-    /// app's managed state, so the app calls this when it exits. Lines logged afterwards are
-    /// lost.
+    /// app's managed state, so the app calls this when it exits (and when the start failed).
+    /// Lines logged afterwards are lost.
     pub fn flush(&self) {
         let guard = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
         drop(guard);
+    }
+
+    /// Whether the log file is being written: `init` could open it, and it is not flushed yet.
+    pub fn is_writing(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+}
+
+/// Writes every panic to the log (spec 10.1: nothing fails silently): the thread, where, and its
+/// message. A release build has no console, so without it a panic would leave no trace; a panic
+/// on the mpv event thread, say, would only stop the player's state from reaching the UI. Rust's
+/// own hook (the message on stderr) still runs after it. A panic on the main thread before the
+/// start is complete is a failed start, and the user is told (`fatal::on_panic`).
+///
+/// Installed first thing in `run`: what panics before [`init`] is not in the log (there is none
+/// yet), but a failed start is still told. A second call does nothing.
+pub fn install_panic_hook() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            let current = thread::current();
+            let message = panic_message(info.payload());
+            tracing::error!("{}", panic_line(current.name(), info.location(), message));
+            super::fatal::on_panic(current.name() == Some("main"), message);
+            previous(info);
+        }));
+    });
+}
+
+/// The text a panic was raised with: `panic!` gives a `&str` or a `String`.
+fn panic_message(payload: &(dyn Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("(no message)")
+}
+
+/// `thread 'mpv-events' panicked at src\lib.rs:10:5: the message`, as Rust's own hook says it.
+fn panic_line(thread: Option<&str>, location: Option<&Location<'_>>, message: &str) -> String {
+    let thread = thread.unwrap_or("<unnamed>");
+    match location {
+        Some(at) => format!("thread '{thread}' panicked at {at}: {message}"),
+        None => format!("thread '{thread}' panicked: {message}"),
     }
 }
 
@@ -320,5 +372,61 @@ mod tests {
         assert!(!text.contains("below the default level"), "{text}");
         // Plain text, no colour codes.
         assert!(!text.contains('\u{1b}'), "{text:?}");
+    }
+
+    /// Spec 10.1: a panic on any thread is in the log, with the thread, the place and the message,
+    /// once however often the hook is installed.
+    #[test]
+    fn a_panic_is_written_to_the_log() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        let (logger, guard) = build(&logs).unwrap();
+        install_panic_hook();
+        install_panic_hook();
+
+        // Named as the engine's event thread is; the logger only for this thread, as above.
+        let panicking = thread::Builder::new()
+            .name("mpv-events".into())
+            .spawn(move || {
+                tracing::dispatcher::with_default(&logger, || {
+                    panic!("the state loop broke at event {}", 42);
+                });
+            })
+            .unwrap();
+        assert!(panicking.join().is_err(), "the thread did not panic");
+        drop(guard);
+
+        let files = names(&logs);
+        assert_eq!(files.len(), 1, "{files:?}");
+        let text = fs::read_to_string(logs.join(&files[0])).unwrap();
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|line| line.contains("panicked"))
+            .collect();
+        assert_eq!(lines.len(), 1, "{text}");
+        let line = lines[0];
+        assert!(line.contains("ERROR"), "{line}");
+        assert!(line.contains("thread 'mpv-events' panicked at "), "{line}");
+        assert!(line.contains("logs.rs:"), "{line}");
+        assert!(line.contains("the state loop broke at event 42"), "{line}");
+    }
+
+    #[test]
+    fn a_panic_line_names_the_thread_the_place_and_the_message() {
+        let at = Location::caller();
+        assert_eq!(
+            panic_line(Some("main"), Some(at), "boom"),
+            format!("thread 'main' panicked at {at}: boom")
+        );
+        assert_eq!(
+            panic_line(None, None, "boom"),
+            "thread '<unnamed>' panicked: boom"
+        );
+        let text: Box<dyn Any + Send> = Box::new("a literal");
+        let owned: Box<dyn Any + Send> = Box::new(String::from("a formatted one"));
+        let other: Box<dyn Any + Send> = Box::new(7_u8);
+        assert_eq!(panic_message(&*text), "a literal");
+        assert_eq!(panic_message(&*owned), "a formatted one");
+        assert_eq!(panic_message(&*other), "(no message)");
     }
 }

@@ -18,6 +18,8 @@
  * - `system:paste-empty` (Ctrl+V found no link) while the view is not the start screen. The start
  *   screen answers that itself, with its paste field (`HomeScreen.tsx`), and is mounted exactly
  *   while the view is `home`; so the two never both react.
+ * - `system:error`: something inside Kaleido failed (a panic on the mpv event thread, Ruling R53);
+ *   the log says what, the card says that it happened, on every page.
  * - `pushAppNotice` from elsewhere: a dropped link that Rust refused (`home/useDrop.ts`).
  *
  * Hints (`status` notices) are announced by a live region that is always in the page, not by their
@@ -37,7 +39,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { glassRegions, useGlassRegion } from '../../glass/useGlassRegion';
-import { onPasteEmpty } from '../../ipc/events';
+import { onPasteEmpty, onSystemError } from '../../ipc/events';
 import { listenTo } from '../../ipc/listen';
 import { nameOfFile } from '../../player/entryName';
 import {
@@ -93,6 +95,19 @@ function useNoticeFeed(): void {
           pushAppNotice('errors.pasteEmpty', 'status');
         },
         'system:paste-empty',
+      ),
+    [],
+  );
+
+  // Something inside Kaleido failed (Ruling R53): the log has it, the user is told.
+  useEffect(
+    () =>
+      listenTo(
+        onSystemError,
+        () => {
+          pushAppNotice('errors.internal');
+        },
+        'system:error',
       ),
     [],
   );

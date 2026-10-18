@@ -693,6 +693,27 @@ describe('what the app itself says', () => {
   });
 });
 
+describe('something inside Kaleido failed (system:error)', () => {
+  test('a card says so, on the start screen as on the player, once however often it comes', () => {
+    render(<ErrorCards />);
+    const failed = () => {
+      act(() => {
+        for (const handler of events.handlers.get('system:error') ?? []) handler({ payload: {} });
+      });
+    };
+
+    failed();
+    expect(cards()).toHaveLength(1);
+    expect(within(cards()[0]).getByRole('alert').textContent).toContain(
+      'Something went wrong inside Kaleido',
+    );
+
+    playing();
+    failed();
+    expect(cards()).toHaveLength(1);
+  });
+});
+
 describe('Ctrl+V without a link (system:paste-empty)', () => {
   test('outside the start screen it says so on a card', () => {
     render(<ErrorCards />);

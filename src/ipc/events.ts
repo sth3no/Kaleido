@@ -60,6 +60,10 @@ export const onOpenRequest = (callback: (payload: OpenRequest) => void) =>
 export const onPasteEmpty = (callback: (payload: EmptyPayload) => void) =>
   on('system:paste-empty', callback);
 
+/** Something inside Kaleido failed (a panic on the mpv event thread); the log says what. */
+export const onSystemError = (callback: (payload: EmptyPayload) => void) =>
+  on('system:error', callback);
+
 /** The glass went on or off. Comes only on a change: ask with `glassState` at start. */
 export const onGlassState = (callback: (payload: GlassState) => void) =>
   on('glass:state', callback);

@@ -432,6 +432,7 @@
       "continues": "Přehrávání pokračuje dalším souborem."
     },
     "pasteEmpty": "Ve schránce není žádný odkaz. Zkopíruj webovou adresu (http:// nebo https://) a stiskni Ctrl+V.",
-    "dropLink": "Přetažený odkaz se nepodařilo otevřít. Musí to být jedna úplná webová adresa, která začíná http:// nebo https://."
+    "dropLink": "Přetažený odkaz se nepodařilo otevřít. Musí to být jedna úplná webová adresa, která začíná http:// nebo https://.",
+    "internal": "V Kaleidu se něco pokazilo. Je to zapsané v logu; když přehrávač přestane reagovat, spusť Kaleido znovu."
   }
 }

@@ -376,7 +376,7 @@ export type PlayerStateBatch = { changes: Record<string, unknown> };
 /** The payload of `system:open-request`: Rust has handed the player `count` sources. */
 export type OpenRequest = { count: number };
 
-/** The payload of `player:file-loaded` and `system:paste-empty`: `{}`. */
+/** The payload of `player:file-loaded`, `system:paste-empty` and `system:error`: `{}`. */
 export type EmptyPayload = Record<string, never>;
 
 /** Every event Rust emits to the UI today, by name. */
@@ -389,6 +389,7 @@ export interface EventTable {
   'player:thumb': ThumbReady;
   'system:open-request': OpenRequest;
   'system:paste-empty': EmptyPayload;
+  'system:error': EmptyPayload;
   'glass:state': GlassState;
   'settings:changed': Settings;
   'system:appearance-changed': SystemAppearance;

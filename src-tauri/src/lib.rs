@@ -35,6 +35,9 @@ use system::open_queue::OpenQueue;
 const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn run() {
+    // First: every panic goes to the log once there is one, and one that ends the start is told
+    // (spec 10.1, Ruling R53).
+    system::logs::install_panic_hook();
     // Before anything is spawned, so every child process is covered.
     if let Err(error) = job::bind_children_to_this_process() {
         // There is no log file yet; a stray helper after a crash is not worth refusing to start.
@@ -50,7 +53,7 @@ pub fn run() {
         std::env::args_os().skip(1).collect(),
         std::env::current_dir().unwrap_or_default(),
     );
-    tauri::Builder::default()
+    let built = tauri::Builder::default()
         // First: a later launch hands over its command line and exits before anything else.
         .plugin(system::instance::plugin())
         .plugin(tauri_plugin_dialog::init())
@@ -95,80 +98,19 @@ pub fn run() {
             commands::system_appearance,
             commands::system_locale,
         ])
+        // A failed start is logged with its whole chain of causes and shown in a message box
+        // before Tauri turns it into a panic, whose message has nowhere to go (Ruling R53).
         .setup(|app| {
-            let paths = paths::AppPaths::resolve(app.handle())?;
-            // First, so that everything after is logged. The logs folder is known only from
-            // here, so lines logged before are not captured (the job object's failure goes to
-            // stderr). It makes the folder itself, and the guard stays managed so that the
-            // writer lives as long as the app does.
-            app.manage(system::logs::init(&paths));
-            paths.ensure_dirs()?;
-            player::options::ensure_defaults(&paths)?;
-            // Before the engine: the open-while-playing setting decides how the first
-            // launch's files play.
-            app.manage(settings::SharedSettings::new(
-                settings::SettingsStore::load(paths.config_dir.join(settings::SETTINGS_FILE)),
-            ));
-            let window = app
-                .get_webview_window("main")
-                .context("the main window is missing")?;
-            let main = window.hwnd()?.0 as isize;
-            // Before the engine starts: its first state batch may already set the window's
-            // fullscreen or always-on-top.
-            let surface = Surface::new(main);
-            let size = window.inner_size()?;
-            surface.apply(size.width, size.height, window.scale_factor()?);
-            app.manage(surface);
-            app.manage(WindowSync::default());
-            // Before the engine: mpv opens mpv.log anew, so the last run's log is archived now.
-            if let Err(error) = system::logs::rotate_mpv_log(&paths.logs_dir, SystemTime::now()) {
-                tracing::warn!("cannot archive the last mpv log: {error}");
-            }
-            let engine = Engine::start(
-                EngineConfig {
-                    paths: paths.clone(),
-                    wid: Some(main),
-                    vo: "gpu-next".into(),
-                    ao: None,
-                },
-                StateLoop::new(AppSink {
-                    app: app.handle().clone(),
-                }),
-            )?;
-            // Queued, not called: this is the main thread. Requests run in order, so the
-            // observations are in place before any file is loaded.
-            engine.request(Request::Call(Box::new(|mpv| {
-                if let Err(error) = player::observe_all(mpv) {
-                    tracing::error!("cannot observe the player state: {error}");
+            setup(app).map_err(|error| {
+                let reason = system::fatal::describe(&error);
+                tracing::error!("Kaleido could not start: {reason}");
+                // On disk before the user goes to look; the app ends right after this.
+                if let Some(log) = app.try_state::<LogGuard>() {
+                    log.flush();
                 }
-            })));
-            // Queued behind the observations, before anything the UI asks of thumbfast.
-            player::options::load_thumbfast(&engine, &paths);
-            let shader = glass::shader_path(&paths.cache_dir);
-            app.manage(paths);
-            app.manage(engine);
-            // After the engine: the glass queues its shader on it. Always managed, also when
-            // the shader cannot be written (then it starts off), so the commands find it.
-            let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
-            glass.set_scale(window.scale_factor()?);
-            // Where mpv's window is: the regions are moved into it (Ruling R45).
-            surface::sync_glass(&app.state::<Surface>(), &glass);
-            app.manage(glass);
-            // After the glass: Windows' transparency and the settings decide whether it runs,
-            // and the window gets Mica.
-            themes::start(app.handle());
-            // Without it only dropping files fails; the dialog still opens them.
-            if let Err(error) = system::drop::install(window.as_ref()) {
-                tracing::error!("dropped files will not open: {error:#}");
-            }
-            // WebView2's own caption for the islands (CSS app-region), for the Snap Layouts
-            // spike. Without it the islands still move the window (data-tauri-drag-region).
-            if let Err(error) = surface::caption::install(window.as_ref()) {
-                tracing::warn!("the islands are no WebView2 caption: {error:#}");
-            }
-            // The queued command lines (this launch's first) are checked from now on.
-            app.state::<OpenThread>().attach(app.handle().clone());
-            Ok(())
+                system::fatal::start_failed(&reason);
+                error.into()
+            })
         })
         .on_window_event(|window, event| match event {
             WindowEvent::Resized(_) => surface::window_resized(window),
@@ -199,17 +141,112 @@ pub fn run() {
             }
             _ => {}
         })
-        .build(tauri::generate_context!())
-        .expect("failed to build Kaleido")
-        .run(|app, event| {
-            // The process ends without dropping the managed state, so the log writer is told
-            // to write what it still holds.
-            if matches!(event, RunEvent::Exit)
-                && let Some(log) = app.try_state::<LogGuard>()
-            {
-                log.flush();
-            }
-        });
+        .build(tauri::generate_context!());
+    // Before the setup runs (a plugin that cannot start): there is no log yet, only the box.
+    let app = match built {
+        Ok(app) => app,
+        Err(error) => {
+            let reason = system::fatal::describe(&error.into());
+            tracing::error!("Kaleido could not start: {reason}");
+            system::fatal::start_failed(&reason);
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| {
+        // The process ends without dropping the managed state, so the log writer is told to
+        // write what it still holds.
+        if matches!(event, RunEvent::Exit)
+            && let Some(log) = app.try_state::<LogGuard>()
+        {
+            log.flush();
+        }
+    });
+}
+
+/// The app's setup, once the main window is there. An error ends the start (see `run`).
+fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
+    let paths = paths::AppPaths::resolve(app.handle())?;
+    // First, so that everything after is logged. The logs folder is known only from here, so
+    // lines logged before are not captured (the job object's failure goes to stderr). It makes
+    // the folder itself, and the guard stays managed so that the writer lives as long as the app
+    // does.
+    let log = system::logs::init(&paths);
+    if log.is_writing() {
+        system::fatal::logging_to(&paths.logs_dir);
+    }
+    app.manage(log);
+    paths
+        .ensure_dirs()
+        .context("cannot create Kaleido's folders")?;
+    player::options::ensure_defaults(&paths)
+        .with_context(|| format!("cannot write mpv.conf in {}", paths.config_dir.display()))?;
+    // Before the engine: the open-while-playing setting decides how the first launch's files
+    // play.
+    app.manage(settings::SharedSettings::new(
+        settings::SettingsStore::load(paths.config_dir.join(settings::SETTINGS_FILE)),
+    ));
+    let window = app
+        .get_webview_window("main")
+        .context("the main window is missing")?;
+    let main = window.hwnd()?.0 as isize;
+    // Before the engine starts: its first state batch may already set the window's fullscreen
+    // or always-on-top.
+    let surface = Surface::new(main);
+    let size = window.inner_size()?;
+    surface.apply(size.width, size.height, window.scale_factor()?);
+    app.manage(surface);
+    app.manage(WindowSync::default());
+    // Before the engine: mpv opens mpv.log anew, so the last run's log is archived now.
+    if let Err(error) = system::logs::rotate_mpv_log(&paths.logs_dir, SystemTime::now()) {
+        tracing::warn!("cannot archive the last mpv log: {error}");
+    }
+    let engine = Engine::start(
+        EngineConfig {
+            paths: paths.clone(),
+            wid: Some(main),
+            vo: "gpu-next".into(),
+            ao: None,
+        },
+        StateLoop::new(AppSink {
+            app: app.handle().clone(),
+        }),
+    )
+    .context("cannot start the player")?;
+    // Queued, not called: this is the main thread. Requests run in order, so the observations
+    // are in place before any file is loaded.
+    engine.request(Request::Call(Box::new(|mpv| {
+        if let Err(error) = player::observe_all(mpv) {
+            tracing::error!("cannot observe the player state: {error}");
+        }
+    })));
+    // Queued behind the observations, before anything the UI asks of thumbfast.
+    player::options::load_thumbfast(&engine, &paths);
+    let shader = glass::shader_path(&paths.cache_dir);
+    app.manage(paths);
+    app.manage(engine);
+    // After the engine: the glass queues its shader on it. Always managed, also when the shader
+    // cannot be written (then it starts off), so the commands find it.
+    let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
+    glass.set_scale(window.scale_factor()?);
+    // Where mpv's window is: the regions are moved into it (Ruling R45).
+    surface::sync_glass(&app.state::<Surface>(), &glass);
+    app.manage(glass);
+    // After the glass: Windows' transparency and the settings decide whether it runs, and the
+    // window gets Mica.
+    themes::start(app.handle());
+    // Without it only dropping files fails; the dialog still opens them.
+    if let Err(error) = system::drop::install(window.as_ref()) {
+        tracing::error!("dropped files will not open: {error:#}");
+    }
+    // WebView2's own caption for the islands (CSS app-region), for the Snap Layouts spike.
+    // Without it the islands still move the window (data-tauri-drag-region).
+    if let Err(error) = surface::caption::install(window.as_ref()) {
+        tracing::warn!("the islands are no WebView2 caption: {error:#}");
+    }
+    // The queued command lines (this launch's first) are checked from now on.
+    app.state::<OpenThread>().attach(app.handle().clone());
+    system::fatal::started();
+    Ok(())
 }
 
 /// Delivers the player's events: Rust's own handlers first, the UI for the rest.
@@ -226,6 +263,13 @@ impl EventSink for AppSink {
             && let Err(error) = self.app.emit(channel, &event)
         {
             tracing::warn!("cannot send {channel} to the UI: {error}");
+        }
+    }
+
+    /// A panic on the mpv event thread (logged by the panic hook): the UI shows a notice.
+    fn failed(&self) {
+        if let Err(error) = self.app.emit(system::ERROR_EVENT, serde_json::json!({})) {
+            tracing::warn!("cannot send {} to the UI: {error}", system::ERROR_EVENT);
         }
     }
 }
