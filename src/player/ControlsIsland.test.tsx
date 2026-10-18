@@ -205,6 +205,20 @@ test('the context menu of the page does not open on the controls', () => {
   expect(notPrevented).toBe(false);
 });
 
+test('back from the mini player with the keyboard, the focus lands on play and pause', () => {
+  open();
+  // "Back to player" pressed with Enter asks for it (mini/MiniPlayer.tsx); the island is hidden
+  // (inert) at first, and takes it when it shows.
+  useUiStore.getState().setFocusRequest('play');
+  const { rerender } = render(<ControlsIsland hidden />);
+  expect(document.activeElement).toBe(document.body);
+  expect(useUiStore.getState().focusRequest).toBe('play');
+
+  rerender(<ControlsIsland hidden={false} />);
+  expect(document.activeElement).toBe(button('Pause'));
+  expect(useUiStore.getState().focusRequest).toBeNull();
+});
+
 test('a click with the pointer gives the focus back, so that Space goes to mpv again', () => {
   open();
   render(<ControlsIsland />);

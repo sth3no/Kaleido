@@ -16,6 +16,7 @@ test('starts on the player with the sidebar and the panels closed, and the glass
     quickTab: 'subtitles',
     controlsHidden: false,
     glass: { enabled: true, reason: null },
+    focusRequest: null,
   });
 });
 
@@ -26,6 +27,7 @@ test('the setters change one thing each', () => {
   store.getState().setQuickTab('audio');
   store.getState().setControlsHidden(true);
   store.getState().setGlass({ enabled: false, reason: 'gpuFailure' });
+  store.getState().setFocusRequest('play');
   expect(store.getState()).toMatchObject({
     page: 'settings',
     sidebarOpen: true,
@@ -33,6 +35,7 @@ test('the setters change one thing each', () => {
     quickTab: 'audio',
     controlsHidden: true,
     glass: { enabled: false, reason: 'gpuFailure' },
+    focusRequest: 'play',
   });
   store.getState().setPanel(null);
   expect(store.getState().panel).toBeNull();

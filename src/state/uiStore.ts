@@ -11,6 +11,7 @@ import type { GlassState } from '../ipc/types';
 export type Page = 'player' | 'settings';
 export type Panel = 'quick-settings' | 'playlist';
 export type QuickTab = 'subtitles' | 'audio';
+export type FocusRequest = 'play';
 
 export interface UiState {
   page: Page;
@@ -29,12 +30,19 @@ export interface UiState {
    * While it is off the panels are opaque. It starts on, as Rust does.
    */
   glass: GlassState;
+  /**
+   * A control that should take the focus when it next shows: `play`, the player's play and pause
+   * button (the mini player's "Back to player" pressed with the keyboard asks for it). The control
+   * clears it when it has the focus.
+   */
+  focusRequest: FocusRequest | null;
   setPage: (page: Page) => void;
   setSidebarOpen: (open: boolean) => void;
   setPanel: (panel: Panel | null) => void;
   setQuickTab: (tab: QuickTab) => void;
   setControlsHidden: (hidden: boolean) => void;
   setGlass: (glass: GlassState) => void;
+  setFocusRequest: (request: FocusRequest | null) => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
@@ -44,6 +52,7 @@ export const useUiStore = create<UiState>()((set) => ({
   quickTab: 'subtitles',
   controlsHidden: false,
   glass: { enabled: true, reason: null },
+  focusRequest: null,
   setPage: (page) => {
     set({ page });
   },
@@ -61,5 +70,8 @@ export const useUiStore = create<UiState>()((set) => ({
   },
   setGlass: (glass) => {
     set({ glass });
+  },
+  setFocusRequest: (focusRequest) => {
+    set({ focusRequest });
   },
 }));

@@ -3,13 +3,15 @@
  *
  * 1. `VideoLayer`: transparent, where mpv's window is; it passes input to mpv. While mpv's window
  *    is the mini player (or on its way there) the pointer stays in the UI (Ruling R45).
- *    Above it the mini player's hole (`MiniHole`): the page's background around the video.
- * 2. The page: the start screen (`home`), the player (`player`) or the settings (`settings`), as
- *    the tasks that build them pass them in. Over the video the page layer lets the pointer
- *    through to the video: the player page gives its controls `pointer-events: auto`. A page
- *    paints no background of its own: the root does, or the mini player's hole around the video.
- *    Above it the mini player's frame and controls (`MiniPlayer`), while a file is open and
- *    another page is shown (`surface/useSurfaceLayout.ts` moves mpv's window there).
+ * 2. The page layer, with the page in it: the start screen (`home`), the player (`player`) or the
+ *    settings (`settings`), as the tasks that build them pass them in. Over the video the page
+ *    lets the pointer through to the video: the player page gives its controls
+ *    `pointer-events: auto`. While the mini player is up, and while the video moves there and
+ *    back (`surface/useSurfaceLayout.ts`), the page layer owns the hole (Ruling R46): it paints the
+ *    page's background itself and is clipped around the video (`--mini-hole` on the shell), so a
+ *    page may paint whatever it likes (its own glass has a background to blur), and nothing of it
+ *    (popovers neither) draws over the video. Above it the mini player's frame and controls
+ *    (`MiniPlayer`), and the cover of reduced motion (`MiniCover`).
  * 3. On a page (no video): a strip along the top that moves the window, as a title bar would.
  *    The top `--shell-titlebar-height` of a docked page is that strip's: no controls there.
  * 4. The islands: the title capsule (over the video only) and the window buttons. They fade with
@@ -21,12 +23,21 @@
  * Which page: the settings while the user is there; the player while a file is loaded or loading
  * (mpv says it is not idle); else the start screen. It also starts the bridge to Rust, once for the
  * app, and makes the page transparent while a video is shown (spec 5.1: opaque until then): the
- * loaded player, and the mini player, whose hole layer paints the page around the video.
+ * loaded player, and the mini player, whose page layer paints the page around the video.
  */
 
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 
-import MiniPlayer, { MiniHole, useMiniBox } from '../mini/MiniPlayer';
+import MiniPlayer, { holePath, MiniCover, useMiniBox } from '../mini/MiniPlayer';
 import { usePlayerBridge } from '../state/bridge';
 import { usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
@@ -90,6 +101,8 @@ export default function AppShell({ home, player, settings, notices }: AppShellPr
   const miniBox = useMiniBox(surface.rect);
   // The video is not the whole window, and there is room for it (else Rust shows none either).
   const miniPhase = surface.phase !== 'full' && miniBox !== null ? surface.phase : null;
+  // The page layer is clipped by it (Ruling R46).
+  const hole = miniPhase !== null && miniBox !== null ? holePath(miniBox) : null;
   useVideoBackdrop((overVideo && loaded) || miniPhase !== null);
   // Open is a state of the sidebar over the video: a page shows it anyway, and the next video
   // starts with it closed.
@@ -123,12 +136,20 @@ export default function AppShell({ home, player, settings, notices }: AppShellPr
   const dragStrip = SNAP_LAYOUTS ? `${styles.dragStrip} ${styles.caption}` : styles.dragStrip;
 
   return (
-    <div className={styles.shell} data-view={view}>
+    <div
+      className={styles.shell}
+      data-view={view}
+      style={hole === null ? undefined : ({ '--mini-hole': hole } as CSSProperties)}
+    >
       <VideoLayer pointer={surface.phase === 'full'} />
-      {miniPhase && miniBox && <MiniHole box={miniBox} fade={surface.fade} />}
-      <main className={styles.page} data-view={view}>
-        {content}
-      </main>
+      <div className={styles.pageLayer} data-page-layer data-mini={hole !== null}>
+        <main className={styles.page} data-view={view}>
+          {content}
+        </main>
+      </div>
+      {surface.fade && (surface.phase === 'full' || miniBox) && (
+        <MiniCover key={surface.phase} box={surface.phase === 'full' ? null : miniBox} />
+      )}
       {/* After the page: its controls come after the page's in the tab order. */}
       {miniPhase && miniBox && <MiniPlayer box={miniBox} phase={miniPhase} fade={surface.fade} />}
       {!overVideo && <div className={dragStrip} data-tauri-drag-region />}

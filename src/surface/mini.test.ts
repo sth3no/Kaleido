@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import golden from '../../src-tauri/tests/fixtures/surface/mini_layout.json';
 import {
   animateRect,
   DEFAULT_ASPECT,
@@ -82,6 +83,37 @@ describe('mini player geometry', () => {
   test('no room is no mini player', () => {
     expect(miniRect(miniLayout(16 / 9), 30, 400)).toBeNull();
     expect(miniRect(miniLayout(16 / 9), 0, 0)).toBeNull();
+  });
+});
+
+describe('the table the UI and Rust share (Ruling R47)', () => {
+  // src-tauri/src/surface/layout.rs tests the same table: Rust places the layout at `placement`.
+  test.each(golden.cases.map((entry) => [entry.name, entry] as const))('%s', (_name, entry) => {
+    const { client, scale, aspect, zoom, hole, placement } = entry;
+    // What the UI sends.
+    const layout = miniLayout(aspect[0] / aspect[1], zoom);
+    expect(layout).toEqual(entry.layout);
+
+    // The hole, in a window of the client's size in CSS px (the fraction of a px included).
+    const rect = miniRect(layout, client.w / scale, client.h / scale);
+    if (!rect) throw new Error('no mini player');
+    expect(rect.x).toBeCloseTo(hole.x, 2);
+    expect(rect.y).toBeCloseTo(hole.y, 2);
+    expect(rect.w).toBeCloseTo(hole.w, 2);
+    expect(rect.h).toBeCloseTo(hole.h, 2);
+
+    // mpv's window covers all of it: no seam on any side.
+    expect(rect.x * scale).toBeGreaterThanOrEqual(placement.x - 1e-6);
+    expect(rect.y * scale).toBeGreaterThanOrEqual(placement.y - 1e-6);
+    expect((rect.x + rect.w) * scale).toBeLessThanOrEqual(placement.x + placement.w + 1e-6);
+    expect((rect.y + rect.h) * scale).toBeLessThanOrEqual(placement.y + placement.h + 1e-6);
+  });
+
+  test('the table has the review’s case and the fractional display scales', () => {
+    expect(golden.cases.some(({ client, scale }) => client.w === 1921 && client.h === 1081 && scale === 1.5)).toBe(
+      true,
+    );
+    expect(new Set(golden.cases.map(({ scale }) => scale))).toEqual(new Set([1, 1.25, 1.5, 1.75]));
   });
 });
 

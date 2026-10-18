@@ -1,0 +1,293 @@
+{
+  "about": "The mini player in CSS px of the window (what the UI cuts its hole by, src/surface/mini.ts) and in physical px of the client area (where Rust places mpv's window, src-tauri/src/surface/layout.rs, 1 px past the hole on every side: Ruling R47). Both sides test against this table, so that they cannot drift apart. client: physical px; scale: the display scale; aspect: the video's width and height; zoom: the UI scale; layout: what the UI sends; hole: CSS px of the window; placement: physical px.",
+  "cases": [
+    {
+      "name": "1280×720 at 100 %, 16:9",
+      "client": {
+        "w": 1280,
+        "h": 720
+      },
+      "scale": 1,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 203,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 904,
+        "y": 501,
+        "w": 360,
+        "h": 203
+      },
+      "placement": {
+        "x": 903,
+        "y": 500,
+        "w": 362,
+        "h": 205
+      }
+    },
+    {
+      "name": "1920×1080 at 150 %, 16:9",
+      "client": {
+        "w": 1920,
+        "h": 1080
+      },
+      "scale": 1.5,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 203,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 904,
+        "y": 501,
+        "w": 360,
+        "h": 203
+      },
+      "placement": {
+        "x": 1355,
+        "y": 750,
+        "w": 542,
+        "h": 307
+      }
+    },
+    {
+      "name": "1600×900 at 125 %, 16:9",
+      "client": {
+        "w": 1600,
+        "h": 900
+      },
+      "scale": 1.25,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 203,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 904,
+        "y": 501,
+        "w": 360,
+        "h": 203
+      },
+      "placement": {
+        "x": 1129,
+        "y": 625,
+        "w": 452,
+        "h": 256
+      }
+    },
+    {
+      "name": "1921×1081 at 150 %, 16:9: a client that is no whole number of CSS px",
+      "client": {
+        "w": 1921,
+        "h": 1081
+      },
+      "scale": 1.5,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 203,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 904.667,
+        "y": 501.667,
+        "w": 360,
+        "h": 203
+      },
+      "placement": {
+        "x": 1356,
+        "y": 751,
+        "w": 542,
+        "h": 307
+      }
+    },
+    {
+      "name": "1601×901 at 125 %, 4:3",
+      "client": {
+        "w": 1601,
+        "h": 901
+      },
+      "scale": 1.25,
+      "aspect": [
+        4,
+        3
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 270,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 904.8,
+        "y": 434.8,
+        "w": 360,
+        "h": 270
+      },
+      "placement": {
+        "x": 1130,
+        "y": 542,
+        "w": 452,
+        "h": 340
+      }
+    },
+    {
+      "name": "1366×768 at 125 %, 2.39:1",
+      "client": {
+        "w": 1366,
+        "h": 768
+      },
+      "scale": 1.25,
+      "aspect": [
+        239,
+        100
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 151,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 716.8,
+        "y": 447.4,
+        "w": 360,
+        "h": 151
+      },
+      "placement": {
+        "x": 895,
+        "y": 558,
+        "w": 452,
+        "h": 191
+      }
+    },
+    {
+      "name": "2560×1440 at 175 %, a portrait 9:16",
+      "client": {
+        "w": 2560,
+        "h": 1440
+      },
+      "scale": 1.75,
+      "aspect": [
+        9,
+        16
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 203,
+        "h": 360,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 1243.857,
+        "y": 446.857,
+        "w": 203,
+        "h": 360
+      },
+      "placement": {
+        "x": 2176,
+        "y": 781,
+        "w": 357,
+        "h": 632
+      }
+    },
+    {
+      "name": "1920×1080 at 125 %, UI scale 150 %, 16:9",
+      "client": {
+        "w": 1920,
+        "h": 1080
+      },
+      "scale": 1.25,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1.5,
+      "layout": {
+        "kind": "mini",
+        "w": 540,
+        "h": 304.5,
+        "right": 24,
+        "bottom": 24
+      },
+      "hole": {
+        "x": 972,
+        "y": 535.5,
+        "w": 540,
+        "h": 304.5
+      },
+      "placement": {
+        "x": 1214,
+        "y": 668,
+        "w": 677,
+        "h": 383
+      }
+    },
+    {
+      "name": "450×300 at 150 %, 16:9: too small, the mini shrinks",
+      "client": {
+        "w": 450,
+        "h": 300
+      },
+      "scale": 1.5,
+      "aspect": [
+        16,
+        9
+      ],
+      "zoom": 1,
+      "layout": {
+        "kind": "mini",
+        "w": 360,
+        "h": 203,
+        "right": 16,
+        "bottom": 16
+      },
+      "hole": {
+        "x": 16,
+        "y": 32.878,
+        "w": 268,
+        "h": 151.122
+      },
+      "placement": {
+        "x": 23,
+        "y": 48,
+        "w": 404,
+        "h": 229
+      }
+    }
+  ]
+}

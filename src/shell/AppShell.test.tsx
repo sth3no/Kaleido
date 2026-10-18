@@ -104,19 +104,20 @@ test('the page is transparent only while a video is shown', () => {
     usePlayerStore.setState({ loaded: true, props: PLAYING });
   });
   expect(shown()).toBe(true);
-  // On the settings page the video goes into the mini player, and its hole layer paints the page
-  // around it (mini/MiniPlayer.tsx): the root stays transparent.
+  // On the settings page the video goes into the mini player, and the page layer paints the page
+  // around it (Ruling R46): the root stays transparent.
+  const pageLayer = () => screen.getByRole('main').closest('[data-page-layer]');
   act(() => {
     useUiStore.getState().setPage('settings');
   });
   expect(shown()).toBe(true);
-  expect(document.querySelector('[data-mini-hole]')).not.toBeNull();
-  // With nothing open the page is opaque.
+  expect(pageLayer()?.getAttribute('data-mini')).toBe('true');
+  // With nothing open the page is opaque, and the root paints it again.
   act(() => {
     usePlayerStore.setState({ loaded: false, props: { 'idle-active': true } });
   });
   expect(shown()).toBe(false);
-  expect(document.querySelector('[data-mini-hole]')).toBeNull();
+  expect(pageLayer()?.getAttribute('data-mini')).toBe('false');
 });
 
 test('the shell starts the bridge to Rust, once', async () => {

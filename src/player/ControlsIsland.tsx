@@ -61,6 +61,8 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
   const island = useRef<HTMLDivElement>(null);
   const subtitlesButton = useRef<HTMLButtonElement>(null);
   const playlistButton = useRef<HTMLButtonElement>(null);
+  const playButton = useRef<HTMLButtonElement>(null);
+  const focusRequest = useUiStore((state) => state.focusRequest);
   const paused = usePlayerStore((state) => selectPaused(state.props));
   // One entry is no list to go through.
   const hasPlaylist = usePlayerStore((state) => selectPlaylist(state.props).length > 1);
@@ -83,6 +85,14 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
     },
     [],
   );
+
+  // The keyboard came back from the mini player ("Back to player"): the focus goes on to play and
+  // pause, not to the page. A hidden island is inert; it takes it when it shows.
+  useEffect(() => {
+    if (focusRequest !== 'play' || hidden) return;
+    playButton.current?.focus();
+    useUiStore.getState().setFocusRequest(null);
+  }, [focusRequest, hidden]);
 
   const subtitlesOpen = panel === 'quick-settings' && quickTab === 'subtitles';
   const playlistOpen = panel === 'playlist';
@@ -135,6 +145,7 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
             onClick={previous}
           />
           <ControlButton
+            ref={playButton}
             label={paused ? t('player.play') : t('player.pause')}
             icon={paused ? PLAY : PAUSE}
             large

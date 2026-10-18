@@ -1,7 +1,8 @@
 /*
- * The layers of the window (AppShell.tsx), bottom to top: the video layer and over it the mini
- * player's hole (0, mini/MiniPlayer.module.css), the page (1), the mini player's frame and the
- * title-bar strip of a docked page (2), the islands (3), the sidebar (4), the notices (5). The
+ * The layers of the window (AppShell.tsx), bottom to top: the video layer (0), the page layer with
+ * the page in it and the mini player's cover (1), the mini player's frame and the title-bar strip
+ * of a docked page (2, mini/MiniPlayer.module.css), the islands (3), the sidebar (4), the notices
+ * (5). The
  * layers above the page let the pointer through where they have nothing (pointer-events: none);
  * what is in them takes it again (pointer-events: auto in its own module).
  */
@@ -22,10 +23,38 @@
   overflow: hidden;
 }
 
-.page {
+/*
+ * The page layer: the whole window, with the page in it. It takes no pointer itself; the page in
+ * it does (below).
+ */
+.pageLayer {
   position: absolute;
   inset: 0;
   z-index: 1;
+  pointer-events: none;
+}
+
+/*
+ * The mini player, and the video on its way there and back (Ruling R46): the layer paints the
+ * page's background itself (the root is transparent then, :root[data-video] below) and is
+ * clipped by the hole where mpv's window is (`--mini-hole`, set on the shell). So nothing of the
+ * page draws over the video, whatever the page paints, and a page's own glass has this
+ * background to blur (the clip makes the layer the backdrop its blur sees).
+ */
+.pageLayer[data-mini='true'] {
+  background: var(--k-color-backdrop);
+  clip-path: var(--mini-hole);
+}
+
+/* Windows 11: the page's background is Mica, behind the window; the hole is still cut. */
+:global(:root[data-mica]) .pageLayer[data-mini='true'] {
+  background: none;
+}
+
+.page {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
 }
 
 /* Over the video the page is the player's controls on transparent ground: the rest is the video's. */
@@ -96,7 +125,7 @@
 /*
  * While a video is shown the page background is transparent: mpv's window is under the WebView
  * (spec 5.1). AppShell sets the attribute; --k-backdrop is what html, body and the root paint.
- * With the mini player the page's background comes from its hole layer instead.
+ * With the mini player the page's background comes from the page layer instead (above).
  */
 :global(:root[data-video]) {
   --k-backdrop: transparent;

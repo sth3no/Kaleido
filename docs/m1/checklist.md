@@ -209,7 +209,19 @@ Nastavení je do Task 22 prázdná; mini přehrávač je na ní i tak.
   zmenší s UI (při 150 % je 540 px široké) a díra pořád sedí na video.
 - [ ] **Omezené animace** (Windows: Nastavení → Usnadnění → Vizuální efekty → Efekty animace
   vypnout): po otevření Nastavení je video hned v rohu, nic se nehýbe a rámeček s videem se
-  prolnou; „Zpět do přehrávače“ skočí na celé okno bez pohybu.
+  prolnou; „Zpět do přehrávače“ skočí na celé okno bez pohybu a přehrávač se prolne z pozadí
+  stránky. Totéž ve Windows 11 s Mica (prolnutí je vidět i tam).
+- [ ] **Žádná spára (Ruling R47):** při měřítku Windows 100, 125, 150 a 175 % a v okně libovolné
+  velikosti (tažením za okraj po jednom pixelu) není mezi stránkou a videem ani na jedné straně
+  světlá nebo černá linka (okno mpv sahá na každé straně o pixel pod stránku).
+- [ ] **Stránka nekreslí přes video (Ruling R46):** obsah Nastavení u pravého dolního rohu (až bude,
+  Task 22: dlouhý seznam posunutý dolů, rozbalená nabídka) je v díře useknutý a video zůstává
+  celé vidět; během zmenšování se text stránky nekreslí přes zmenšující se video.
+- [ ] **Fokus z klávesnice:** Tab na „Zastavit“ a Enter: video se zastaví a fokus je na první
+  položce stránky (bez ní na položce Nastavení v liště), ne nikde. Tab na „Zpět do přehrávače“
+  a Enter: přehrávač se vrátí a fokus je na tlačítku přehrát/pozastavit (viditelný fokus).
+- [ ] Během zmenšování a zvětšování (čtvrt vteřiny) klik do stránky mimo video trefí stránku, ne
+  rámeček.
 - [ ] **Snížit průhlednost:** pruh mini přehrávače je neprůhledný (bez rozmazání). **Vysoký
   kontrast:** rámeček a pruh v systémových barvách, tlačítka jsou vidět.
 - [ ] **Spotřeba v klidu:** v mini režimu v DevTools (Paint flashing) nic nebliká a WebView2 má

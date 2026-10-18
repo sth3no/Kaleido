@@ -325,16 +325,17 @@ mod tests {
     use super::win32::testing::{
         class_name, destroy, pump, set_rect, test_parent, wait_for_child, window_rect,
     };
-    use super::{FullscreenSync, Layout, Surface, SyncAction, video_rect};
+    use super::{FullscreenSync, Layout, PxRect, Surface, SyncAction, to_physical, video_rect};
     use crate::glass::VideoRect;
     use crate::player::testing::{NoEvents, temp_paths};
     use crate::player::{Engine, EngineConfig};
 
-    /// What the glass is told (Ruling R45): the rectangle mpv's window is placed at, in CSS px.
+    /// What the glass is told (Ruling R45): the rectangle mpv's window is placed at, overscan
+    /// included (Ruling R47), in CSS px.
     #[test]
     fn the_video_rect_is_where_mpvs_window_goes_in_css_px() {
         // A mini player in a 1280 × 720 CSS px window at 150 %: 540 × 303 physical px at
-        // (1920 − 24 − 540, 1080 − 24 − 303).
+        // (1920 − 24 − 540, 1080 − 24 − 303), and a pixel more on every side.
         let mini = Layout::Mini {
             w: 360.0,
             h: 202.0,
@@ -342,12 +343,21 @@ mod tests {
             bottom: 16.0,
         };
         assert_eq!(
+            to_physical(mini, 1920, 1080, 1.5),
+            Some(PxRect {
+                x: 1355,
+                y: 752,
+                w: 542,
+                h: 305
+            })
+        );
+        assert_eq!(
             video_rect(mini, 1920, 1080, 1.5),
             Some(VideoRect {
-                x: 904.0,
-                y: 502.0,
-                w: 360.0,
-                h: 202.0
+                x: 1355.0 / 1.5,
+                y: 752.0 / 1.5,
+                w: 542.0 / 1.5,
+                h: 305.0 / 1.5
             })
         );
         assert_eq!(
@@ -359,14 +369,14 @@ mod tests {
                 h: 720.0
             })
         );
-        // A frame of the animation, as rounded as the window is placed.
+        // A frame of the animation, as rounded (and overscanned) as the window is placed.
         assert_eq!(
             video_rect(FRAME, 400, 300, 1.0),
             Some(VideoRect {
-                x: 10.0,
-                y: 20.0,
-                w: 160.0,
-                h: 90.0
+                x: 9.0,
+                y: 19.0,
+                w: 162.0,
+                h: 92.0
             })
         );
         assert_eq!(video_rect(Layout::Hidden, 1920, 1080, 1.5), None);
@@ -449,9 +459,10 @@ mod tests {
         let surface = Surface::new(parent);
         surface.apply(400, 300, 1.0);
         surface.set_layout(FRAME);
-        // Give mpv time to fight the placement; it must not.
+        // Give mpv time to fight the placement; it must not. A pixel past the frame on every
+        // side (layout::OVERSCAN).
         pump(Duration::from_millis(500));
-        assert_eq!(window_rect(video), (110, 120, 160, 90));
+        assert_eq!(window_rect(video), (109, 119, 162, 92));
 
         close(engine, parent);
     }
@@ -468,19 +479,20 @@ mod tests {
         surface.apply(400, 300, 1.0);
         surface.set_layout(MINI);
         pump(Duration::from_millis(500));
-        // Client 400×300 at (100, 100): x = 400 − 16 − 160, y = 300 − 16 − 90.
-        assert_eq!(window_rect(video), (324, 294, 160, 90), "in the corner");
+        // Client 400×300 at (100, 100): x = 400 − 16 − 160, y = 300 − 16 − 90, and a pixel more
+        // on every side (layout::OVERSCAN).
+        assert_eq!(window_rect(video), (323, 293, 162, 92), "in the corner");
 
         set_rect(parent, 150, 150, 400, 300);
         pump(Duration::from_millis(500));
-        assert_eq!(window_rect(video), (374, 344, 160, 90), "after a move");
+        assert_eq!(window_rect(video), (373, 343, 162, 92), "after a move");
 
         set_rect(parent, 150, 150, 500, 400);
         surface.apply(500, 400, 1.0); // what WindowEvent::Resized does
         pump(Duration::from_millis(500));
         assert_eq!(
             window_rect(video),
-            (474, 444, 160, 90),
+            (473, 443, 162, 92),
             "after a resize, in the new corner"
         );
 

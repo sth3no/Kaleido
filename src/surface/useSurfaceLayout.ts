@@ -4,15 +4,18 @@
  * two. It sends Rust the layout (`surfaceSetLayout`) and tells the shell where the video is, so
  * that the shell cuts its hole in the page and draws the mini player's frame on the same numbers.
  *
- * - Into the mini player: a `rect` frame every animation frame for `motion.slow` (250 ms), eased,
- *   from the whole window to the corner; then the docked `mini` layout, which Rust keeps in its
- *   corner while the window is resized. Back to the player: the same frames the other way, then
- *   `full`. Turning round half-way starts from where the video is.
+ * - Into the mini player: a `rect` frame every animation frame for `--k-motion-slow` (250 ms),
+ *   eased, from the whole window to the corner; then the docked `mini` layout, which Rust keeps in
+ *   its corner while the window is resized. Back to the player: the same frames the other way,
+ *   then `full`. Turning round half-way starts from where the video is.
  * - Reduced motion (Windows' animations are off): nothing moves. `hidden`, then `mini` at once, and
- *   the frame fades in (spec 8.6; also the M0 fallback for point 6). Back: `hidden`, then `full`.
+ *   a cover over the video fades out while the frame fades in (spec 8.6; also the M0 fallback for
+ *   point 6). Back: `hidden`, then `full`, and a cover over the whole window fades out.
  * - A file that opens while another page is shown has no big picture to shrink from: it comes up
  *   in the corner the reduced-motion way. One that closes is gone at once: `full`, which the opaque
  *   page covers.
+ * - The layouts go to Rust one at a time: while one is on its way, the frames of the animation
+ *   that come behind it are replaced by the newest, so that a slow answer never piles them up.
  * - The animation's frames are asked for only while it runs. At rest nothing runs per frame (spec
  *   13): the docked rectangle is worked out again only when the window is resized, the UI scale
  *   changes or the video gets another shape, and Rust is told only when the layout changed.
@@ -29,7 +32,7 @@ import { defaultTokens } from '../theme/tokens';
 import { readZoomFrame } from '../theme/zoom';
 import { animateRect, miniLayout, miniRect, videoAspect, type MiniLayout, type Rect } from './mini';
 
-/** How long the video takes into the corner and back: the `motion.slow` token. */
+/** How long the video takes into the corner and back while the tokens are not applied: `motion.slow`. */
 export const MINI_MOTION_MS = defaultTokens('dark').motion.slow;
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
@@ -48,7 +51,11 @@ export interface SurfaceState {
    * docked in a window too small for any mini player.
    */
   rect: Rect | null;
-  /** The mini player came up without moving: its frame fades in. */
+  /**
+   * The video came up without moving (reduced motion): a cover over it fades out, over the corner
+   * (`mini`, and the frame fades in) or over the whole window (`full`, back in the player). For
+   * the duration of the fade.
+   */
   fade: boolean;
 }
 
@@ -58,15 +65,72 @@ function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia(REDUCED_MOTION).matches;
 }
 
-/** The window in CSS px, and the UI scale. */
-function readViewport(): { w: number; h: number; zoom: number } {
-  return { w: window.innerWidth, h: window.innerHeight, zoom: readZoomFrame().zoom };
+/**
+ * The duration of the `motion.slow` token as the root has it now (`--k-motion-slow`,
+ * theme/useAppearance.ts); the token's own value until the tokens are applied.
+ */
+export function motionSlowMs(root: HTMLElement = document.documentElement): number {
+  return durationMs(getComputedStyle(root).getPropertyValue('--k-motion-slow'), MINI_MOTION_MS);
 }
 
-function send(layout: Layout): void {
-  surfaceSetLayout(layout).catch((error: unknown) => {
-    console.warn('surface_set_layout', layout.kind, error);
-  });
+/** A CSS time (`250ms`, `0.3s`) in ms; `fallback` for anything else. */
+export function durationMs(value: string, fallback: number): number {
+  const time = value.trim();
+  const number = Number.parseFloat(time);
+  if (!Number.isFinite(number) || number < 0) return fallback;
+  if (time.endsWith('ms')) return number;
+  return time.endsWith('s') ? number * 1000 : number;
+}
+
+/**
+ * The window in CSS px, and the UI scale. The visual viewport has the size to the fraction of a
+ * px, as Rust has it (a client 1921 px wide at 150 % is 1280.67 CSS px), where `innerWidth` is a
+ * whole number; times its pinch zoom it is the whole window.
+ */
+function readViewport(): { w: number; h: number; zoom: number } {
+  // Not in every engine (jsdom has none).
+  const visual = window.visualViewport as VisualViewport | null | undefined;
+  const exact = visual !== null && visual !== undefined && visual.width > 0 && visual.height > 0;
+  return {
+    w: exact ? visual.width * visual.scale : window.innerWidth,
+    h: exact ? visual.height * visual.scale : window.innerHeight,
+    zoom: readZoomFrame().zoom,
+  };
+}
+
+/**
+ * Sends layouts to Rust one at a time, in order. While one is on its way, a frame of the animation
+ * (`rect`) that waits behind it is dropped as soon as anything comes after it: only the newest
+ * place is worth sending. The other layouts (`full`, `mini`, `hidden`) all go.
+ */
+export function createLayoutSender(
+  post: (layout: Layout) => Promise<unknown> = surfaceSetLayout,
+): (layout: Layout) => void {
+  const waiting: Layout[] = [];
+  let busy = false;
+  const next = () => {
+    const layout = waiting.shift();
+    if (!layout) {
+      busy = false;
+      return;
+    }
+    busy = true;
+    let sent: Promise<unknown>;
+    try {
+      sent = Promise.resolve(post(layout));
+    } catch (error) {
+      sent = Promise.reject(error);
+    }
+    sent.then(next, (error: unknown) => {
+      console.warn('surface_set_layout', layout.kind, error);
+      next();
+    });
+  };
+  return (layout) => {
+    while (waiting.at(-1)?.kind === 'rect') waiting.pop();
+    waiting.push(layout);
+    if (!busy) next();
+  };
 }
 
 const sameLayout = (a: MiniLayout | null, b: MiniLayout | null): boolean =>
@@ -87,6 +151,7 @@ export function useSurfaceLayout(): SurfaceState {
   const aspect = usePlayerStore((state) => videoAspect(state.props['video-params']));
   const mini = onOtherPage && open;
   const [state, setState] = useState<SurfaceState>(FULL);
+  const [send] = useState(() => createLayoutSender());
 
   /** mpv's window fills the window (or is about to: `full` is on its way). */
   const full = useRef(true);
@@ -96,6 +161,8 @@ export function useSurfaceLayout(): SurfaceState {
   const docked = useRef<MiniLayout | null>(null);
   /** Stops the animation that runs. */
   const stop = useRef<(() => void) | null>(null);
+  /** Ends the fade of reduced motion. */
+  const fading = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Whether a file was open the last time the page or the file changed. */
   const wasOpen = useRef(open);
   /** The video's shape now, for the transitions (which do not run again when it changes). */
@@ -111,8 +178,10 @@ export function useSurfaceLayout(): SurfaceState {
     return () => {
       stop.current?.();
       stop.current = null;
+      if (fading.current !== null) clearTimeout(fading.current);
+      fading.current = null;
     };
-  }, []);
+  }, [send]);
 
   // Before the paint: the page that changed is never shown for a frame with the video where it
   // was (an opaque page over it with no hole yet, or a hole where the video has gone).
@@ -121,13 +190,23 @@ export function useSurfaceLayout(): SurfaceState {
     wasOpen.current = open;
     stop.current?.();
     stop.current = null;
+    if (fading.current !== null) clearTimeout(fading.current);
+    fading.current = null;
     const view = readViewport();
     const whole: Rect = { x: 0, y: 0, w: view.w, h: view.h };
+    const ms = motionSlowMs();
 
     const frames = (phase: 'shrinking' | 'growing') => (rect: Rect) => {
       shown.current = rect;
       send({ kind: 'rect', ...rect });
       setState({ phase, rect, fade: false });
+    };
+    /** The fade ends after the token's time: the cover goes (no frame is asked for meanwhile). */
+    const fadeFor = (end: () => void) => {
+      fading.current = setTimeout(() => {
+        fading.current = null;
+        end();
+      }, ms);
     };
 
     if (mini) {
@@ -143,11 +222,14 @@ export function useSurfaceLayout(): SurfaceState {
       if (prefersReducedMotion() || appeared || target === null) {
         send({ kind: 'hidden' });
         dock(true);
+        fadeFor(() => {
+          setState((current) => (current.phase === 'mini' ? { ...current, fade: false } : current));
+        });
         return;
       }
       const from = shown.current ?? whole;
       setState({ phase: 'shrinking', rect: from, fade: false });
-      stop.current = animateRect(from, target, MINI_MOTION_MS, frames('shrinking'), () => {
+      stop.current = animateRect(from, target, ms, frames('shrinking'), () => {
         stop.current = null;
         dock(false);
       });
@@ -155,30 +237,33 @@ export function useSurfaceLayout(): SurfaceState {
     }
 
     if (full.current) return;
-    const finish = () => {
+    const finish = (fade: boolean) => {
       full.current = true;
       shown.current = null;
       docked.current = null;
       send({ kind: 'full' });
-      setState(FULL);
+      setState({ ...FULL, fade });
     };
     // The file closed: nothing to grow, and the page that stays is opaque again.
     if (!open) {
-      finish();
+      finish(false);
       return;
     }
     const from = shown.current;
     if (prefersReducedMotion() || from === null) {
       send({ kind: 'hidden' });
-      finish();
+      finish(true);
+      fadeFor(() => {
+        setState((current) => (current.phase === 'full' ? FULL : current));
+      });
       return;
     }
     setState({ phase: 'growing', rect: from, fade: false });
-    stop.current = animateRect(from, whole, MINI_MOTION_MS, frames('growing'), () => {
+    stop.current = animateRect(from, whole, ms, frames('growing'), () => {
       stop.current = null;
-      finish();
+      finish(false);
     });
-  }, [mini, open]);
+  }, [mini, open, send]);
 
   // Docked: the corner follows the window, the UI scale and the video's shape. Rust moves mpv's
   // window with the window by itself; the hole needs the new rectangle, and Rust a new layout
@@ -210,7 +295,7 @@ export function useSurfaceLayout(): SurfaceState {
       window.removeEventListener('resize', update);
       root.disconnect();
     };
-  }, [atRest, aspect]);
+  }, [atRest, aspect, send]);
 
   return state;
 }

@@ -48,7 +48,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use windows::core::Interface;
 
-use super::layout::{Layout, PxRect, to_physical};
+use super::layout::{PxRect, rect_to_physical};
 
 /// A window button the UI draws and Windows hit-tests itself, as the UI measured it: CSS px of the
 /// window (before the display scale), like a glass rectangle. Today only the maximise/restore
@@ -75,13 +75,10 @@ pub fn to_physical_rects(
     buttons
         .iter()
         .filter_map(|button| {
-            let layout = Layout::Rect {
-                x: button.x,
-                y: button.y,
-                w: button.w,
-                h: button.h,
-            };
-            to_physical(layout, client_w, client_h, scale)
+            // Where the UI drew it, without the overscan mpv's window gets.
+            rect_to_physical(
+                button.x, button.y, button.w, button.h, client_w, client_h, scale,
+            )
         })
         .collect()
 }

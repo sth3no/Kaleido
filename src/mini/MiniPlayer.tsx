@@ -2,22 +2,28 @@
  * The mini player (spec 8.3; pages-navigation-v2.html, screen 2): while a file is open and another
  * page is shown, the video plays in the bottom-right corner of the opaque page. Where it is comes
  * from `surface/useSurfaceLayout.ts`, in CSS px of the window, the numbers Rust places mpv's
- * window by; `useMiniBox` turns them into the elements' own px under the UI scale, once, for both
- * parts:
+ * window by; `useMiniBox` turns them into the elements' own px under the UI scale, once, for
+ * everything that is drawn on them:
  *
- * - `MiniHole`, under the page's content: the page's background with a hole where mpv's window
- *   is. The shell makes the root transparent while it is up (`data-video`), so the hole is the
- *   only place the video shows through, and the page around it stays as opaque as it was. With
- *   reduced motion a cover lies over the hole and fades out.
- * - `MiniPlayer`, over the page's content: the frame (edge and shadow) and, once docked, the glass
- *   bar with play or pause, back to the player and stop. Its glass is one of the shader's regions:
- *   Rust moves it into mpv's window (Ruling R45). With the glass off it is opaque, as every glass
- *   is (theme/glass.module.css).
+ * - The hole: the shell's page layer paints the page's background and is clipped by `holePath`
+ *   (Ruling R46, shell/AppShell.tsx), so that nothing of the page draws over the video. Rust
+ *   places mpv's window a pixel past it on every side (Ruling R47), so no seam shows.
+ * - `MiniPlayer`, over the page: the frame (edge and shadow) and, once docked, the glass bar with
+ *   play or pause, back to the player and stop. Its glass is one of the shader's regions: Rust
+ *   moves it into mpv's window (Ruling R45). With the glass off it is opaque, as every glass is
+ *   (theme/glass.module.css). While the video moves the frame takes no pointer: at the first and
+ *   the last frame it is the whole window.
+ * - `MiniCover`, with reduced motion: a cover over the video (or over the whole window, back in
+ *   the player) that fades out, so that the video fades in instead of moving.
  *
  * The pointer over the video is the mini player's, not mpv's: the video layer under the page sends
  * mpv no pointer while the video is not the whole window (shell/VideoLayer.tsx). A double click
  * goes back to the player, and mpv never sees it, so it does not switch to fullscreen. A single
  * click does nothing: it would also come twice in every double click.
+ *
+ * With the keyboard, Stop leaves the focus on the page (its first control, else the sidebar's
+ * current page) and Back to player on the player's play and pause button: the mini player and its
+ * buttons go away, and the focus must not fall to nothing.
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
@@ -60,7 +66,8 @@ export function miniBox(rect: Rect, frame: ZoomFrame, radius: number): MiniBox {
 
 /**
  * The clip path of the page around the hole: everything (an area larger than any window), less the
- * rounded box. The even-odd rule leaves what is in both out.
+ * rounded box. The even-odd rule leaves what is in both out. For an element that covers the window
+ * from its top left corner (the shell's page layer).
  */
 export function holePath({ x, y, w, h, r }: MiniBox): string {
   const all = 'M0 0H100000V100000H0Z';
@@ -116,20 +123,23 @@ const placed = ({ x, y, w, h, r }: MiniBox): CSSProperties => ({
   borderRadius: r,
 });
 
-export interface MiniHoleProps {
-  box: MiniBox;
-  /** The mini player came up without moving: the cover over the hole fades out. */
-  fade: boolean;
+export interface MiniCoverProps {
+  /** Over the mini player; `null` for the whole window (back in the player). */
+  box: MiniBox | null;
 }
 
-/** The page's background around the video (see the top of the file). */
-export function MiniHole({ box, fade }: MiniHoleProps) {
-  const hole = { '--mini-hole': holePath(box) } as CSSProperties;
+/**
+ * The cover of reduced motion: the page's background (a plain colour under Mica, which it cannot
+ * paint) over the video, fading out once. A new one for each fade (`key`).
+ */
+export function MiniCover({ box }: MiniCoverProps) {
   return (
-    <>
-      <div className={styles.backdrop} style={hole} aria-hidden data-mini-hole />
-      {fade && <div className={styles.cover} style={placed(box)} aria-hidden />}
-    </>
+    <div
+      className={styles.cover}
+      style={box ? placed(box) : { inset: 0 }}
+      aria-hidden
+      data-mini-cover={box ? 'mini' : 'full'}
+    />
   );
 }
 
@@ -146,9 +156,25 @@ const noContextMenu = (e: MouseEvent) => {
   e.preventDefault();
 };
 
-const backToPlayer = () => {
-  useUiStore.getState().setPage('player');
-};
+/** What takes the focus first on a page. */
+const FOCUSABLE = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+/** Pressed with the keyboard: Enter and Space click with no click count. */
+const byKeyboard = (e: MouseEvent) => e.detail === 0;
+
+/** The page's first control, else the sidebar's item of the page that is shown. */
+function focusThePage(): void {
+  const first = document.querySelector('main')?.querySelector<HTMLElement>(FOCUSABLE);
+  const current = document.querySelector<HTMLElement>('nav [aria-current="page"]');
+  (first ?? current)?.focus();
+}
 
 /** The frame and the controls over the video (see the top of the file). */
 export default function MiniPlayer({ box, phase, fade }: MiniPlayerProps) {
@@ -163,8 +189,14 @@ export default function MiniPlayer({ box, phase, fade }: MiniPlayerProps) {
   const togglePause = () => {
     sendCommand({ type: 'togglePause' });
   };
-  const stop = () => {
+  const stop = (e: MouseEvent) => {
     sendCommand({ type: 'stop' });
+    if (byKeyboard(e)) focusThePage();
+  };
+  const back = (e: MouseEvent) => {
+    const ui = useUiStore.getState();
+    if (byKeyboard(e)) ui.setFocusRequest('play');
+    ui.setPage('player');
   };
 
   return (
@@ -177,7 +209,7 @@ export default function MiniPlayer({ box, phase, fade }: MiniPlayerProps) {
       data-fade={fade}
       onContextMenu={noContextMenu}
     >
-      <div className={styles.video} onDoubleClick={backToPlayer} data-mini-video />
+      <div className={styles.video} onDoubleClick={back} data-mini-video />
       {docked && (
         <div
           ref={bar}
@@ -190,7 +222,7 @@ export default function MiniPlayer({ box, phase, fade }: MiniPlayerProps) {
             icon={paused ? PLAY : PAUSE}
             onClick={togglePause}
           />
-          <ControlButton label={t('player.mini.back')} icon={EXPAND} onClick={backToPlayer} />
+          <ControlButton label={t('player.mini.back')} icon={EXPAND} onClick={back} />
           <ControlButton label={t('player.mini.stop')} icon={STOP} onClick={stop} />
         </div>
       )}

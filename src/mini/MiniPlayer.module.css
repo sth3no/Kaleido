@@ -1,34 +1,18 @@
 /*
  * The mini player (MiniPlayer.tsx; pages-navigation-v2.html, screen 2). The boxes are placed by
- * script, in the elements' own px, on the numbers Rust places mpv's window by.
- *
- * The page around the hole: while the mini player is up the root is transparent (`data-video`,
- * AppShell.module.css), and this layer paints what the root would, the page's background, with
- * the hole cut out of it (`--mini-hole`, a clip path). It lies under the page's content, the
- * sidebar and everything else, and takes no pointer.
+ * script, in the elements' own px, on the numbers Rust places mpv's window by. The page around the
+ * video is the shell's page layer, clipped by the hole (AppShell.module.css, Ruling R46).
  */
-.backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: var(--k-color-backdrop);
-  clip-path: var(--mini-hole);
-}
-
-/* Windows 11: Mica is the page's background, and Mica is behind the window everywhere already. */
-:global(:root[data-mica]) .backdrop {
-  background: none;
-}
 
 /*
- * With reduced motion the video comes up in its place without moving (surface/useSurfaceLayout.ts):
- * a cover in the page's background lies over the hole and fades out while the frame fades in.
- * Both are opacity transitions from where `@starting-style` puts them; no keyframes.
+ * Reduced motion: the video comes up in its place without moving (surface/useSurfaceLayout.ts),
+ * and a cover in the page's background lies over it and fades out, over the corner while the
+ * frame fades in, or over the whole window on the way back to the player. Opacity transitions
+ * from where `@starting-style` puts them; no keyframes. Over the page layer, under the frame.
  */
 .cover {
   position: absolute;
-  z-index: 0;
+  z-index: 1;
   pointer-events: none;
   background: var(--k-color-backdrop) fixed;
   opacity: 0;
@@ -41,8 +25,12 @@
   }
 }
 
+/*
+ * Windows 11: the page's background is Mica, which no element can paint. The cover is the plain
+ * colour of the background instead, so that it still fades.
+ */
 :global(:root[data-mica]) .cover {
-  background: none;
+  background: var(--k-color-bg);
 }
 
 /* The frame over the video: its edge and shadow, above the page's content. */
@@ -59,6 +47,15 @@
   .frame[data-fade='true'] {
     opacity: 0;
   }
+}
+
+/*
+ * While the video moves the frame takes no pointer: at the first and the last frame it covers the
+ * whole window, and the page under it stays the page's.
+ */
+.frame[data-phase='shrinking'],
+.frame[data-phase='growing'] {
+  pointer-events: none;
 }
 
 /* The video: it takes the pointer here, so that the page under it does not. */
