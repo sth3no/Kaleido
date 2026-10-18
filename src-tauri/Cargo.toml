@@ -29,7 +29,7 @@ mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # SHA-256 of the files Kaleido pins by checksum: every file a plugin install puts in place
-# (plugins/install.rs); the tool downloads of M2 are to check theirs with it. Already in the
+# (plugins/install.rs), and the downloads of yt-dlp and Deno (tools/checksum.rs). Already in the
 # build through tauri.
 sha2 = "0.10"
 # The system's language for the "system" language setting (system_locale in commands.rs).
@@ -42,7 +42,18 @@ tracing = "0.1"
 tracing-appender = "0.2.3"
 # Plain text lines (no colours) and the `log` records of the crates that do not use tracing.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "tracing-log"] }
+# The downloads of yt-dlp and Deno from GitHub Releases (tools/http.rs). TLS through native-tls,
+# which is schannel on Windows with the system's root certificates: no rustls, so no ring or
+# aws-lc-rs and the C build tools they need, and no root bundle of its own (webpki-root-certs is
+# CDLA-Permissive-2.0, a license not on the accepted list). `native-tls-no-default` is the
+# feature for that in ureq 3.4 (checked on crates.io 2026-10-19; the README calls it unstable, so
+# a newer ureq may rename it); no gzip: release assets are not sent compressed.
+ureq = { version = "3.4.2", default-features = false, features = ["native-tls-no-default"] }
 url = "2"
+# deno.exe out of Deno's release zip (tools/mod.rs). Deflate only, through flate2 (in the build
+# through Tauri already) with zlib-rs, which is pure Rust (flate2 then inflates with it for
+# Tauri's images too): no bzip2, zstd, lzma or AES.
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The version wry uses, so that its WebView2 interfaces are the ones Tauri hands out.
 webview2-com = "0.39"
 windows = { version = "0.62", features = [

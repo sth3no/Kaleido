@@ -31,6 +31,9 @@ pub struct AppPaths {
     pub cache_dir: PathBuf,
     /// `<local_dir>\crash`.
     pub crash_dir: PathBuf,
+    /// `<local_dir>\tools`: the managed `yt-dlp.exe` and `deno.exe` and their `tools.json`
+    /// (spec 4.3, 6.6).
+    pub tools_dir: PathBuf,
     /// `resources\` of the installation: `defaults\`, `essentials\<name>\<file>`, ...
     pub resource_dir: PathBuf,
     /// The user's Desktop: mpv `screenshot-dir`.
@@ -62,6 +65,7 @@ impl AppPaths {
             logs_dir: local_dir.join("logs"),
             cache_dir: local_dir.join("cache"),
             crash_dir: local_dir.join("crash"),
+            tools_dir: local_dir.join("tools"),
             state_dir,
             local_dir,
             resource_dir: resources.join("resources"),
@@ -103,6 +107,7 @@ impl AppPaths {
             &self.logs_dir,
             &self.cache_dir,
             &self.crash_dir,
+            &self.tools_dir,
         ] {
             std::fs::create_dir_all(dir)?;
         }
@@ -138,6 +143,7 @@ mod tests {
         assert_eq!(p.logs_dir, Path::new("L/Kaleido/logs"));
         assert_eq!(p.cache_dir, Path::new("L/Kaleido/cache"));
         assert_eq!(p.crash_dir, Path::new("L/Kaleido/crash"));
+        assert_eq!(p.tools_dir, Path::new("L/Kaleido/tools"));
         assert_eq!(p.resource_dir, Path::new("res/resources"));
         assert_eq!(p.desktop_dir, Path::new("D"));
         assert_eq!(p.exe_dir, Path::new("E"));
@@ -169,6 +175,7 @@ mod tests {
             &p.logs_dir,
             &p.cache_dir,
             &p.crash_dir,
+            &p.tools_dir,
         ] {
             assert!(dir.is_dir(), "{} was not created", dir.display());
         }

@@ -12,6 +12,7 @@ pub mod surface;
 pub mod system;
 pub mod themes;
 pub mod thumbs;
+pub mod tools;
 
 #[cfg(test)]
 mod ipc_contract_tests;
