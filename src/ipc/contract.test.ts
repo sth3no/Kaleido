@@ -291,7 +291,7 @@ const CAPTION_BUTTON: Shape<CaptionButton> = {
   fields: { x: 'required', y: 'required', w: 'required', h: 'required' },
 };
 const END_FILE: Shape<EndFile> = {
-  fields: { reason: 'required', error: 'required', file: 'required' },
+  fields: { reason: 'required', error: 'required', file: 'required', continues: 'required' },
 };
 const LOG_LINE: Shape<LogLine> = {
   fields: { level: 'required', prefix: 'required', text: 'required' },
@@ -466,12 +466,17 @@ describe('fixtures type-check against the IPC types', () => {
     expect(eventFixtures['player:end-file'].map(({ reason, error }) => [reason, error !== null])).toEqual(
       eventFixtures['player:end-file'].map(({ reason }) => [reason, reason === 'error']),
     );
-    // The file is a string or null (an entry the playlist no longer has), and an error has both.
-    const errors = eventFixtures['player:end-file'].filter(({ reason }) => reason === 'error');
+    // Only an error is told with its file (a string, or null for an entry the playlist no longer
+    // has) and with whether mpv goes on; the fixture has an error of each kind.
+    const ends = eventFixtures['player:end-file'];
+    const errors = ends.filter(({ reason }) => reason === 'error');
     expect(errors.some(({ file }) => typeof file === 'string')).toBe(true);
     expect(errors.some(({ file }) => file === null)).toBe(true);
-    for (const { file } of eventFixtures['player:end-file']) {
+    expect(errors.some(({ continues }) => continues)).toBe(true);
+    expect(errors.some(({ continues }) => !continues)).toBe(true);
+    for (const { reason, file, continues } of ends) {
       expect(file === null || typeof file === 'string').toBe(true);
+      if (reason !== 'error') expect([file, continues]).toEqual([null, false]);
     }
     expectAll(eventFixtures['player:log'].map(({ level }) => level), LOG_LEVELS, 'log level');
     const glass = eventFixtures['glass:state'];

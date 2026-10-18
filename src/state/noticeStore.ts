@@ -29,10 +29,10 @@ interface NoticeBase {
 
 /**
  * What the card of a file that could not be played has to say about what happens now (spec 10.1,
- * Ruling R41), decided when the file failed:
+ * Rulings R41, R43), from `continues` of `player:end-file`:
  *
- * - `continues`: another entry follows the failed one, and mpv goes on with it by itself.
- * - `open`: the failure left mpv with nothing to play; the user has to open something.
+ * - `continues`: mpv goes on by itself (another entry follows, or the playlist loops).
+ * - `open`: it does not, or Rust could not tell; the user has to open something.
  */
 export type PlaybackRemedy = 'continues' | 'open';
 

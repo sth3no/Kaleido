@@ -124,7 +124,7 @@ test('it shows again for the next file of the playlist, whose end cleared loaded
   expect(capsule()).toBeNull();
 
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed', file: null });
+    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false });
     usePlayerStore.getState().applyChanges({ 'media-title': 'Druhý' });
   });
 

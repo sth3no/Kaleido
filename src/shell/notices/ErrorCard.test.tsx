@@ -62,12 +62,16 @@ const advance = (ms: number) => {
 const cards = () => screen.queryAllByRole('listitem');
 
 /**
- * `player:end-file` for a file that failed, `file` being the playlist entry Rust names; a new object
- * each time, as every event is one.
+ * `player:end-file` for a file that failed, `file` being the playlist entry Rust names and
+ * `continues` whether Rust says mpv goes on by itself; a new object each time, as every event is one.
  */
-const fails = (error: string | null = 'loading failed', file: string | null = null) => {
+const fails = (
+  error: string | null = 'loading failed',
+  file: string | null = null,
+  continues = false,
+) => {
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error, file });
+    usePlayerStore.getState().endFile({ reason: 'error', error, file, continues });
   });
 };
 
@@ -228,14 +232,14 @@ describe('a file that cannot be played', () => {
 
   test('only an error makes a card, and one that was there before the stack is no card', () => {
     act(() => {
-      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed', file: null } });
+      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed', file: null, continues: false } });
     });
     render(<ErrorCards />);
     expect(cards()).toHaveLength(0);
 
     for (const reason of ['eof', 'stop', 'quit', 'redirect'] as const) {
       act(() => {
-        usePlayerStore.getState().endFile({ reason, error: null, file: 'C:\\Videa\\a.mkv' });
+        usePlayerStore.getState().endFile({ reason, error: null, file: null, continues: false });
       });
     }
     expect(cards()).toHaveLength(0);
@@ -271,78 +275,74 @@ describe('a file that cannot be played', () => {
   });
 });
 
-describe('what the card says is going on (Ruling R41)', () => {
-  const NAMES = ['a.mkv', 'b.mkv', 'c.mkv'];
+describe('what the card says is going on (Rulings R41, R43)', () => {
+  const SENTENCE = 'Playback continues with the next file.';
 
-  test('error card says playback continues only with a following entry, and offers Open file only when playback ended', () => {
+  test('error card says playback continues only when mpv goes on, and offers Open file only when playback ended', () => {
     render(<ErrorCards />);
 
-    // The first of three fails: mpv goes on with the second by itself.
-    playlist(0, ...NAMES);
-    fails('loading failed', 'a.mkv');
+    // Rust says that mpv goes on: an entry follows the one that failed.
+    fails('loading failed', 'a.mkv', true);
     const continuing = cards()[0];
-    expect(within(continuing).getByText('Playback continues with the next file.')).toBeTruthy();
+    expect(within(continuing).getByText(SENTENCE)).toBeTruthy();
     expect(within(continuing).queryByRole('button', { name: 'Open file' })).toBeNull();
 
-    // The last one fails: nothing is left to play, and the way on is to open a file.
-    playlist(2, ...NAMES);
-    fails('loading failed', 'c.mkv');
+    // Rust says that it does not: the last one failed, and nothing is left to play.
+    fails('loading failed', 'c.mkv', false);
     const ended = cards()[0];
-    expect(within(ended).queryByText('Playback continues with the next file.')).toBeNull();
+    expect(within(ended).queryByText(SENTENCE)).toBeNull();
     expect(within(ended).getByRole('button', { name: 'Open file' })).toBeTruthy();
 
-    // The first card was decided when its file failed: the playlist that moved since changes nothing.
-    expect(within(cards()[1]).getByText('Playback continues with the next file.')).toBeTruthy();
+    // The first card keeps what it was told.
+    expect(within(cards()[1]).getByText(SENTENCE)).toBeTruthy();
     expect(within(cards()[1]).queryByRole('button', { name: 'Open file' })).toBeNull();
   });
 
   test('there is no Next: mpv goes on by itself, and Next would skip a file nobody saw', () => {
     render(<ErrorCards />);
-    playlist(0, ...NAMES);
-    fails('loading failed', 'a.mkv');
-    playlist(2, ...NAMES);
-    fails('loading failed', 'c.mkv');
+    fails('loading failed', 'a.mkv', true);
+    fails('loading failed', 'c.mkv', false);
 
     expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
     expect(sentCommands('player_command')).toEqual([]);
   });
 
-  test('it goes by where the failed file stood, not by the entry that is current now', () => {
+  test('it is Rust\'s word: the UI\'s own copy of the playlist is not asked, however old it is', () => {
     render(<ErrorCards />);
-    // mpv has gone on: the current entry is the last one, but the one that failed was the first.
-    playlist(2, ...NAMES);
-    fails('loading failed', 'a.mkv');
-    expect(within(cards()[0]).getByText('Playback continues with the next file.')).toBeTruthy();
-
-    // And the other way round: the current entry is the first, but the last one failed.
-    playlist(0, ...NAMES);
-    fails('loading failed', 'c.mkv');
-    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
-  });
-
-  test('a file that was alone in the playlist, or that Rust could not name, leaves Open file', () => {
-    render(<ErrorCards />);
-    playlist(0, 'a.mkv');
-    fails('loading failed', 'a.mkv');
-    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
-
-    // No file, no playlist: nothing is known to play next.
+    // A list was just opened and its first file fails at once: the UI still has the list from
+    // before (none), because the change of the playlist is behind the events that are queued.
     act(() => {
       usePlayerStore.getState().applyChanges({ playlist: [] });
     });
-    fails('loading failed', null);
+    fails('loading failed', 'a.mkv', true);
+    expect(within(cards()[0]).getByText(SENTENCE)).toBeTruthy();
+    expect(within(cards()[0]).queryByRole('button', { name: 'Open file' })).toBeNull();
+
+    // And a list that shows entries after the failed one does not make it go on.
+    playlist(0, 'a.mkv', 'b.mkv', 'c.mkv');
+    fails('loading failed', 'a.mkv', false);
+    expect(within(cards()[0]).queryByText(SENTENCE)).toBeNull();
     expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
-    expect(within(cards()[0]).queryByText('Playback continues with the next file.')).toBeNull();
+  });
+
+  test('a file Rust could not name still has the word on whether mpv goes on', () => {
+    render(<ErrorCards />);
+    // A playlist that loops: mpv starts over, whichever file it was.
+    fails('loading failed', null, true);
+    expect(within(cards()[0]).getByText('Cannot play this file')).toBeTruthy();
+    expect(within(cards()[0]).getByText(SENTENCE)).toBeTruthy();
+
+    // Nothing is known to play next.
+    fails('loading failed', null, false);
+    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
+    expect(within(cards()[0]).queryByText(SENTENCE)).toBeNull();
   });
 
   test('the sentence is part of what is read out with the failure', () => {
     render(<ErrorCards />);
-    playlist(0, ...NAMES);
-    fails('loading failed', 'a.mkv');
+    fails('loading failed', 'a.mkv', true);
 
-    expect(within(cards()[0]).getByRole('alert').textContent).toContain(
-      'Playback continues with the next file.',
-    );
+    expect(within(cards()[0]).getByRole('alert').textContent).toContain(SENTENCE);
   });
 
   test('Open file asks for the open dialog and closes the card', () => {
@@ -373,9 +373,8 @@ describe('what the card says is going on (Ruling R41)', () => {
 
   test('Close and Details are always there', () => {
     render(<ErrorCards />);
-    playlist(0, ...NAMES);
-    fails('loading failed', 'a.mkv');
-    fails('loading failed', null);
+    fails('loading failed', 'a.mkv', true);
+    fails('loading failed', null, false);
 
     for (const card of cards()) {
       expect(within(card).getByRole('button', { name: 'Close' })).toBeTruthy();

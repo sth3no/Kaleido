@@ -9,11 +9,12 @@
  *
  * - `player:end-file` with `reason: "error"`: a playback card. The text comes from mpv's error
  *   string (`playbackError.ts`). The name is the file Rust says failed (`file`, the playlist entry
- *   by the id of the event: nothing here looks at the entry that is current, which has moved on),
- *   and what the card offers depends on where that file stood in the playlist when it failed
- *   (`playbackRemedy`). The details are the tail of mpv's log (`logTail`); the lines that explain
- *   the failure may arrive after `end-file`, so for a moment longer the card also takes the lines
- *   that come in.
+ *   by the id of the event), and what the card offers is Rust's `continues`: whether mpv goes on
+ *   by itself (Rulings R42, R43). Rust has them from the playlist as it is when the file fails;
+ *   the UI's copy of it may be older than that, so nothing here reads it, and nothing looks at
+ *   the entry that is current, which has moved on. The details are the tail of mpv's log
+ *   (`logTail`); the lines that explain the failure may arrive after `end-file`, so for a moment
+ *   longer the card also takes the lines that come in.
  * - `system:paste-empty` (Ctrl+V found no link) while the view is not the start screen. The start
  *   screen answers that itself, with its paste field (`HomeScreen.tsx`), and is mounted exactly
  *   while the view is `home`; so the two never both react.
@@ -51,7 +52,7 @@ import glass from '../../theme/glass.module.css';
 import { selectView } from '../view';
 import ErrorCard from './ErrorCard';
 import styles from './ErrorCards.module.css';
-import { playbackErrorKey, playbackRemedy } from './playbackError';
+import { playbackErrorKey } from './playbackError';
 
 /** How long after `end-file` a new line of mpv's log still belongs to the failed file, ms. */
 export const LOG_FOLLOW_MS = 1500;
@@ -67,8 +68,8 @@ function useNoticeFeed(): void {
           kind: 'playback',
           message: playbackErrorKey(end.error),
           name: nameOfFile(end.file),
-          // Where the file stood in the playlist now, when it failed: mpv moves on at once.
-          remedy: playbackRemedy(state.props, end.file),
+          // Rust read the playlist when the file failed; the UI's copy may be older.
+          remedy: end.continues ? 'continues' : 'open',
           error: end.error,
           lines: state.logTail.slice(-DETAIL_LINES),
         });

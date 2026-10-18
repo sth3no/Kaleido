@@ -4,11 +4,11 @@
  * mpv's own word for the error and the last lines of its log. A notice of the app (Ctrl+V without
  * a link, a dropped link that was refused) is a message and Close.
  *
- * - What happens now follows from where the failed file stood in the playlist when it failed
- *   (`playbackRemedy`). mpv always goes on by itself (spec 10.2), so there is no "Next" to offer:
- *   it would skip an entry that was never seen. Where another entry follows, the card says that
- *   playback continues with the next file; where the failure left mpv with nothing to play, it
- *   offers "Open file", the way out.
+ * - What happens now is Rust's word, `continues` of `player:end-file`, from the playlist as it was
+ *   when the file failed. mpv goes on by itself (spec 10.2), so there is no "Next" to offer: it
+ *   would skip an entry that was never seen. Where mpv goes on, the card says that playback
+ *   continues with the next file; where the failure left it with nothing to play, the card offers
+ *   "Open file", the way out.
  * - It goes by itself after 8 s. The clock is held while someone is dealing with the card: the
  *   pointer is over it, the focus is in it, or its details are open (a card that is being read, or
  *   copied from, must not vanish); the 8 s start anew when that ends.

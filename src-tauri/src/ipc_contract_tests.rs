@@ -743,24 +743,27 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
         EndReason::Error,
         EndReason::Redirect,
     ];
-    // The file is the playlist entry that ended (a string), or none where the playlist no longer
-    // has it (null); the fixture has both for an error.
+    // Only an error is told with its file (a string, or null where the playlist no longer has the
+    // entry) and with whether mpv goes on by itself; the other ends have neither. The fixture has
+    // an error that continues, one that does not, and one without a file.
+    let failed_file = || Some(r"C:\Videa\poškozený.mkv".to_owned());
     for reason in end_reasons {
+        let error = reason == EndReason::Error;
         ui_events.push(PlayerEvent::EndFile {
             reason,
-            error: (reason == EndReason::Error).then(|| "loading failed".to_owned()),
-            file: match reason {
-                EndReason::Eof => Some(r"C:\Videa\a.mkv".to_owned()),
-                EndReason::Error => Some(r"C:\Videa\poškozený.mkv".to_owned()),
-                _ => None,
-            },
+            error: error.then(|| "loading failed".to_owned()),
+            file: if error { failed_file() } else { None },
+            continues: error,
         });
     }
-    ui_events.push(PlayerEvent::EndFile {
-        reason: EndReason::Error,
-        error: Some("loading failed".to_owned()),
-        file: None,
-    });
+    for (file, continues) in [(failed_file(), false), (None, false)] {
+        ui_events.push(PlayerEvent::EndFile {
+            reason: EndReason::Error,
+            error: Some("loading failed".to_owned()),
+            file,
+            continues,
+        });
+    }
     covers(
         "EndReason",
         &end_reasons,

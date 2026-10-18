@@ -336,11 +336,23 @@ export type OsdDimensions = { w: number; h: number; ml: number; mr: number; mt: 
 export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
 
 /**
- * The payload of `player:end-file`. `file` is the playlist entry that ended: its `filename` as
- * mpv's `playlist` has it (a path, with the `\\?\` of a long one, or a link), found by the id of
- * the entry; `null` where the playlist no longer has it.
+ * The payload of `player:end-file`. For an error (`reason: "error"`), and only then, Rust has looked
+ * at mpv's playlist as it is at that moment:
+ *
+ * - `file` is the entry that failed: its `filename` as the playlist has it (a path, with the
+ *   `\\?\` of a long one, or a link), found by the id of the entry; `null` where the playlist no
+ *   longer has it.
+ * - `continues`: mpv goes on by itself, because an entry follows the failed one, or the playlist
+ *   loops and has another entry to play. `false` where it does not, or Rust could not tell.
+ *
+ * Any other end has `file: null` and `continues: false`.
  */
-export type EndFile = { reason: EndReason; error: string | null; file: string | null };
+export type EndFile = {
+  reason: EndReason;
+  error: string | null;
+  file: string | null;
+  continues: boolean;
+};
 
 /** The payload of `player:log`: only the warnings and errors of mpv's log. */
 export type LogLine = { level: 'warn' | 'error' | 'fatal'; prefix: string; text: string };

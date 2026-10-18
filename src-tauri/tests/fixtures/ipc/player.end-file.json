@@ -1,8 +1,9 @@
 [
-  { "reason": "eof", "error": null, "file": "C:\\Videa\\a.mkv" },
-  { "reason": "stop", "error": null, "file": null },
-  { "reason": "quit", "error": null, "file": null },
-  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv" },
-  { "reason": "redirect", "error": null, "file": null },
-  { "reason": "error", "error": "loading failed", "file": null }
+  { "reason": "eof", "error": null, "file": null, "continues": false },
+  { "reason": "stop", "error": null, "file": null, "continues": false },
+  { "reason": "quit", "error": null, "file": null, "continues": false },
+  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": true },
+  { "reason": "redirect", "error": null, "file": null, "continues": false },
+  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": false },
+  { "reason": "error", "error": "loading failed", "file": null, "continues": false }
 ]
