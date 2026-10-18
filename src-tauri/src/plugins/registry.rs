@@ -4,7 +4,9 @@
 //! only ever describes what Kaleido itself put there.
 //!
 //! `load` never fails and `save` is atomic, as for `settings.json`. The file is Kaleido's, but it
-//! is the user's folder: keys this Kaleido does not know survive a load and a save.
+//! is the user's folder: keys this Kaleido does not know survive a load and a save, and a file
+//! that is there but cannot be read, or cannot be put aside when it is not a registry, is never
+//! replaced (Ruling R23): the registry is then [`refused`](Registry::refused) and `save` fails.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -37,6 +39,10 @@ pub struct Registry {
     /// are.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+    /// Why `save` is refused: the file is there, but what it holds could neither be read nor be
+    /// kept safe, and writing would replace it. Not part of the file.
+    #[serde(skip)]
+    refused: Option<String>,
 }
 
 impl Default for Registry {
@@ -46,6 +52,7 @@ impl Default for Registry {
             plugins: BTreeMap::new(),
             removed: BTreeSet::new(),
             extra: Map::new(),
+            refused: None,
         }
     }
 }
@@ -101,34 +108,65 @@ impl Registry {
     /// - missing: an empty one; nothing is written until the first [`save`](Registry::save);
     /// - not a registry this Kaleido understands (not JSON, not an object, a field of the wrong
     ///   type or an unknown `source`, a `version` other than [`VERSION`]): moved aside to
-    ///   `plugins.json.bad-<unix time>` as for `settings.json` (Ruling R23), and an empty one
-    ///   is used. The scripts themselves are in `scripts\`, so nothing is lost: they show up as
-    ///   manual ones until the user installs again;
-    /// - there but unreadable: an empty one, with an error in the log.
+    ///   `plugins.json.bad-<unix time>` as for `settings.json` (Ruling R23), or copied there if it
+    ///   cannot be moved, and an empty one is used. The scripts themselves are in `scripts\`, so
+    ///   nothing is lost: they show up as manual ones until the user installs again;
+    /// - there but unreadable (another program has it open, no permission), or not a registry and
+    ///   neither movable nor copyable: an empty one that is [`refused`](Registry::refused). The
+    ///   file may hold records Kaleido cannot see, so nothing replaces it.
     pub fn load(path: impl AsRef<Path>) -> Registry {
         let path = path.as_ref();
+        Registry::load_keeping_aside_as(path, &aside(path))
+    }
+
+    /// [`load`](Registry::load) with the place a registry that cannot be used goes to chosen by
+    /// the caller, which is how the tests make that fail.
+    fn load_keeping_aside_as(path: &Path, aside: &Path) -> Registry {
         let bytes = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Registry::default(),
             Err(error) => {
                 tracing::error!(
-                    "cannot read {}: {error}; the plugins start without a registry",
+                    "cannot read {}: {error}; the plugins start without a registry and it is not \
+                     replaced",
                     path.display()
                 );
-                return Registry::default();
+                return Registry::refusing(format!("plugins.json cannot be read: {error}"));
             }
         };
         match parse(&bytes) {
             Ok(registry) => registry,
-            Err(reason) => {
-                keep_aside(path, &reason);
-                Registry::default()
-            }
+            Err(reason) => match keep_aside(path, aside, &reason) {
+                Ok(()) => Registry::default(),
+                Err(error) => Registry::refusing(format!(
+                    "plugins.json is not a plugin registry and cannot be kept aside: {error}"
+                )),
+            },
         }
     }
 
+    /// An empty registry that `save` will not write.
+    fn refusing(reason: String) -> Registry {
+        Registry {
+            refused: Some(reason),
+            ..Registry::default()
+        }
+    }
+
+    /// Why the registry cannot be saved, if the file it was read from was left alone because it
+    /// could not be read or kept safe: the evidence in it is unknown, so it must not be replaced.
+    /// The plugins run all the same; this is for the log and for telling the user.
+    pub fn refused(&self) -> Option<&str> {
+        self.refused.as_deref()
+    }
+
     /// Writes the registry to `path` atomically ([`write_atomic`]); the folder must be there.
+    /// A [`refused`](Registry::refused) registry writes nothing and returns that reason as the
+    /// error.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        if let Some(reason) = &self.refused {
+            return Err(io::Error::other(reason.clone()));
+        }
         let mut text = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
         text.push('\n');
         write_atomic(path.as_ref(), text.as_bytes())
@@ -149,13 +187,12 @@ fn parse(bytes: &[u8]) -> Result<Registry, String> {
     Ok(registry)
 }
 
-/// Gets a registry that cannot be used out of the way, so that the user still has it: moved, or
-/// copied where it cannot be moved. If neither works the next [`Registry::save`] replaces it,
-/// which is all right: it only says what Kaleido installed, and the scripts are still there.
-fn keep_aside(path: &Path, reason: &str) {
-    let aside = aside(path);
-    let kept = fs::rename(path, &aside).or_else(|_| fs::copy(path, &aside).map(|_| ()));
-    match kept {
+/// Gets a registry that cannot be used out of the way, so that the user still has it: moved to
+/// `aside`, or copied there where it cannot be moved. Fails if neither works, and the file is
+/// then left as it is.
+fn keep_aside(path: &Path, aside: &Path, reason: &str) -> io::Result<()> {
+    let kept = fs::rename(path, aside).or_else(|_| fs::copy(path, aside).map(|_| ()));
+    match &kept {
         Ok(()) => tracing::warn!(
             "{} is not a plugin registry ({reason}); it is kept as {} and the plugins start \
              without a registry",
@@ -164,10 +201,11 @@ fn keep_aside(path: &Path, reason: &str) {
         ),
         Err(error) => tracing::error!(
             "{} is not a plugin registry ({reason}) and cannot be kept aside ({error}); the \
-             plugins start without a registry",
+             plugins start without a registry and it is not replaced",
             path.display()
         ),
     }
+    kept
 }
 
 #[cfg(test)]
@@ -261,6 +299,7 @@ mod tests {
 
         let registry = Registry::load(&path);
 
+        assert_eq!(registry.refused(), None);
         assert_eq!(registry.version, 1);
         assert_eq!(registry.plugins.len(), 4);
         let thumbfast = &registry.plugins["thumbfast"];
@@ -338,6 +377,7 @@ mod tests {
             let registry = Registry::load(&path);
 
             assert_eq!(registry, Registry::default(), "{broken}");
+            assert_eq!(registry.refused(), None, "kept safe, so it may be saved");
             assert!(!path.exists(), "moved, not left: {broken}");
             assert_eq!(kept_aside(tmp.path()), broken);
 
@@ -347,5 +387,86 @@ mod tests {
             assert_eq!(kept_aside(tmp.path()), broken);
             assert_eq!(names(tmp.path()).len(), 2);
         }
+    }
+
+    /// A file that is there but cannot be read may hold records Kaleido cannot see: it is left
+    /// alone, however long the registry lives (Ruling R23, controller Ruling R6).
+    #[test]
+    fn a_registry_that_cannot_be_read_is_never_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(FILE);
+        // A folder in the place of the file cannot be read: a stand-in that works anywhere.
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("inner.txt"), "the user's").unwrap();
+
+        let registry = Registry::load(&path);
+
+        let reason = registry.refused().expect("refused").to_owned();
+        assert!(reason.contains("cannot be read"), "{reason}");
+        assert!(registry.plugins.is_empty() && registry.removed.is_empty());
+        // The refusal is not part of the file.
+        assert_eq!(
+            serde_json::to_value(&registry).unwrap(),
+            json!({ "version": 1, "plugins": {} })
+        );
+        // Even when the obstacle is gone, this registry writes nothing: it never saw the file.
+        fs::remove_dir_all(&path).unwrap();
+        let error = registry.save(&path).unwrap_err();
+        assert!(error.to_string().contains("cannot be read"), "{error}");
+        assert!(names(tmp.path()).is_empty(), "no file, no temporary file");
+        // A registry loaded afresh is a normal one.
+        assert_eq!(Registry::load(&path).refused(), None);
+    }
+
+    /// The case the refusal is for: an antivirus scan or an editor has the file open.
+    #[cfg(windows)]
+    #[test]
+    fn a_registry_another_program_holds_open_is_not_replaced() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(FILE);
+        let text = serde_json::to_string_pretty(&spec_example()).unwrap();
+        fs::write(&path, &text).unwrap();
+        // Opened without sharing: reading it fails with a sharing violation.
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+
+        let registry = Registry::load(&path);
+
+        assert!(registry.refused().is_some());
+        assert!(registry.plugins.is_empty());
+        // The other program lets go; the file is the same, and this registry still writes nothing.
+        drop(holder);
+        assert!(registry.save(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(names(tmp.path()), [FILE], "no temporary file is left");
+        // A fresh load sees the real registry.
+        let again = Registry::load(&path);
+        assert_eq!(again.refused(), None);
+        assert_eq!(again.plugins.len(), 4);
+    }
+
+    /// Not a registry, and nowhere to put it: it stays where it is, and nothing replaces it.
+    #[test]
+    fn a_registry_that_cannot_be_kept_aside_is_never_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(FILE);
+        let newer = r#"{ "version": 2, "plugins": {}, "removed": ["reload"] }"#;
+        fs::write(&path, newer).unwrap();
+        // Neither a move nor a copy can go into a folder that is not there.
+        let nowhere = tmp.path().join("missing").join("plugins.json.bad-1");
+
+        let registry = Registry::load_keeping_aside_as(&path, &nowhere);
+
+        let reason = registry.refused().expect("refused").to_owned();
+        assert!(reason.contains("cannot be kept aside"), "{reason}");
+        assert!(registry.plugins.is_empty());
+        assert!(registry.save(&path).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), newer);
+        assert_eq!(names(tmp.path()), [FILE], "no copy, no temporary file");
     }
 }

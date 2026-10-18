@@ -4,9 +4,9 @@
 //!
 //! What counts as a script is what mpv loads from `scripts\` (`mp_load_scripts` and
 //! `list_script_files` in `player/scripting.c`): a file with a script extension, or a folder with
-//! a `main.<extension>` in it, and nothing whose name starts with a dot. Anything else in the
-//! folder (a `readme.txt`, a folder of libraries without a `main`) mpv ignores or complains
-//! about, and Kaleido does not list.
+//! a `main.<extension>` in it, and nothing whose name starts with a dot or ends in `.disable`.
+//! Anything else in the folder (a `readme.txt`, a folder of libraries without a `main`) mpv
+//! ignores or complains about, and Kaleido does not list.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -76,18 +76,34 @@ fn list(dir: &Path, enabled: bool) -> Vec<Found> {
         }
     };
     entries
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let file_name = entry.file_name();
-            found_at(&entry.path(), &file_name.to_string_lossy(), enabled)
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let file_name = entry.file_name();
+                found_at(&entry.path(), &file_name.to_string_lossy(), enabled)
+            }
+            Err(error) => {
+                tracing::warn!("cannot read an entry of {}: {error}", dir.display());
+                None
+            }
         })
         .collect()
 }
+
+/// The extension that makes mpv skip an entry, file or folder, whatever it holds: the way to
+/// turn a script off by hand.
+const MPV_SKIPS: &str = "disable";
 
 /// The script in the entry `path` called `entry_name`, if mpv would load one from it.
 fn found_at(path: &Path, entry_name: &str, enabled: bool) -> Option<Found> {
     // mpv does not look at what starts with a dot (.git, .DS_Store, ...).
     if entry_name.starts_with('.') {
+        return None;
+    }
+    // `foo.disable` is skipped before mpv looks at what it is, a folder with a `main.lua` too.
+    if entry_name
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case(MPV_SKIPS))
+    {
         return None;
     }
     // As mpv does with `stat`: a link to a folder or a file is the folder or the file.
@@ -129,6 +145,11 @@ fn found_at(path: &Path, entry_name: &str, enabled: bool) -> Option<Found> {
 /// It goes by `found` as it is given: scripts that are off collide with the ones that are on as
 /// soon as one of them is turned on, and are reported with them. Hand it only the enabled ones to
 /// see what collides in mpv now.
+///
+/// It does not know mpv's own clients: the built-in scripts (`select`, `commands`, `positioning`,
+/// `context_menu`, `console`, `stats`, `ytdl_hook`, `auto_profiles`) and the main handle
+/// (`main`). A manual script named like one of them is numbered by mpv (`stats2`) without being
+/// reported here.
 pub fn duplicates(found: &[Found]) -> Vec<(String, Vec<String>)> {
     let mut by_name: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for script in found {
@@ -251,6 +272,9 @@ mod tests {
             "no-extension",
             "lib/helper.lua",
             "@.lua",
+            // Turned off by hand: mpv skips these before it looks inside.
+            "off.disable/main.lua",
+            "Off2.DISABLE/main.js",
         ] {
             put(&scripts.join(other), "-- not listed\n");
         }
