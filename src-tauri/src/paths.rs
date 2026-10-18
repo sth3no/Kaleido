@@ -13,6 +13,12 @@ const APP_DIR: &str = "Kaleido";
 pub struct AppPaths {
     /// `%APPDATA%\Kaleido`: the mpv `config-dir` (mpv.conf, input.conf, scripts, settings.json).
     pub config_dir: PathBuf,
+    /// `<config_dir>\scripts`: the mpv scripts mpv loads at start (the plugins that are on).
+    pub scripts_dir: PathBuf,
+    /// `<config_dir>\scripts-disabled`: the plugins that are off; mpv never looks there.
+    pub scripts_disabled_dir: PathBuf,
+    /// `<config_dir>\script-opts`: the `<script>.conf` files of the scripts' options.
+    pub script_opts_dir: PathBuf,
     /// `%LOCALAPPDATA%\Kaleido`.
     pub local_dir: PathBuf,
     /// `<local_dir>\state`.
@@ -46,8 +52,12 @@ impl AppPaths {
     ) -> AppPaths {
         let local_dir = local.join(APP_DIR);
         let state_dir = local_dir.join("state");
+        let config_dir = roaming.join(APP_DIR);
         AppPaths {
-            config_dir: roaming.join(APP_DIR),
+            scripts_dir: config_dir.join("scripts"),
+            scripts_disabled_dir: config_dir.join("scripts-disabled"),
+            script_opts_dir: config_dir.join("script-opts"),
+            config_dir,
             watch_later_dir: state_dir.join("watch_later"),
             logs_dir: local_dir.join("logs"),
             cache_dir: local_dir.join("cache"),
@@ -81,7 +91,9 @@ impl AppPaths {
     }
 
     /// Creates the folders Kaleido writes to. Existing folders and the files in them stay as
-    /// they are. The resource, Desktop and executable folders are not ours to create.
+    /// they are. The resource, Desktop and executable folders are not ours to create, and neither
+    /// are `scripts`, `scripts-disabled` and `script-opts`: mpv runs without them, and the first
+    /// install of a plugin makes the ones it needs.
     pub fn ensure_dirs(&self) -> std::io::Result<()> {
         for dir in [
             &self.config_dir,
@@ -114,6 +126,12 @@ mod tests {
             Path::new("E"),
         );
         assert_eq!(p.config_dir, Path::new("R/Kaleido"));
+        assert_eq!(p.scripts_dir, Path::new("R/Kaleido/scripts"));
+        assert_eq!(
+            p.scripts_disabled_dir,
+            Path::new("R/Kaleido/scripts-disabled")
+        );
+        assert_eq!(p.script_opts_dir, Path::new("R/Kaleido/script-opts"));
         assert_eq!(p.local_dir, Path::new("L/Kaleido"));
         assert_eq!(p.state_dir, Path::new("L/Kaleido/state"));
         assert_eq!(p.watch_later_dir, Path::new("L/Kaleido/state/watch_later"));
@@ -158,6 +176,10 @@ mod tests {
             std::fs::read_to_string(&settings).unwrap(),
             "{\"keep\":true}"
         );
+        // The plugin folders appear with the first install, not before.
+        assert!(!p.scripts_dir.exists());
+        assert!(!p.scripts_disabled_dir.exists());
+        assert!(!p.script_opts_dir.exists());
         // Folders that belong to the installation or the OS are not ours to create.
         assert!(!p.resource_dir.exists());
         assert!(!p.desktop_dir.exists());

@@ -461,8 +461,9 @@ fn merge(target: &mut Value, patch: Value) {
     }
 }
 
-/// Where a bad settings file is kept for the user: `settings.json.bad-<unix time>`.
-fn aside(path: &Path) -> PathBuf {
+/// Where a bad settings file is kept for the user: `settings.json.bad-<unix time>`. Any file
+/// Kaleido keeps aside is named so (`plugins.json` too).
+pub(crate) fn aside(path: &Path) -> PathBuf {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs());
