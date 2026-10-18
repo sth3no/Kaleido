@@ -11,6 +11,7 @@
  *    the player's own islands when the video has played 2.5 s without movement
  *    (`uiStore.controlsHidden`, set by `useAutohide`).
  * 5. The sidebar, docked beside the page or over the video.
+ * 6. The notices (`notices`): the error cards, over everything.
  *
  * Which page: the settings while the user is there; the player while a file is loaded or loading
  * (mpv says it is not idle); else the start screen. It also starts the bridge to Rust, once for the
@@ -20,14 +21,18 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { usePlayerBridge } from '../state/bridge';
-import { selectIdle, usePlayerStore, type PlayerState } from '../state/playerStore';
-import { useUiStore, type Page } from '../state/uiStore';
+import { usePlayerStore } from '../state/playerStore';
+import { useUiStore } from '../state/uiStore';
 import styles from './AppShell.module.css';
 import { SNAP_LAYOUTS } from './captionButtons';
 import Sidebar, { type SidebarMode, type SidebarOpener } from './Sidebar';
 import TitleIsland from './TitleIsland';
+import { selectView } from './view';
 import VideoLayer from './VideoLayer';
 import WindowIsland from './WindowIsland';
+
+export { selectView };
+export type { View } from './view';
 
 export interface AppShellProps {
   /** The start screen (Task 17). */
@@ -36,20 +41,11 @@ export interface AppShellProps {
   player: ReactNode;
   /** The settings (Task 22). */
   settings: ReactNode;
-}
-
-/** What the shell shows. */
-export type View = 'home' | 'player' | 'settings';
-
-/**
- * The settings while the user is there; the player while a file is loaded or loading (mpv said it
- * is not idle); else the start screen. Before mpv has said whether it is idle (until the first
- * snapshot) that is the start screen as well, so the player never flashes up at start.
- */
-export function selectView(page: Page, { props, loaded }: Pick<PlayerState, 'props' | 'loaded'>): View {
-  if (page === 'settings') return 'settings';
-  const known = typeof props['idle-active'] === 'boolean';
-  return loaded || (known && !selectIdle(props)) ? 'player' : 'home';
+  /**
+   * The notices (the error cards, Task 19): over every view and above the sidebar, because a file
+   * that fails to open leaves the player for the start screen at once, and the card is for that too.
+   */
+  notices?: ReactNode;
 }
 
 /**
@@ -68,7 +64,7 @@ function useVideoBackdrop(on: boolean): void {
   }, [on]);
 }
 
-export default function AppShell({ home, player, settings }: AppShellProps) {
+export default function AppShell({ home, player, settings, notices }: AppShellProps) {
   usePlayerBridge();
   const page = useUiStore((state) => state.page);
   const view = usePlayerStore((state) => selectView(page, state));
@@ -141,6 +137,7 @@ export default function AppShell({ home, player, settings }: AppShellProps) {
           onReturnFocus={returnFocus}
         />
       </div>
+      <div className={styles.notices}>{notices}</div>
     </div>
   );
 }

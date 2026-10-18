@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
 import { initI18n } from './i18n';
+import { useNoticeStore } from './state/noticeStore';
 import { usePlayerStore } from './state/playerStore';
 import { useUiStore } from './state/uiStore';
 
@@ -25,6 +26,7 @@ beforeAll(() => {
 beforeEach(() => {
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
+  useNoticeStore.setState(useNoticeStore.getInitialState(), true);
   // Rust says nothing is open, and the glass is on.
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(((command: string) => {
@@ -103,4 +105,43 @@ test('a drop on the settings page is cancelled as well, and a link dropped there
   await waitFor(() => {
     expect(useUiStore.getState().page).toBe('player');
   });
+});
+
+test('a file that fails to open leaves its card on the start screen, where mpv is idle again', async () => {
+  render(<App />);
+  await waitFor(() => {
+    expect(usePlayerStore.getState().props['idle-active']).toBe(true);
+  });
+
+  act(() => {
+    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed' });
+  });
+
+  // The player page is not there for it: the card is the shell's, over every page.
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('home');
+  expect(screen.getByRole('alert').textContent).toContain('could not be opened');
+  expect(screen.getByRole('list', { name: 'Notifications' })).toBeTruthy();
+});
+
+test('a dropped link that Rust refuses says so on a card', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  vi.mocked(invoke).mockImplementation(((command: string) => {
+    if (command === 'system_ui_ready') return Promise.resolve({ 'idle-active': true, pause: true });
+    if (command === 'glass_state') return Promise.resolve({ enabled: true, reason: null });
+    if (command === 'player_load') {
+      return Promise.reject([{ source: 'https://example.com/v', kind: 'invalid' }]);
+    }
+    return Promise.resolve(null);
+  }) as unknown as typeof invoke);
+  render(<App />);
+  await waitFor(() => {
+    expect(usePlayerStore.getState().props['idle-active']).toBe(true);
+  });
+
+  fireEvent.drop(window, { dataTransfer: dragged({ 'text/uri-list': 'https://example.com/v' }) });
+
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('dropped link could not be opened');
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('home');
+  warn.mockRestore();
 });

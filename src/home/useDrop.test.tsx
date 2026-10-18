@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import dropMessageJson from '../../src-tauri/tests/fixtures/drop/message.json';
+import { useNoticeStore } from '../state/noticeStore';
 import { useUiStore } from '../state/uiStore';
 import { DROP_MESSAGE, linkFromDrop, useDrop } from './useDrop';
 
@@ -48,6 +49,7 @@ beforeEach(() => {
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockResolvedValue(null);
   useUiStore.setState(useUiStore.getInitialState(), true);
+  useNoticeStore.setState(useNoticeStore.getInitialState(), true);
 });
 
 afterEach(() => {
@@ -100,6 +102,8 @@ describe('dropping', () => {
     await waitFor(() => {
       expect(useUiStore.getState().page).toBe('player');
     });
+    // A link that plays has nothing to report.
+    expect(useNoticeStore.getState().notices).toEqual([]);
   });
 
   test('a link that is only text plays too', () => {
@@ -110,7 +114,7 @@ describe('dropping', () => {
     expect(sent('player_load')).toEqual([['player_load', { sources: [LINK], mode: 'replace' }]]);
   });
 
-  test('a link Rust refuses is logged and leaves the page as it is', async () => {
+  test('a link Rust refuses is logged, shown on a card, and leaves the page as it is', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.mocked(invoke).mockRejectedValue([{ source: LINK, kind: 'invalid' }]);
     useUiStore.setState({ page: 'settings' });
@@ -122,6 +126,10 @@ describe('dropping', () => {
       expect(warn).toHaveBeenCalled();
     });
     expect(useUiStore.getState().page).toBe('settings');
+    // And it is said on a card, whichever page the user is on (Ruling R40).
+    expect(useNoticeStore.getState().notices.map((notice) => [notice.kind, notice.message])).toEqual([
+      ['app', 'errors.dropLink'],
+    ]);
   });
 
   test('a drop that carries no web link plays nothing', () => {

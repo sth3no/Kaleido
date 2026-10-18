@@ -7,10 +7,15 @@
  * island fades out, and when it has faded it is taken away, so that nothing of it is measured,
  * drawn or kept running while it is hidden (spec 13: hidden controls do not repaint, and the
  * clock that moves the seekbar stops with them). It comes back with a fade. While a file is
- * only loading there is nothing to control yet, and no island.
+ * only loading there is nothing to control yet, and no island: the loading title is all there is.
  *
- * Later tasks add what else the page shows: the indicator, the loading title, the error card
- * (Tasks 19) and the panels above the controls (Task 20).
+ * The indicator (volume, speed, seek) and the loading title (a file that loads, a stream that
+ * buffers) are the page's own and do not depend on the island: they work while the controls are
+ * hidden, and the loading title while there are none yet. The error cards are not here but one
+ * level up, in the shell's notice layer (`ErrorCards.tsx`): a file that fails to open leaves the
+ * player for the start screen, and its card has to outlive this page.
+ *
+ * Later tasks add the panels above the controls (Task 20).
  */
 
 import { createPortal } from 'react-dom';
@@ -18,6 +23,8 @@ import { createPortal } from 'react-dom';
 import { usePlayerStore } from '../state/playerStore';
 import { useFullscreenCurtain } from './fullscreen';
 import ControlsIsland from './ControlsIsland';
+import Indicator from './Indicator';
+import LoadingTitle from './LoadingTitle';
 import styles from './PlayerPage.module.css';
 import { useAutohide, useLinger } from './useAutohide';
 
@@ -33,6 +40,8 @@ export default function PlayerPage() {
   return (
     <>
       {loaded && present && <ControlsIsland hidden={hidden} />}
+      <Indicator />
+      <LoadingTitle />
       {/* Over everything, the islands of the shell too: in the body, not in the page. */}
       {createPortal(<div className={styles.curtain} data-on={curtain} aria-hidden />, document.body)}
     </>

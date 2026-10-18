@@ -1,8 +1,8 @@
 /*
  * The layers of the window (AppShell.tsx), bottom to top: the video layer (0), the page (1), the
- * title-bar strip of a docked page (2), the islands (3), the sidebar (4). The layers above the
- * page let the pointer through where they have nothing (pointer-events: none); what is in them
- * takes it again (pointer-events: auto in its own module).
+ * title-bar strip of a docked page (2), the islands (3), the sidebar (4), the notices (5). The
+ * layers above the page let the pointer through where they have nothing (pointer-events: none);
+ * what is in them takes it again (pointer-events: auto in its own module).
  */
 .shell {
   /* The sidebar's width (Sidebar.module.css), which a docked page leaves free. */
@@ -82,6 +82,14 @@
 
 .sidebar {
   z-index: 4;
+}
+
+/* The error cards (player/ErrorCards.tsx): over the sidebar, on every view. */
+.notices {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
 
 /*

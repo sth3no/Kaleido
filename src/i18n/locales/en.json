@@ -46,6 +46,11 @@
     "mute": "Mute",
     "volume": "Volume",
     "volumeValue": "{{percent}}%",
+    "muted": "Muted",
+    "speed": "Speed",
+    "speedValue": "{{speed}}×",
+    "loading": "Loading…",
+    "buffering": "Buffering…",
     "subtitles": "Subtitles",
     "fullscreen": "Fullscreen",
     "exitFullscreen": "Exit fullscreen",
@@ -69,6 +74,18 @@
   },
   "errors": {
     "generic": "Something went wrong.",
-    "details": "Details"
+    "details": "Details",
+    "close": "Close",
+    "notices": "Notifications",
+    "noDetails": "Nothing was written to the log.",
+    "playback": {
+      "title": "Cannot play {{name}}",
+      "titleUnknown": "Cannot play this file",
+      "notFound": "The file or link could not be opened. It may have been moved or deleted, or the address may be offline.",
+      "unsupported": "Kaleido cannot play this file: its format is not recognized or not supported, or the file is damaged.",
+      "generic": "The file could not be played."
+    },
+    "pasteEmpty": "There is no link on the clipboard. Copy a web address (http:// or https://), then press Ctrl+V.",
+    "dropLink": "The dropped link could not be opened. It has to be one complete web address that starts with http:// or https://."
   }
 }

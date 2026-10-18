@@ -38,6 +38,18 @@ export const FULLSCREEN = 'M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 
 export const EXIT_FULLSCREEN =
   'M8 4h2v6H4V8h4zm6 0h2v4h4v2h-6zM4 14h6v6H8v-4H4zm10 0h6v2h-4v4h-2z';
 
+// Feedback over the video: the indicator, the loading title and the notices (Task 19).
+/** Two arrows to the right: the speed. */
+export const FAST_FORWARD = 'M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z';
+/** A clock: the place in the file. */
+export const CLOCK =
+  'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z';
+/** A triangle with a mark: a file that cannot be played. */
+export const WARNING = 'M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z';
+export const INFO =
+  'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z';
+export const CHEVRON_DOWN = 'M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z';
+
 const VIEW_BOX = '0 0 24 24';
 
 export default function Icon({ path }: { path: string }) {

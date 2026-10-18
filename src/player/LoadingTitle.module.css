@@ -1,0 +1,84 @@
+/*
+ * The loading title (LoadingTitle.tsx): a glass capsule in the middle of the window with a ring
+ * that turns, the name of what loads and what it waits for. It comes after theme/glass.module.css,
+ * so its radius and padding win over the glass'. The layer is the live region: always in the page,
+ * with nothing in it, and out of the pointer's way.
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.capsule {
+  box-sizing: border-box;
+  max-width: calc(100% - 2 * var(--k-space-l));
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-m) var(--k-space-xl) var(--k-space-m) var(--k-space-l);
+  border-radius: var(--k-radius-pill);
+  opacity: 0;
+  /* It goes at once... */
+  transition: opacity var(--k-motion-fast) ease;
+}
+
+/* ...and comes after a quarter of a second, so that a file that opens at once does not flash it. */
+.capsule[data-shown='true'] {
+  opacity: 1;
+  transition: opacity var(--k-motion-base) ease 250ms;
+}
+
+@starting-style {
+  .capsule[data-shown='true'] {
+    opacity: 0;
+  }
+}
+
+/* A ring with one bright quarter. With reduced motion it stands still (theme/global.css). */
+.spinner {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: turn 0.9s linear infinite;
+}
+
+@keyframes turn {
+  to {
+    rotate: 360deg;
+  }
+}
+
+.text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.name {
+  max-width: 420px;
+  overflow: hidden;
+  font-size: var(--k-font-size-l);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.state {
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+@media (forced-colors: active) {
+  .spinner {
+    border-color: GrayText;
+    border-top-color: CanvasText;
+  }
+}

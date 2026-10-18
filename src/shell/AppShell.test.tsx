@@ -140,6 +140,38 @@ test('the islands of the shell fade and are out of reach while the player hides 
   expect(islands?.hasAttribute('inert')).toBe(false);
 });
 
+test('the notices are a layer of their own: on every view, and not faded with the islands', () => {
+  usePlayerStore.setState({ loaded: true, props: PLAYING });
+  render(
+    <AppShell
+      home={<p>Start</p>}
+      player={<p>Video</p>}
+      settings={<p>Options</p>}
+      notices={<p>Card</p>}
+    />,
+  );
+  act(() => {
+    useUiStore.getState().setControlsHidden(true);
+  });
+
+  const card = screen.getByText('Card');
+  expect(card.closest('[data-hidden]')).toBeNull();
+  expect(card.closest('[inert]')).toBeNull();
+
+  act(() => {
+    useUiStore.getState().setPage('settings');
+  });
+  expect(screen.getByText('Card')).toBeTruthy();
+
+  // A file that failed leaves the player for the start screen, and the card stays.
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': true } });
+    useUiStore.getState().setPage('player');
+  });
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('home');
+  expect(screen.getByText('Card')).toBeTruthy();
+});
+
 test('the islands of the shell are marked, so that the autohide knows the pointer is on one', () => {
   usePlayerStore.setState({ loaded: true, props: PLAYING });
   shell();

@@ -1,0 +1,175 @@
+/*
+ * The stack of cards (ErrorCards.tsx, ErrorCard.tsx): one glass sheet at the top right, under the
+ * row of the islands, with a card for each notice, the newest on top. It comes after
+ * theme/glass.module.css, so its radius and padding win over the glass'. The layer it sits in lets
+ * the pointer through (AppShell.module.css); the sheet takes it.
+ */
+.stack {
+  position: absolute;
+  top: calc(var(--shell-island-height) + 2 * var(--k-space-l));
+  right: var(--k-space-l);
+  box-sizing: border-box;
+  width: min(380px, calc(100% - 2 * var(--k-space-l)));
+  /* Three cards with their details open may be taller than a small window: the sheet scrolls. */
+  max-height: calc(100% - var(--shell-island-height) - 3 * var(--k-space-l));
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: calc(var(--k-radius-l) * 1.2);
+  pointer-events: auto;
+  transition:
+    opacity var(--k-motion-base) ease,
+    translate var(--k-motion-base) var(--k-motion-spring);
+}
+
+/* Where it comes from when the first card appears. */
+@starting-style {
+  .stack {
+    opacity: 0;
+    translate: 0 calc(-1 * var(--k-space-m));
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  padding: var(--k-space-m) var(--k-space-l);
+  transition: opacity var(--k-motion-base) ease;
+}
+
+/* A card that is added to a stack fades in. */
+@starting-style {
+  .card {
+    opacity: 0;
+  }
+}
+
+.card + .card {
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--k-space-m);
+}
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+/* The icon is 16 px (shell/Icon.module.css); the warning is in the colour of dangers. */
+.icon[data-tone='alert'] {
+  color: var(--k-color-danger);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-m);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.message {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  overflow-wrap: anywhere;
+}
+
+.close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.close:hover {
+  background: var(--k-color-hover);
+}
+
+/* Under the text, not under the icon. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-s);
+  padding-left: calc(20px + var(--k-space-m));
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+  padding: 4px var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.action:hover {
+  background: var(--k-color-selected);
+}
+
+.chevron {
+  display: grid;
+  transition: rotate var(--k-motion-fast) ease;
+}
+
+.chevron[data-open='true'] {
+  rotate: 180deg;
+}
+
+/* mpv's log: what it said is shown as it said it. */
+.log {
+  margin-left: calc(20px + var(--k-space-m));
+  padding: var(--k-space-s);
+  border-radius: var(--k-radius-s);
+  background: color-mix(in srgb, var(--k-color-on-glass) 10%, transparent);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--k-font-size-xs);
+  text-shadow: none;
+  user-select: text;
+}
+
+.line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* High contrast: a plain edge, and the actions as buttons. */
+@media (forced-colors: active) {
+  .action {
+    border-color: ButtonText;
+  }
+
+  .log {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}

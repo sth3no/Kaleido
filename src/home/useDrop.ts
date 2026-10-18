@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 
 import { playerLoad } from '../ipc/commands';
+import { pushAppNotice } from '../state/noticeStore';
 import { useUiStore } from '../state/uiStore';
 
 /**
@@ -75,7 +76,11 @@ function handOverFiles(files: ArrayLike<File>): void {
   }
 }
 
-/** Plays the dropped link in place of what is open; the player is the page to show for it. */
+/**
+ * Plays the dropped link in place of what is open; the player is the page to show for it. A link
+ * that Rust refuses is logged and says so on a card (the stack of notices, any page): a drop that
+ * does nothing would look like one that was not seen.
+ */
 function openLink(link: string): void {
   playerLoad([link], 'replace').then(
     () => {
@@ -83,6 +88,7 @@ function openLink(link: string): void {
     },
     (issues: unknown) => {
       console.warn('cannot open the dropped link', link, issues);
+      pushAppNotice('errors.dropLink');
     },
   );
 }

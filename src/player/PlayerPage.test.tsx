@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import { act, render } from '@testing-library/react';
+import { listen } from '@tauri-apps/api/event';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi, type MockInstance } from 'vitest';
 
 import { initI18n } from '../i18n';
@@ -7,6 +8,8 @@ import type { GlassRect } from '../ipc/types';
 import { usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
 import { CURTAIN_MAX_MS } from './fullscreen';
+import { INDICATOR_FADE_MS, INDICATOR_MS } from './Indicator';
+import { LOADING_FADE_MS } from './LoadingTitle';
 import PlayerPage, { FADE_OUT_MS } from './PlayerPage';
 import { AUTOHIDE_MS } from './useAutohide';
 
@@ -37,6 +40,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: FAKE });
   vi.mocked(invoke).mockClear();
+  vi.mocked(listen).mockClear();
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
   // The island is at the bottom of the window: 92 px high, 16 px above the edge.
@@ -80,6 +84,22 @@ const advance = (ms: number) => {
     vi.advanceTimersByTime(ms);
   });
 };
+
+/** Rust sends `script-message kaleido <args>` as `player:message`. */
+function messageFromRust(...args: string[]) {
+  const subscription = vi
+    .mocked(listen)
+    .mock.calls.filter(([event]) => event === 'player:message')
+    .at(-1);
+  if (!subscription) throw new Error('the page does not listen to player:message');
+  const callback = subscription[1] as (event: { payload: unknown }) => void;
+  act(() => {
+    callback({ payload: { args } });
+  });
+}
+
+/** The capsule of the indicator: the live region with a `data-shown` (the loading title's has none). */
+const indicator = () => document.querySelector('[role="status"][data-shown]');
 
 test('the island fades after 2500 ms of stillness, is gone when it has faded, and comes back with a move', () => {
   render(<PlayerPage />);
@@ -192,4 +212,55 @@ test('a black curtain covers the window while mpv switches to fullscreen, and no
     await vi.advanceTimersByTimeAsync(CURTAIN_MAX_MS + 100);
   });
   expect(curtain()?.getAttribute('data-on')).toBe('false');
+});
+
+test('the indicator works while the controls are hidden, and does not bring them back', () => {
+  act(() => {
+    usePlayerStore.getState().applyChanges({ volume: 52 });
+  });
+  render(<PlayerPage />);
+  advance(AUTOHIDE_MS + FADE_OUT_MS);
+  expect(island()).toBeNull();
+  expect(useUiStore.getState().controlsHidden).toBe(true);
+
+  messageFromRust('osd', 'volume');
+
+  expect(indicator()?.getAttribute('data-shown')).toBe('true');
+  expect(indicator()?.textContent).toContain('52%');
+  expect(island()).toBeNull();
+  expect(useUiStore.getState().controlsHidden).toBe(true);
+});
+
+test('while the file loads the loading title is all there is, and it goes when the file is loaded', () => {
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': false, 'media-title': 'Duna' } });
+  });
+  render(<PlayerPage />);
+
+  expect(island()).toBeNull();
+  expect(screen.getByText('Duna')).toBeTruthy();
+  expect(screen.getByText('Loading…')).toBeTruthy();
+
+  act(() => {
+    usePlayerStore.getState().fileLoaded();
+  });
+  expect(island()).not.toBeNull();
+  advance(LOADING_FADE_MS);
+  expect(screen.queryByText('Loading…')).toBeNull();
+});
+
+test('the indicator is a glass region while it shows, and none afterwards', () => {
+  render(<PlayerPage />);
+  advance(50);
+  const before = regions()?.length ?? 0;
+  expect(before).toBeGreaterThan(0);
+
+  messageFromRust('osd', 'volume');
+  advance(50);
+  expect(regions()).toHaveLength(before + 1);
+
+  advance(INDICATOR_MS + INDICATOR_FADE_MS);
+  // The frame that measures the list without it.
+  advance(50);
+  expect(regions()).toHaveLength(before);
 });
