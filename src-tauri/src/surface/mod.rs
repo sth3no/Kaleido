@@ -409,30 +409,67 @@ mod tests {
         bottom: 16.0,
     };
 
-    /// The real libmpv with `wid` = `parent` (a `test_parent()`), started as in the app, and the
+    /// The real libmpv with `wid` = a `test_parent()` of its own, started as in the app, and the
     /// window it created there.
-    fn mpv_inside(parent: isize, dir: &std::path::Path) -> (Engine, isize) {
-        let engine = Engine::start(
-            EngineConfig {
-                paths: temp_paths(dir),
-                wid: Some(parent),
-                // The app's video output. Without a GPU (CI) d3d11-warp=auto uses WARP.
-                vo: "gpu-next".into(),
-                ao: Some("null".into()),
-            },
-            NoEvents,
-        )
-        .expect("start libmpv");
-        // Found without find_child: the parent's only child is whatever mpv created.
-        let video = wait_for_child(parent, Duration::from_secs(15))
-            .expect("libmpv created no direct child window inside wid");
-        (engine, video)
+    ///
+    /// It is a guard: however the test ends, returning or panicking at a failed assertion, its
+    /// Drop ends the engine as [`close`] does. Dropped as it is on the test thread, which owns the
+    /// parent window, the engine would wait for mpv's window to close, and mpv's window for the
+    /// message pump of the very thread that waits: a failing test would hang instead of failing.
+    struct MpvInside {
+        /// `None` once closed.
+        engine: Option<Engine>,
+        parent: isize,
+        /// The window mpv created inside `parent`.
+        video: isize,
+    }
+
+    impl MpvInside {
+        fn start(dir: &std::path::Path) -> MpvInside {
+            let parent = test_parent();
+            let engine = Engine::start(
+                EngineConfig {
+                    paths: temp_paths(dir),
+                    wid: Some(parent),
+                    // The app's video output. Without a GPU (CI) d3d11-warp=auto uses WARP.
+                    vo: "gpu-next".into(),
+                    ao: Some("null".into()),
+                },
+                NoEvents,
+            )
+            .expect("start libmpv");
+            let mut mpv = MpvInside {
+                engine: Some(engine),
+                parent,
+                video: 0,
+            };
+            // Found without find_child: the parent's only child is whatever mpv created. A
+            // failure here is a panic the guard already covers.
+            mpv.video = wait_for_child(parent, Duration::from_secs(15))
+                .expect("libmpv created no direct child window inside wid");
+            mpv
+        }
+    }
+
+    impl Drop for MpvInside {
+        fn drop(&mut self) {
+            let Some(engine) = self.engine.take() else {
+                return;
+            };
+            let closed = close(engine, self.parent);
+            // A second panic while the test unwinds would abort the run; the first one is the
+            // test's failure, and it is reported as such.
+            if !closed && !thread::panicking() {
+                panic!("closing libmpv hung");
+            }
+        }
     }
 
     /// Ends the engine on another thread while this one, which owns `parent`, handles what mpv's
     /// window sends while it closes (in the app that is the main thread's job), then destroys
-    /// `parent`.
-    fn close(engine: Engine, parent: isize) {
+    /// `parent`. False if it did not end within 10 s; `parent` is then left alone (mpv's window
+    /// is still in it, and the thread that drops the engine is left to the end of the run).
+    fn close(engine: Engine, parent: isize) -> bool {
         let (done, closed) = mpsc::channel();
         thread::spawn(move || {
             drop(engine);
@@ -440,10 +477,13 @@ mod tests {
         });
         let deadline = Instant::now() + Duration::from_secs(10);
         while closed.try_recv().is_err() {
-            assert!(Instant::now() < deadline, "closing libmpv hung");
+            if Instant::now() >= deadline {
+                return false;
+            }
             pump(Duration::from_millis(20));
         }
         destroy(parent);
+        true
     }
 
     /// Upstream detail the surface relies on (spec 5.1): with `wid` set, the real libmpv creates
@@ -452,19 +492,16 @@ mod tests {
     #[test]
     fn surface_moves_the_window_libmpv_creates_inside_wid() {
         let tmp = tempfile::tempdir().unwrap();
-        let parent = test_parent();
-        let (engine, video) = mpv_inside(parent, tmp.path());
-        assert_eq!(class_name(video), "mpv");
+        let mpv = MpvInside::start(tmp.path());
+        assert_eq!(class_name(mpv.video), "mpv");
 
-        let surface = Surface::new(parent);
+        let surface = Surface::new(mpv.parent);
         surface.apply(400, 300, 1.0);
         surface.set_layout(FRAME);
         // Give mpv time to fight the placement; it must not. A pixel past the frame on every
         // side (layout::OVERSCAN).
         pump(Duration::from_millis(500));
-        assert_eq!(window_rect(video), (109, 119, 162, 92));
-
-        close(engine, parent);
+        assert_eq!(window_rect(mpv.video), (109, 119, 162, 92));
     }
 
     /// libmpv snaps its window back to the parent's whole client area whenever the parent moves
@@ -473,8 +510,8 @@ mod tests {
     #[test]
     fn mini_player_survives_moving_and_resizing_the_window() {
         let tmp = tempfile::tempdir().unwrap();
-        let parent = test_parent();
-        let (engine, video) = mpv_inside(parent, tmp.path());
+        let mpv = MpvInside::start(tmp.path());
+        let (parent, video) = (mpv.parent, mpv.video);
         let surface = Surface::new(parent);
         surface.apply(400, 300, 1.0);
         surface.set_layout(MINI);
@@ -501,7 +538,5 @@ mod tests {
         surface.apply(600, 450, 1.0);
         pump(Duration::from_millis(500));
         assert_eq!(window_rect(video), (150, 150, 600, 450), "full again");
-
-        close(engine, parent);
     }
 }
