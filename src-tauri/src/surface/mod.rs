@@ -247,6 +247,26 @@ impl Flag {
     }
 }
 
+/// The window's fullscreen and always-on-top as mpv's properties and their values, for a new core
+/// (a restart): it starts with mpv's own, and the window follows what mpv reports, so without
+/// these it would leave fullscreen. A state that cannot be read is left out. Not on the main
+/// thread, which answers the window's getters.
+pub fn window_flags(app: &AppHandle) -> Vec<(&'static str, bool)> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return Vec::new();
+    };
+    Flag::ALL
+        .into_iter()
+        .filter_map(|flag| match flag.read(&window) {
+            Ok(on) => Some((flag.property(), on)),
+            Err(error) => {
+                tracing::warn!("cannot read the window's {}: {error}", flag.property());
+                None
+            }
+        })
+        .collect()
+}
+
 /// A [`FullscreenSync`] for each [`Flag`]. Managed state, used on the main thread only.
 #[derive(Debug, Default)]
 pub struct WindowSync {

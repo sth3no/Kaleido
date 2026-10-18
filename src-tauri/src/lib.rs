@@ -17,7 +17,7 @@ pub mod thumbs;
 mod ipc_contract_tests;
 
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
@@ -27,7 +27,8 @@ use mpv_ffi::Mpv;
 use paths::AppPaths;
 use player::command::ScreenshotMode;
 use player::{
-    Engine, EngineConfig, EventSink, PlayerEvent, Request, Restart, RestartError, StateLoop,
+    Engine, EngineConfig, EventSink, PlayerEvent, QUIT_TIMEOUT, Request, Restart, RestartError,
+    StateLoop,
 };
 use surface::{Surface, WindowSync};
 use system::OpenThread;
@@ -35,9 +36,6 @@ use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
 use system::logs::LogGuard;
 use system::open_queue::OpenQueue;
-
-/// How long closing the window waits for mpv to save the position and shut down.
-const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn run() {
     // First: every panic goes to the log once there is one, and one that ends the start is told
@@ -277,13 +275,12 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
             startup.language,
         );
     }
-    let window = WindowFlags::of(app);
     let logs_dir = paths.logs_dir.clone();
     let restart = Restart {
         events: Box::new(StateLoop::new(AppSink { app: app.clone() })),
         prepare: Box::new({
             let app = app.clone();
-            move |mpv| prepare_core(&app, mpv, window)
+            move |mpv| prepare_core(&app, mpv)
         }),
         // Task 12: the quality chosen for a stream.
         entry_options: Box::new(|_| Vec::new()),
@@ -311,33 +308,13 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
     result
 }
 
-/// The window's fullscreen and always-on-top. A new core starts with mpv's own, and the window
-/// follows what mpv reports (spec 5.1): without these it would leave fullscreen at a restart.
-#[derive(Debug, Clone, Copy, Default)]
-struct WindowFlags {
-    fullscreen: bool,
-    ontop: bool,
-}
-
-impl WindowFlags {
-    /// Read off the window (not on the main thread, which answers).
-    fn of(app: &AppHandle) -> WindowFlags {
-        let Some(window) = app.get_webview_window(surface::MAIN_WINDOW) else {
-            return WindowFlags::default();
-        };
-        WindowFlags {
-            fullscreen: window.is_fullscreen().unwrap_or(false),
-            ontop: window.is_always_on_top().unwrap_or(false),
-        }
-    }
-}
-
 /// What a restarted core gets on the request thread, before it has reported anything and before
-/// its playback is restored: the window's flags (first, so that the observations report them and
-/// the window stays as it is), the observations the UI renders, and the glass. The tools'
-/// options join them in Task 9.
-fn prepare_core(app: &AppHandle, mpv: &Mpv, window: WindowFlags) {
-    for (name, on) in [("fullscreen", window.fullscreen), ("ontop", window.ontop)] {
+/// its playback is restored: the window's fullscreen and always-on-top as they are now, a change
+/// made during the restart included (first, so that the observations report them and the window
+/// stays as it is; the main thread, which answers, never waits for the request thread), the
+/// observations the UI renders, and the glass. The tools' options join them in Task 9.
+fn prepare_core(app: &AppHandle, mpv: &Mpv) {
+    for (name, on) in surface::window_flags(app) {
         if let Err(error) = mpv.set_property(name, if on { "yes" } else { "no" }) {
             tracing::warn!("the restarted player does not take the window's {name}: {error}");
         }

@@ -17,11 +17,11 @@ const PATH_LIST_SEPARATOR: char = ';';
 pub struct ResumeState {
     /// The playlist, in order.
     pub entries: Vec<ResumeEntry>,
-    /// The index in `entries` of the entry mpv was playing (or loading); `None` when it played
-    /// none (idle, or at the end of the playlist without `keep-open`).
+    /// The index in `entries` of the entry mpv was playing (or loading, or about to play);
+    /// `None` when it played none (idle, or at the end of the playlist without `keep-open`).
     pub current: Option<usize>,
-    /// Seconds into the current entry; `None` where it is not known (the entry had not loaded
-    /// yet): the new core starts it where mpv would.
+    /// Seconds into the current entry; `None` where it is not known (mpv had not got to the
+    /// entry, or not loaded it yet): the new core starts it where mpv would.
     pub position: Option<f64>,
     pub paused: bool,
     /// The tracks of the current entry.
@@ -29,6 +29,11 @@ pub struct ResumeState {
     /// The subtitle files the current entry had besides its own tracks (`sub-add`, mpv's
     /// `sub-auto`), in the order of their track ids, so that the new core numbers them the same.
     pub external_subs: Vec<String>,
+    /// The player's volume and mute, not the entry's: they come back before anything loads,
+    /// also for an idle player. A new core would start with mpv.conf's (spec 6.3: Apply does not
+    /// change the volume). `None` where they could not be read.
+    pub volume: Option<f64>,
+    pub mute: Option<bool>,
 }
 
 /// One entry of the playlist.
@@ -120,9 +125,18 @@ pub(crate) fn capture_with_entry(
         entries,
         current: playlist.current,
         paused: mpv.get_flag("pause").unwrap_or(false),
+        volume: mpv
+            .get_f64("volume")
+            .ok()
+            .filter(|volume| volume.is_finite() && *volume >= 0.0),
+        mute: mpv.get_flag("mute").ok(),
         ..ResumeState::default()
     };
-    if state.current.is_some() {
+    // The time and the tracks are the playing file's. Only when the current entry is the one mpv
+    // plays are they its own: an entry switch that mpv has not got to yet (a `playlist-next` just
+    // before the restart) makes the next entry current while the last one still plays. Then
+    // nothing is known of the current entry yet, and the new core starts it as mpv would.
+    if state.current.is_some() && playlist.playing {
         // Unavailable until the entry has loaded.
         state.position = mpv
             .get_f64("time-pos")
@@ -176,17 +190,24 @@ pub(crate) fn unsettled(state: &mut ResumeState, entry: Option<i64>, restored: O
         .clone_from(&restored.state.external_subs);
 }
 
-/// The commands that give a new (idle) core the playlist of `state` and play its current entry
-/// where it was, with its tracks and subtitles, paused or not. Every entry gets
-/// [`NO_FOLDER_PLAYLIST`] (Ruling R55) and its own options; the current one its start, its tracks
-/// and its subtitle files besides. Values are quoted as `load_commands` quotes them. Nothing for
-/// an empty playlist; nothing plays where none was current.
+/// The commands that give a new (idle) core the volume and mute of `state`, its playlist, and
+/// play its current entry where it was, with its tracks and subtitles, paused or not. Every entry
+/// gets [`NO_FOLDER_PLAYLIST`] (Ruling R55) and its own options; the current one its start, its
+/// tracks and its subtitle files besides. Values are quoted as `load_commands` quotes them. For an
+/// empty playlist only the volume and mute; nothing plays where no entry was current.
 pub fn restore_commands(state: &ResumeState) -> Vec<Vec<String>> {
-    if state.entries.is_empty() {
-        return Vec::new();
+    let mut commands = Vec::new();
+    // Before any file loads, so that none starts at mpv.conf's volume.
+    if let Some(volume) = state.volume {
+        commands.push(args(&["set", "volume", &volume.to_string()]));
     }
-    let pause = if state.paused { "yes" } else { "no" };
-    let mut commands = vec![args(&["set", "pause", pause])];
+    if let Some(mute) = state.mute {
+        commands.push(args(&["set", "mute", yes_no(mute)]));
+    }
+    if state.entries.is_empty() {
+        return commands;
+    }
+    commands.push(args(&["set", "pause", yes_no(state.paused)]));
     for (index, entry) in state.entries.iter().enumerate() {
         let mut options = vec![NO_FOLDER_PLAYLIST.to_owned()];
         options.extend(entry.options.iter().filter_map(|(name, value)| {
@@ -257,12 +278,18 @@ fn args(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|&part| part.to_owned()).collect()
 }
 
+fn yes_no(on: bool) -> &'static str {
+    if on { "yes" } else { "no" }
+}
+
 /// The entries of mpv's `playlist` property (JSON text), the current one and its `id`.
 #[derive(Debug, Default, PartialEq)]
 struct Playlist {
     filenames: Vec<String>,
     current: Option<usize>,
     current_id: Option<i64>,
+    /// The current entry is also the one mpv plays (`"playing": true`).
+    playing: bool,
 }
 
 fn playlist_of(text: &str) -> Playlist {
@@ -275,9 +302,11 @@ fn playlist_of(text: &str) -> Playlist {
             tracing::warn!("an entry of mpv's playlist has no filename and is left out: {entry}");
             continue;
         };
-        if entry.get("current").and_then(Value::as_bool) == Some(true) {
+        let flag = |name: &str| entry.get(name).and_then(Value::as_bool) == Some(true);
+        if flag("current") {
             playlist.current = Some(playlist.filenames.len());
             playlist.current_id = entry.get("id").and_then(Value::as_i64);
+            playlist.playing = flag("playing");
         }
         playlist.filenames.push(filename.to_owned());
     }
@@ -349,7 +378,8 @@ mod tests {
     }
 
     /// Two entries, the second (a link with a chosen quality) paused at 12.5 s with the second
-    /// subtitle track: the playlist comes back as it was, and the second entry plays.
+    /// subtitle track, the volume at 40.5 and muted: the volume first, then the playlist as it
+    /// was, and the second entry plays.
     #[test]
     fn restore_commands_play_the_current_entry_with_its_options() {
         let state = ResumeState {
@@ -368,11 +398,15 @@ mod tests {
                 ..ResumeTracks::default()
             },
             external_subs: Vec::new(),
+            volume: Some(40.5),
+            mute: Some(true),
         };
         // %N% is the length in bytes of the value that follows: 23 for the format.
         assert_eq!(
             restore_commands(&state),
             [
+                text(&["set", "volume", "40.5"]),
+                text(&["set", "mute", "yes"]),
                 text(&["set", "pause", "yes"]),
                 text(&[
                     "loadfile",
@@ -413,6 +447,9 @@ mod tests {
                 r"C:\Titulky\a, b.srt".to_owned(),
                 r"C:\Titulky\díl; 2.srt".to_owned(),
             ],
+            // Not read: not set.
+            volume: None,
+            mute: None,
         };
         let files = r"C:\Titulky\a, b.srt;C:\Titulky\díl\; 2.srt";
         assert_eq!(
@@ -449,6 +486,21 @@ mod tests {
         assert!(restore_commands(&idle).is_empty());
     }
 
+    /// The volume belongs to the player, not to a file: an idle player gets it back too.
+    #[test]
+    fn an_idle_player_gets_its_volume_back_and_nothing_else() {
+        let idle = ResumeState {
+            paused: true,
+            volume: Some(37.0),
+            mute: Some(false),
+            ..ResumeState::default()
+        };
+        assert_eq!(
+            restore_commands(&idle),
+            [text(&["set", "volume", "37"]), text(&["set", "mute", "no"])]
+        );
+    }
+
     /// The playlist ended (no `keep-open`): it comes back, and nothing plays.
     #[test]
     fn a_playlist_without_a_current_entry_comes_back_without_playing() {
@@ -459,6 +511,7 @@ mod tests {
             paused: false,
             tracks: ResumeTracks::default(),
             external_subs: vec![r"C:\Titulky\a.srt".to_owned()],
+            ..ResumeState::default()
         };
         assert_eq!(
             restore_commands(&state),
@@ -506,6 +559,7 @@ mod tests {
                 ],
                 current: Some(1),
                 current_id: Some(7),
+                playing: true,
             }
         );
         // An idle player, and what is not a playlist.
@@ -514,6 +568,16 @@ mod tests {
         }
         let ended = r#"[{"filename": "a.mkv", "id": 1}]"#;
         assert_eq!(playlist_of(ended).current, None);
+        // A `playlist-next` mpv has not got to: b is current, a still plays.
+        let switching = r#"[
+            {"filename": "a.mkv", "id": 1, "playing": true},
+            {"filename": "b.mkv", "id": 2, "current": true}
+        ]"#;
+        let switching = playlist_of(switching);
+        assert_eq!(
+            (switching.current, switching.current_id, switching.playing),
+            (Some(1), Some(2), false)
+        );
 
         let tracks = r#"[
             {"id": 1, "type": "video", "external": false},
@@ -552,6 +616,7 @@ mod tests {
                     ..ResumeTracks::default()
                 },
                 external_subs: vec!["a.srt".to_owned()],
+                ..ResumeState::default()
             },
         };
         // What mpv says while it opens the file: 0, its own choice of tracks, no subtitles yet.
@@ -609,8 +674,8 @@ mod tests {
             .is_ok_and(|position| (position - seconds).abs() <= tolerance)
     }
 
-    /// [a, b, c] of 10 s each, b paused at 4 s: the new core has the same playlist, plays b,
-    /// from 4 s, paused.
+    /// [a, b, c] of 10 s each, b paused at 4 s, the volume at 40 and muted: the new core has the
+    /// same playlist, plays b, from 4 s, paused, as loud and as muted.
     #[test]
     fn restart_resumes_the_playlist_where_it_was() {
         let tmp = tempfile::tempdir().unwrap();
@@ -620,6 +685,8 @@ mod tests {
             engine.command(&["loadfile", &clip.to_string_lossy(), "append"]);
         }
         engine.command(&["set", "pause", "yes"]);
+        engine.command(&["set", "volume", "40"]);
+        engine.command(&["set", "mute", "yes"]);
         engine.command(&["playlist-play-index", "1"]);
         eventually(&engine, "b has loaded", |mpv| {
             mpv.get_f64("duration").is_ok()
@@ -638,6 +705,42 @@ mod tests {
         assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-pos").unwrap()), 1);
         assert!(engine.call(|mpv| mpv.get_flag("pause").unwrap()));
         let path = clips[1].to_string_lossy().into_owned();
+        assert_eq!(engine.call(|mpv| mpv.get_string("path").unwrap()), path);
+        assert_eq!(engine.call(|mpv| mpv.get_f64("volume").unwrap()), 40.0);
+        assert!(engine.call(|mpv| mpv.get_flag("mute").unwrap()));
+    }
+
+    /// With `keep-open` (Kaleido's mpv.conf) a clip played to its end stays loaded, paused on its
+    /// last frame. The new core has it there too: the same entry, paused, at the end, not idle.
+    #[test]
+    fn restart_paused_at_the_end_resumes_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::write(paths.config_dir.join("mpv.conf"), "keep-open=yes\n").unwrap();
+        let clip = clip(tmp.path(), 2);
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        engine.command(&["loadfile", &clip.to_string_lossy()]);
+        let at_the_end = |mpv: &Mpv| {
+            mpv.get_flag("eof-reached").unwrap_or(false)
+                && mpv.get_flag("pause").unwrap()
+                && !mpv.get_flag("idle-active").unwrap()
+        };
+        eventually(
+            &engine,
+            "the clip ended, paused on its last frame",
+            at_the_end,
+        );
+        let end = engine.call(|mpv| mpv.get_f64("time-pos").unwrap());
+        assert!(end > 1.5, "the clip ended at {end}");
+
+        assert_eq!(engine.restart(Restart::new(NoEvents)), Ok(()));
+
+        eventually(&engine, "the new core is at the end, paused", move |mpv| {
+            at_the_end(mpv) && near(mpv, end, 0.2)
+        });
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-pos").unwrap()), 0);
+        assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-count").unwrap()), 1);
+        let path = clip.to_string_lossy().into_owned();
         assert_eq!(engine.call(|mpv| mpv.get_string("path").unwrap()), path);
     }
 

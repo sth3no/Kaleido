@@ -7,10 +7,11 @@
 //! request thread replaces the core with a new one and plays on where the old one was
 //! ([`resume`]). What was sent meanwhile waits in the queue and reaches the new core in order.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -25,8 +26,9 @@ use crate::paths::AppPaths;
 /// [`EventLoop`] observes with ids below it; the engine's property changes never reach it.
 pub const ENGINE_OBSERVE_BASE: u64 = 1_000_000;
 
-/// How long a restart waits for the old core to quit (mpv saves the position with
-/// `save-position-on-quit`) before it destroys the core anyway.
+/// How long the player waits for mpv to quit (it saves the position with
+/// `save-position-on-quit`): when the window closes (lib.rs), and in a restart, which destroys
+/// the old core anyway after it.
 pub const QUIT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How long a restart waits for the old core to be destroyed (its scripts end, its window goes)
@@ -37,6 +39,24 @@ const REQUEST_THREAD: &str = "mpv-requests";
 const EVENT_THREAD: &str = "mpv-events";
 /// The name Rust gives the main thread, where Tauri runs the window's message loop.
 const MAIN_THREAD: &str = "main";
+
+/// Which of `names` this thread is named, if any.
+fn this_thread_is(names: &[&'static str]) -> Option<&'static str> {
+    let current = thread::current();
+    let name = current.name()?;
+    names.iter().copied().find(|&known| known == name)
+}
+
+thread_local! {
+    /// On the request thread and on an event thread: the core it serves. Weak, so that it never
+    /// keeps a core alive that a restart destroys. Only for [`Engine::call`] on these threads.
+    static OWN_CORE: RefCell<Weak<Mpv>> = const { RefCell::new(Weak::new()) };
+}
+
+/// This thread serves `mpv` from now on (see [`OWN_CORE`]).
+fn serve(mpv: &Arc<Mpv>) {
+    OWN_CORE.set(Arc::downgrade(mpv));
+}
 
 /// mpv's `sub-margin-y` property.
 const SUB_MARGIN_Y: &str = "sub-margin-y";
@@ -62,7 +82,11 @@ pub struct EngineConfig {
 }
 
 /// Receives mpv's events on the event thread. Implementations observe properties with reply
-/// ids below [`ENGINE_OBSERVE_BASE`].
+/// ids below [`ENGINE_OBSERVE_BASE`], and read what they need with the `mpv` they are given.
+///
+/// Never call [`Engine::call`] (or [`Engine::restart`]) from a loop or what it calls: the call
+/// would wait behind a restart that waits for this thread. `call` refuses on this thread (see
+/// there); queue with [`Engine::request`] instead.
 pub trait EventLoop: Send + 'static {
     /// Every event in order, except the engine's own property changes; `Event::Shutdown` is
     /// the last one. The loop of a core that a restart replaces gets nothing more from the moment
@@ -110,7 +134,10 @@ pub enum Request {
 /// The per-file options of a playlist entry (`name`, `value`), by the entry's `filename`.
 pub type EntryOptions = Box<dyn Fn(&str) -> Vec<(String, String)> + Send>;
 
-/// A new core in place of the running one ([`Engine::restart`]).
+/// A new core in place of the running one ([`Engine::restart`]). The closures run on the
+/// request thread, inside the restart: they must never call [`Engine::call`] (or
+/// [`Engine::restart`]), which would wait behind the very restart they are part of. `prepare` has
+/// the new core at hand; `call` refuses on this thread (see there).
 pub struct Restart {
     /// Gets the new core's events, from its first one on.
     pub events: Box<dyn EventLoop>,
@@ -270,7 +297,27 @@ impl Engine {
     /// result. Blocks the caller, so never call it on the main thread. Panics (in the caller)
     /// when `f` panicked, or when no core runs to run it on (a restart whose new core did not
     /// start).
+    ///
+    /// Never call it on the engine's own threads, from an [`EventLoop`] or a [`Restart`]'s
+    /// closures: queued, the call would wait for the request thread, which is the caller itself
+    /// or waits for it (a restart joins the old event thread). There it is a bug, logged as an
+    /// error, and a panic in debug builds (caught: the event thread and the request thread go
+    /// on). A release build does not wait: it runs `f` at once on the core that thread serves,
+    /// out of the queue's order, and panics only where that thread serves none (in a restart,
+    /// between the old core and the new).
     pub fn call<T: Send + 'static>(&self, f: impl FnOnce(&Mpv) -> T + Send + 'static) -> T {
+        if let Some(name) = this_thread_is(&[REQUEST_THREAD, EVENT_THREAD]) {
+            tracing::error!("Engine::call on the {name} thread, which it would wait for");
+            if cfg!(debug_assertions) {
+                panic!("Engine::call on the {name} thread, which it would wait for");
+            }
+            let mpv = OWN_CORE
+                .with(|core| core.borrow().upgrade())
+                .unwrap_or_else(|| {
+                    panic!("Engine::call on the {name} thread, which serves no core")
+                });
+            return f(&mpv);
+        }
         let (reply, result) = mpsc::sync_channel(1);
         self.request(Request::Call(Box::new(move |mpv| {
             // Cannot fail: the caller waits on `result`.
@@ -307,10 +354,7 @@ impl Engine {
     /// runs, so the player is never left without one; `Start` means none runs (a later restart
     /// tries again).
     pub fn restart(&self, restart: Restart) -> Result<(), RestartError> {
-        if let Some(name) = thread::current()
-            .name()
-            .filter(|name| [MAIN_THREAD, REQUEST_THREAD, EVENT_THREAD].contains(name))
-        {
+        if let Some(name) = this_thread_is(&[MAIN_THREAD, REQUEST_THREAD, EVENT_THREAD]) {
             tracing::error!("a restart of the player was asked for on the {name} thread");
             return Err(RestartError::Start(format!(
                 "a restart cannot wait on the {name} thread"
@@ -401,6 +445,9 @@ struct Worker {
 
 impl Worker {
     fn run(mut self, queue: mpsc::Receiver<Job>) {
+        if let Some(core) = &self.core {
+            serve(&core.mpv);
+        }
         // The queue never closes while `self.jobs` lives: `Job::Stop` ends it.
         for job in &queue {
             match job {
@@ -495,6 +542,7 @@ impl Worker {
                 return Err(RestartError::Start(error.to_string()));
             }
         };
+        serve(&core.mpv);
         guarded("preparing the new core", || prepare(&core.mpv));
         for args in resume::restore_commands(&state) {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -576,7 +624,10 @@ impl Core {
             let mpv = Arc::clone(&mpv);
             let status = Arc::clone(status);
             let flags = Arc::clone(&flags);
-            move || run_events(&mpv, events, &enforcer, &status, &flags)
+            move || {
+                serve(&mpv);
+                run_events(&mpv, events, &enforcer, &status, &flags);
+            }
         });
         Core {
             mpv,
@@ -811,8 +862,9 @@ fn run_events(
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{self, AssertUnwindSafe};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex, mpsc};
+    use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -1223,6 +1275,87 @@ mod tests {
             )),
             "{heard:#?}"
         );
+    }
+
+    /// Calls the engine at a `script-message call`, as a loop must not, and keeps what came back
+    /// (`None`: the call was refused).
+    struct Caller {
+        engine: Arc<OnceLock<Weak<Engine>>>,
+        answers: Arc<Mutex<Vec<Option<bool>>>>,
+    }
+
+    impl EventLoop for Caller {
+        fn on_event(&mut self, _mpv: &Mpv, event: Event) {
+            if !matches!(&event, Event::ClientMessage { args } if args == &["call"]) {
+                return;
+            }
+            let Some(engine) = self.engine.get().and_then(Weak::upgrade) else {
+                return;
+            };
+            let answer = panic::catch_unwind(AssertUnwindSafe(|| {
+                engine.call(|mpv| mpv.get_flag("idle-active").unwrap())
+            }))
+            .ok();
+            // Not the last handle of the engine: the test holds one.
+            drop(engine);
+            self.answers.lock().unwrap().push(answer);
+        }
+
+        fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
+            None
+        }
+    }
+
+    /// `call` on the engine's own threads would wait for itself (queued behind a restart that
+    /// joins the event thread, or on the request thread for the request thread): it never queues.
+    /// A debug build panics there (the threads go on); a release build answers at once from the
+    /// core the thread serves.
+    #[test]
+    fn a_call_on_the_engines_own_threads_never_waits_for_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handle = Arc::new(OnceLock::new());
+        let answers = Arc::new(Mutex::new(Vec::new()));
+        let engine = Arc::new(
+            Engine::start(
+                headless(temp_paths(tmp.path())),
+                Caller {
+                    engine: Arc::clone(&handle),
+                    answers: Arc::clone(&answers),
+                },
+            )
+            .unwrap(),
+        );
+        handle.set(Arc::downgrade(&engine)).unwrap();
+        let expected = if cfg!(debug_assertions) {
+            None
+        } else {
+            Some(true)
+        };
+
+        // On the request thread, inside a call.
+        let inner = engine.call({
+            let engine = Arc::clone(&engine);
+            move |_| {
+                panic::catch_unwind(AssertUnwindSafe(|| {
+                    engine.call(|mpv| mpv.get_flag("idle-active").unwrap())
+                }))
+                .ok()
+            }
+        });
+        assert_eq!(inner, expected);
+
+        // On the event thread, in a loop.
+        engine.command(&["script-message", "call"]);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while answers.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "the loop's call never came back");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(*answers.lock().unwrap(), [expected]);
+
+        // Both threads go on.
+        assert!(engine.call(|mpv| mpv.get_flag("idle-active").unwrap()));
+        assert_eq!(engine.restart(Restart::new(NoEvents)), Ok(()));
     }
 
     /// On a thread the restart would wait for (the request thread, in a `call`; the main thread,
