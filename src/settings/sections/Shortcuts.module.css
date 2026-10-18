@@ -1,0 +1,223 @@
+/*
+ * The shortcuts section (Shortcuts.tsx): a search field, then the bindings in groups, a row for
+ * each with its key, what it does and the buttons. The rows sit on the settings page's glass card, so
+ * the text colour is the glass' own and the quieter tones are that colour at a lower strength.
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+}
+
+.intro {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.searchBox {
+  display: flex;
+}
+
+.search {
+  box-sizing: border-box;
+  width: min(100%, 320px);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+}
+
+.search::placeholder {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.status {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.status:empty {
+  display: none;
+}
+
+.loading {
+  margin: 0;
+}
+
+/* The shortcuts could not be read, or the player is not up. */
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-s) var(--k-space-m);
+  border-inline-start: 3px solid var(--k-color-danger);
+}
+
+.failureText {
+  margin: 0;
+}
+
+.group {
+  margin-top: var(--k-space-m);
+}
+
+.groupHeading {
+  margin: 0 0 var(--k-space-xs);
+  font-size: var(--k-font-size-m);
+  font-weight: 700;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The key, what it does, the buttons; the question or the hint of the row goes under them. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--k-space-xs) var(--k-space-l);
+  padding: var(--k-space-s) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .what {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.key {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px var(--k-space-s);
+  overflow: hidden;
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-s);
+  background: var(--k-color-hover);
+  font-family: inherit;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.what {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command {
+  overflow: hidden;
+  font-size: var(--k-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.disabled {
+  font-style: italic;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.actions {
+  display: flex;
+  gap: var(--k-space-xs);
+}
+
+.action,
+.retry {
+  padding: var(--k-space-xs) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.retry {
+  font-size: inherit;
+}
+
+.action:hover:not(:disabled),
+.retry:hover {
+  background: var(--k-color-selected);
+}
+
+.action[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--k-color-selected);
+}
+
+.action:disabled {
+  opacity: 0.5;
+}
+
+.extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  grid-column: 1 / -1;
+  gap: var(--k-space-s);
+}
+
+.hint {
+  flex: 1 1 14rem;
+  margin: 0;
+  font-size: var(--k-font-size-s);
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+/* High contrast: system colours; the button that waits for its key is told by its fill. */
+@media (forced-colors: active) {
+  .search,
+  .action,
+  .retry,
+  .key {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .action[aria-pressed='true'] {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .failure,
+  .error {
+    border-inline-start-color: CanvasText;
+  }
+}

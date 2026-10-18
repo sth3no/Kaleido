@@ -91,6 +91,16 @@ export type LoadIssue = { source: string; kind: SourceError };
 
 export type DialogPurpose = 'media' | 'subtitle';
 
+/**
+ * A page about the sources of what Kaleido ships (spec 11.6). The UI names the page, Rust has the
+ * address: no command opens a link the UI makes up.
+ */
+export type SourcePage =
+  /** The releases of Kaleido, with the tag of the sources of each. */
+  | 'kaleido'
+  /** The sources of the libmpv build Kaleido ships. */
+  | 'libmpv';
+
 export type PasteOutcome =
   /** The clipboard held a link, which now opens. */
   | 'played'
@@ -403,6 +413,7 @@ export interface CommandTable {
   system_paste: { args: undefined; result: PasteOutcome };
   system_open_text: { args: { text: string }; result: Nothing };
   system_open_roadmap: { args: undefined; result: Nothing };
+  system_open_source: { args: { which: SourcePage }; result: Nothing };
   surface_set_layout: { args: { layout: Layout }; result: Nothing };
   surface_set_caption_buttons: { args: { rects: CaptionButton[] }; result: Nothing };
   glass_set_regions: { args: { rects: GlassRect[] }; result: Nothing };

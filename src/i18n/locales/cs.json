@@ -129,7 +129,8 @@
     "playerNotReady": "Přehrávač ještě není připravený, jeho nastavení proto nejde zobrazit.",
     "retry": "Zkusit znovu",
     "units": {
-      "percent": "{{value}}\u00a0%"
+      "percent": "{{value}}\u00a0%",
+      "px": "{{value}}\u00a0px"
     },
     "hints": {
       "atStart": "Platí od příštího spuštění."
@@ -141,7 +142,8 @@
       "notAllowed": "Kaleido tuto hodnotu nepřijme.",
       "io": "Nastavení se nepodařilo uložit. Zkontroluj, že se do složky s nastavením dá zapisovat.",
       "unavailable": "Přehrávač ještě neběží. Zkus to za chvíli znovu.",
-      "generic": "Nastavení se nepodařilo uložit."
+      "generic": "Nastavení se nepodařilo uložit.",
+      "invalidColorOpaque": "Použij tvar #RRGGBB."
     },
     "fields": {
       "listFailed": "Seznam se nepodařilo načíst.",
@@ -154,13 +156,19 @@
         "none": "Žádné písmo nevyhovuje"
       },
       "color": {
-        "placeholder": "#RRGGBB nebo #AARRGGBB"
+        "placeholder": "#RRGGBB nebo #AARRGGBB",
+        "placeholderOpaque": "#RRGGBB"
       },
       "langList": {
         "placeholder": "např. cs, en"
       },
       "shaders": {
         "empty": "Ve složce se shadery zatím nejsou žádné soubory."
+      },
+      "accent": {
+        "kaleido": "Kaleido",
+        "custom": "Vlastní barva",
+        "colour": "Kód barvy zvýraznění"
       }
     },
     "items": {
@@ -280,6 +288,132 @@
         "label": "Shadery",
         "keywords": "glsl, filtr, zvětšení, zostření, anime4k, fsr, ravu, hook",
         "hint": "Použijí se v pořadí, v jakém je zapneš. Soubory patří do složky %APPDATA%\\Kaleido\\shaders."
+      },
+      "language": {
+        "keywords": "jazyk, lokalizace, překlad, čeština, angličtina, jazyk systému, jazyk rozhraní"
+      },
+      "mode": {
+        "label": "Barevný režim",
+        "keywords": "tmavý, světlý, motiv, noc, den, barevné schéma, windows",
+        "options": {
+          "system": "Podle Windows",
+          "dark": "Tmavý",
+          "light": "Světlý"
+        }
+      },
+      "accent": {
+        "label": "Barva zvýraznění",
+        "keywords": "akcent, zvýraznění, barva, duha, kaleido, vlastní, hex"
+      },
+      "glassTint": {
+        "label": "Tónování skla",
+        "keywords": "tónování, odstín, sklo, barva, panel, pozadí, hex"
+      },
+      "glassOpacity": {
+        "label": "Krytí skla",
+        "keywords": "krytí, průhlednost, průhledné, sklo, alfa, průsvitnost"
+      },
+      "blur": {
+        "label": "Rozmazání skla",
+        "keywords": "rozmazání, matné, sklo, gaussovo, měkké"
+      },
+      "saturation": {
+        "label": "Sytost skla",
+        "keywords": "sytost, živé, barvy, sklo, intenzivní"
+      },
+      "radius": {
+        "label": "Zaoblení skla",
+        "keywords": "zaoblení, rohy, kulaté, hranaté, sklo, tvar"
+      },
+      "mica": {
+        "label": "Mica",
+        "keywords": "mica, pozadí okna, tapeta, windows 11, materiál, podklad",
+        "hint": "Jen Windows 11. Pozadí okna jemně prosvítá tapetou plochy.",
+        "unavailable": "Mica vyžaduje Windows 11. Na Windows 10 má okno místo ní neprůhledné pozadí s gradientem."
+      },
+      "reduceTransparency": {
+        "label": "Snížit průhlednost",
+        "keywords": "průhlednost, neprůhledné, plné, přístupnost, výkon, efekty, sklo",
+        "options": {
+          "auto": "Automaticky (podle Windows)",
+          "on": "Zapnuto",
+          "off": "Vypnuto"
+        }
+      },
+      "uiScale": {
+        "label": "Měřítko rozhraní",
+        "keywords": "měřítko, velikost, zoom, dpi, větší, menší, rozhraní"
+      }
+    },
+    "appearance": {
+      "reset": "Obnovit výchozí",
+      "preview": {
+        "label": "Náhled rozhraní s tímto nastavením",
+        "title": "Ukázkové video.mkv",
+        "card": "Titulky",
+        "optionOne": "Čeština",
+        "optionTwo": "Angličtina"
+      }
+    },
+    "shortcuts": {
+      "intro": "Všechny klávesy a co dělají, i ty, které přidávají pluginy. Zvol Změnit a stiskni novou klávesu; Esc změnu zruší.",
+      "search": {
+        "label": "Hledat ve zkratkách",
+        "none": "Pro „{{query}}“ se mezi zkratkami nic nenašlo."
+      },
+      "groups": {
+        "kaleido": "Kaleido",
+        "user": "Vlastní",
+        "mpv": "mpv"
+      },
+      "disabled": "Vypnuto",
+      "change": "Změnit",
+      "changeLabel": "Změnit zkratku {{key}}",
+      "reset": "Obnovit",
+      "resetLabel": "Obnovit zkratku {{key}}",
+      "waiting": "Stiskni novou klávesu pro {{key}}. Esc změnu zruší.",
+      "reserved": "Tuto klávesu používá Windows nebo posouvá fokus, zkratka ji proto mít nemůže. Stiskni jinou.",
+      "cancel": "Zrušit",
+      "conflict": "{{key}} už dělá toto: {{command}}. Nahradit?",
+      "replace": "Nahradit",
+      "changed": "Zkratka přesunuta z {{from}} na {{to}}.",
+      "wasReset": "Zkratka {{key}} obnovena.",
+      "readFailed": "Zkratky se nepodařilo přečíst.",
+      "refreshFailed": "Seznam se nepodařilo obnovit.",
+      "notReady": "Přehrávač ještě není připravený, jeho zkratky proto nejdou zobrazit.",
+      "errors": {
+        "badKey": "mpv tuto klávesu nepřijímá. Stiskni jinou.",
+        "cannotChange": "Tuto zkratku nejde změnit.",
+        "io": "Zkratku se nepodařilo uložit. Zkontroluj, že se do složky s nastavením dá zapisovat.",
+        "generic": "Zkratku se nepodařilo změnit."
+      }
+    },
+    "about": {
+      "versions": {
+        "kaleido": "Kaleido",
+        "libmpv": "libmpv",
+        "ffmpeg": "FFmpeg"
+      },
+      "unknown": "Neznámá",
+      "screenshotNote": "Snímek, který plugin pořídí příkazem screenshot, obsahuje sklo. Snímky z vlastních zkratek Kaleida sklo neobsahují.",
+      "openLogs": "Otevřít složku s logy",
+      "copyDiagnostics": "Zkopírovat diagnostiku",
+      "copied": "Diagnostika je ve schránce.",
+      "copyFailed": "Diagnostiku se nepodařilo zkopírovat: {{reason}}",
+      "openFailed": "Nepodařilo se to otevřít.",
+      "sources": {
+        "title": "Zdroje",
+        "text": "Kaleido je svobodný software pod licencí GPL-3.0-or-later. Přibalená libmpv je GPL build. Každé vydání odkazuje na tag svých zdrojů a na zdroje tohoto buildu libmpv.",
+        "kaleido": "Vydání a zdroje Kaleida",
+        "libmpv": "Zdroje buildu libmpv"
+      },
+      "licenses": {
+        "title": "Licence třetích stran",
+        "note": "Software, na kterém Kaleido stojí. Plná znění licencí přibudou v pozdější verzi.",
+        "search": "Hledat v licencích",
+        "none": "Pro „{{query}}“ se mezi licencemi nic nenašlo.",
+        "count": "Celkem: {{total}}",
+        "list": "Seznam licencí"
       }
     }
   },

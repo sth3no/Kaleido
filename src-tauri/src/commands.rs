@@ -15,7 +15,9 @@ use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
 use crate::system::diagnostics::{self, License};
-use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
+use crate::system::{
+    self, ROADMAP_URL, Snapshot, SourcePage, clipboard::PasteOutcome, dialog::DialogPurpose,
+};
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbStore};
 
@@ -95,6 +97,17 @@ pub fn system_open_text(app: AppHandle, text: String) -> Result<(), LoadIssue> {
 pub async fn system_open_roadmap() {
     if let Err(error) = tauri_plugin_opener::open_url(ROADMAP_URL, None::<&str>) {
         tracing::warn!("cannot open the roadmap: {error}");
+    }
+}
+
+/// Opens a page about the sources of what Kaleido ships in the browser (spec 11.6): the releases
+/// of Kaleido, or the sources of the libmpv build. The UI names the page; the addresses are
+/// fixed in Rust, so no command opens a link the UI makes up. Asynchronous: starting the
+/// browser may take a moment.
+#[tauri::command]
+pub async fn system_open_source(which: SourcePage) {
+    if let Err(error) = tauri_plugin_opener::open_url(which.url(), None::<&str>) {
+        tracing::warn!("cannot open the sources page {which:?}: {error}");
     }
 }
 

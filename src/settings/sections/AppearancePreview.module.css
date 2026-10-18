@@ -1,0 +1,171 @@
+/*
+ * The preview of the appearance settings (AppearancePreview.tsx): islands of glass over a sample
+ * gradient. The stage sets its own --k-* variables inline, so everything inside it (and the glass
+ * class, theme/glass.module.css) is drawn from the settings being previewed and not from the root.
+ * It comes after theme/glass.module.css, so the islands' radius and padding win over the glass' own.
+ */
+.stage {
+  /* The sample picture: colours of a video, not of the interface, so they are the same in every theme. */
+  --sample-a: #ff8a5c;
+  --sample-b: #ffd166;
+  --sample-c: #35d6a4;
+  --sample-d: #2a9df4;
+  --sample-e: #8a4dff;
+  --stage-radius: 16px;
+
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  box-sizing: border-box;
+  height: 200px;
+  margin: var(--k-space-s) 0 var(--k-space-m);
+  border: 1px solid var(--k-color-divider);
+  border-radius: var(--stage-radius);
+  color: var(--k-color-on-glass);
+  font-size: var(--k-font-size-s);
+  background: linear-gradient(
+    115deg,
+    var(--sample-a) 0%,
+    var(--sample-b) 24%,
+    var(--sample-c) 48%,
+    var(--sample-d) 74%,
+    var(--sample-e) 100%
+  );
+}
+
+/* Sharp stripes and discs under the glass: without detail there would be no blur to see. */
+.stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 22% 70%, #ffffffcc 0 26px, transparent 27px),
+    radial-gradient(circle at 74% 34%, #1b1730b3 0 34px, transparent 35px),
+    repeating-linear-gradient(90deg, #ffffff40 0 8px, transparent 8px 28px);
+}
+
+.title {
+  position: absolute;
+  top: var(--k-space-m);
+  left: var(--k-space-m);
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-l) var(--k-space-xs) var(--k-space-s);
+  border-radius: var(--k-radius-pill);
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--k-accent-gradient);
+}
+
+.titleText {
+  white-space: nowrap;
+}
+
+.card {
+  position: absolute;
+  top: var(--k-space-m);
+  right: var(--k-space-m);
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  width: 34%;
+  min-width: 120px;
+  box-sizing: border-box;
+  padding: var(--k-space-m);
+  border-radius: var(--k-radius-l);
+}
+
+.cardTitle {
+  font-weight: 700;
+}
+
+.cardLine {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-s);
+  padding: 2px var(--k-space-s);
+  border-radius: var(--k-radius-s);
+}
+
+.cardLine[data-selected] {
+  background: var(--k-color-selected);
+}
+
+.check {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--k-accent-solid);
+}
+
+.controls {
+  position: absolute;
+  right: var(--k-space-m);
+  bottom: var(--k-space-m);
+  left: var(--k-space-m);
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-m);
+  box-sizing: border-box;
+  padding: var(--k-space-s) var(--k-space-l);
+  border-radius: calc(var(--k-radius-l) * 1.2);
+}
+
+.play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--k-accent-gradient);
+  color: var(--k-color-on-accent);
+}
+
+.track {
+  flex: 1;
+  min-width: 0;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-color-on-glass) 24%, transparent);
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  background: var(--k-accent-gradient);
+}
+
+.time {
+  flex: none;
+}
+
+/* High contrast: system colours; gradients are not drawn there, so the accent is Highlight. */
+@media (forced-colors: active) {
+  .stage {
+    border-color: CanvasText;
+    background: Canvas;
+  }
+
+  .stage::before {
+    display: none;
+  }
+
+  .dot,
+  .play,
+  .fill,
+  .check {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+}

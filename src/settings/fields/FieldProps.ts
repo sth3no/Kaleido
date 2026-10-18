@@ -12,6 +12,11 @@ export interface FieldProps<V> {
    * that says why, shown in the row, or `null` when there is nothing to say any more.
    */
   onInvalid?: (text: string | null) => void;
+  /**
+   * A field that is dragged (a slider) says what it shows now, also while nothing is saved yet, so that
+   * something drawn from the setting (the appearance's preview) can follow it.
+   */
+  onPreview?: (value: V) => void;
   /** The ids of the row's hint and error, which describe the control. */
   describedBy?: string;
   /** The last change was refused. */

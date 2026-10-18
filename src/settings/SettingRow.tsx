@@ -4,6 +4,9 @@
  * the last change was refused (by Rust, or by the field itself: a text that cannot be right), why.
  * The change itself is saved at once by `useSetting`; the message is a `role="alert"`, so that a
  * screen reader says it, and it describes the field (`aria-describedby`) until the next change.
+ *
+ * A setting the system cannot offer (Mica on Windows 10) is `unavailable`: its field is off, shows
+ * what is really so (`shown`) and the hint says why. A slider tells `onPreview` what it shows.
  */
 
 import { useId, useRef, type MouseEvent as ReactMouseEvent } from 'react';
@@ -13,12 +16,26 @@ import type { SettingDescriptor } from './descriptors';
 import SettingField from './SettingField';
 import styles from './SettingRow.module.css';
 import { useSetting } from './useSetting';
+import type { FieldValue } from './values';
+
+/** Why a setting is off here, and what its field shows meanwhile. */
+export interface Unavailable {
+  /** The key of the text that says why; it stands in the place of the hint. */
+  reasonKey: string;
+  shown: FieldValue;
+}
 
 export interface SettingRowProps {
   descriptor: SettingDescriptor;
+  unavailable?: Unavailable;
+  /** A slider of the row shows `value` now (also while it is dragged, before it is saved). */
+  onPreview?: (id: string, value: number) => void;
 }
 
-export default function SettingRow({ descriptor }: SettingRowProps) {
+/** The fields that are several controls, which a `<label for>` cannot name: the group is labelled instead. */
+const GROUPS = new Set<SettingDescriptor['field']['kind']>(['shaderList', 'accent']);
+
+export default function SettingRow({ descriptor, unavailable, onPreview }: SettingRowProps) {
   const { t } = useTranslation();
   const ids = useId();
   const control = useSetting(descriptor);
@@ -26,7 +43,7 @@ export default function SettingRow({ descriptor }: SettingRowProps) {
   const labelId = `${ids}-label`;
   const hintId = `${ids}-hint`;
   const errorId = `${ids}-error`;
-  const hint = descriptor.hintKey;
+  const hint = unavailable?.reasonKey ?? descriptor.hintKey;
   const describedBy =
     [hint === undefined ? '' : hintId, control.error === null ? '' : errorId]
       .filter((id) => id !== '')
@@ -76,7 +93,7 @@ export default function SettingRow({ descriptor }: SettingRowProps) {
   // The list of shaders is a group of checkboxes, not a control a label can be for.
   const labelText = t(descriptor.labelKey);
   const label =
-    descriptor.field.kind === 'shaderList' ? (
+    GROUPS.has(descriptor.field.kind) ? (
       <span id={labelId} className={styles.label}>
         {labelText}
       </span>
@@ -107,12 +124,19 @@ export default function SettingRow({ descriptor }: SettingRowProps) {
           descriptor={descriptor}
           id={fieldId}
           labelId={labelId}
-          value={control.value}
+          value={unavailable === undefined ? control.value : unavailable.shown}
           onChange={control.save}
           onInvalid={control.reject}
+          onPreview={
+            onPreview === undefined
+              ? undefined
+              : (value) => {
+                  if (typeof value === 'number') onPreview(descriptor.id, value);
+                }
+          }
           describedBy={describedBy}
           invalid={control.error !== null}
-          disabled={!control.ready}
+          disabled={!control.ready || unavailable !== undefined}
         />
         {control.error !== null && (
           <p id={errorId} className={styles.error} role="alert">

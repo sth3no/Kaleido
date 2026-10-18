@@ -1,11 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../../i18n';
+import AccentField from './AccentField';
 import ColorField from './ColorField';
 import DeviceField from './DeviceField';
 import Dropdown, { type DropdownProps } from './Dropdown';
+import type { FieldProps } from './FieldProps';
 import FontField from './FontField';
 import LangListField from './LangListField';
 import ShaderListField from './ShaderListField';
@@ -871,5 +873,287 @@ describe('ShaderListField', () => {
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('checkbox', { name: 'Anime4K.glsl' })).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('Slider as a percentage, and what it tells the preview', () => {
+  function renderFraction(props: Partial<SliderProps> = {}) {
+    const onChange = vi.fn();
+    const onPreview = vi.fn();
+    const view = render(
+      <>
+        <span id="label">Opacity</span>
+        <Slider
+          id="slider"
+          labelId="label"
+          value={0.55}
+          onChange={onChange}
+          onPreview={onPreview}
+          min={0.3}
+          max={0.95}
+          step={0.05}
+          unitKey="settings.units.percent"
+          percent
+          {...props}
+        />
+      </>,
+    );
+    return {
+      onChange,
+      onPreview,
+      ...view,
+      slider: screen.getByRole('slider', { name: 'Opacity' }) as HTMLInputElement,
+    };
+  }
+
+  test('a fraction is written as a percentage, and saved as the fraction', () => {
+    const { slider, onChange } = renderFraction();
+    expect(slider.getAttribute('aria-valuetext')).toBe('55%');
+    expect(slider.value).toBe('0.55');
+    expect(screen.getByText('55%').tagName).toBe('OUTPUT');
+
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
+    fireEvent.change(slider, { target: { value: '0.6' } });
+    expect(slider.getAttribute('aria-valuetext')).toBe('60%');
+    expect(onChange.mock.calls).toEqual([[0.6]]);
+  });
+
+  test('a percentage has no float noise', () => {
+    // 0.35 * 100 is 35.00000000000001 in floating point.
+    const { slider } = renderFraction({ value: 0.35 });
+    expect(slider.getAttribute('aria-valuetext')).toBe('35%');
+    cleanup();
+    const { slider: scaled } = renderFraction({ min: 0.9, max: 1.5, value: 1.15 });
+    expect(scaled.getAttribute('aria-valuetext')).toBe('115%');
+  });
+
+  test('without percent the fraction stays a fraction', () => {
+    const { slider } = renderFraction({ percent: false, unitKey: undefined });
+    expect(slider.getAttribute('aria-valuetext')).toBe('0.55');
+  });
+
+  test('tells the preview what it shows: the stored value, then the thumb while it is dragged, then the saved one', () => {
+    const { slider, onPreview, rerender } = renderFraction();
+    expect(onPreview.mock.calls).toEqual([[0.55]]);
+
+    // Dragged: the preview follows the thumb, and nothing is saved on the way.
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, { target: { value: '0.7' } });
+    fireEvent.change(slider, { target: { value: '0.75' } });
+    expect(onPreview.mock.calls).toEqual([[0.55], [0.7], [0.75]]);
+
+    // Let go: the value being saved is the field's value then, which is what it shows.
+    fireEvent.pointerUp(slider);
+    expect(onPreview).toHaveBeenLastCalledWith(0.55);
+    onPreview.mockClear();
+
+    // A stored value that comes from elsewhere is followed too.
+    rerender(
+      <>
+        <span id="label">Opacity</span>
+        <Slider
+          id="slider"
+          labelId="label"
+          value={0.4}
+          onChange={vi.fn()}
+          onPreview={onPreview}
+          min={0.3}
+          max={0.95}
+          step={0.05}
+          percent
+        />
+      </>,
+    );
+    expect(onPreview).toHaveBeenLastCalledWith(0.4);
+  });
+
+  test('does not repeat itself while nothing changes', () => {
+    const { onPreview, rerender } = renderFraction();
+    rerender(
+      <>
+        <span id="label">Opacity</span>
+        <Slider
+          id="slider"
+          labelId="label"
+          value={0.55}
+          onChange={vi.fn()}
+          onPreview={onPreview}
+          min={0.3}
+          max={0.95}
+          step={0.05}
+          percent
+        />
+      </>,
+    );
+    expect(onPreview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ColorField without alpha', () => {
+  function renderTint(value = '#16161c') {
+    const onChange = vi.fn();
+    const onInvalid = vi.fn();
+    render(
+      <>
+        <span id="label">Tint</span>
+        <ColorField
+          id="tint"
+          labelId="label"
+          value={value}
+          onChange={onChange}
+          onInvalid={onInvalid}
+          alpha={false}
+        />
+      </>,
+    );
+    return { onChange, onInvalid, field: screen.getByRole('textbox', { name: 'Tint' }) as HTMLInputElement };
+  }
+
+  test('asks for #RRGGBB only', () => {
+    const { field } = renderTint();
+    expect(field.placeholder).toBe('#RRGGBB');
+  });
+
+  test('a colour with an alpha is no colour here: it is not sent, and the row is told in its own words', () => {
+    const { onChange, onInvalid, field } = renderTint();
+    fireEvent.change(field, { target: { value: '#80102030' } });
+    fireEvent.blur(field);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInvalid).toHaveBeenLastCalledWith('settings.errors.invalidColorOpaque');
+    expect(field.value).toBe('#80102030');
+  });
+
+  test('six digits are sent in capitals', () => {
+    const { onChange, field } = renderTint();
+    fireEvent.change(field, { target: { value: 'ff8800' } });
+    fireEvent.blur(field);
+    expect(onChange.mock.calls).toEqual([['#FF8800']]);
+  });
+});
+
+describe('AccentField', () => {
+  function renderAccent(value = 'kaleido', props: Partial<FieldProps<string>> = {}) {
+    const onChange = vi.fn();
+    const onInvalid = vi.fn();
+    const view = render(
+      <>
+        <span id="label">Accent</span>
+        <AccentField
+          id="accent"
+          labelId="label"
+          value={value}
+          onChange={onChange}
+          onInvalid={onInvalid}
+          {...props}
+        />
+      </>,
+    );
+    return { onChange, onInvalid, ...view };
+  }
+  const radio = (name: string) => screen.getByRole('radio', { name }) as HTMLButtonElement;
+  const code = () => screen.getByRole('textbox', { name: 'Accent color code' }) as HTMLInputElement;
+
+  test('is a radio group named by the label, with the rainbow chosen, and no text for a colour', () => {
+    renderAccent();
+    const group = screen.getByRole('radiogroup', { name: 'Accent' });
+    expect(within(group).getAllByRole('radio').map((choice) => choice.textContent)).toEqual([
+      'Kaleido',
+      'My color',
+    ]);
+    expect(radio('Kaleido').getAttribute('aria-checked')).toBe('true');
+    expect(radio('My color').getAttribute('aria-checked')).toBe('false');
+    // One stop for Tab: the choice that is made.
+    expect([radio('Kaleido').tabIndex, radio('My color').tabIndex]).toEqual([0, -1]);
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  test('a colour is chosen, and its text is beside a swatch of it', () => {
+    const { container } = renderAccent('#ff8800');
+    expect(radio('My color').getAttribute('aria-checked')).toBe('true');
+    expect([radio('Kaleido').tabIndex, radio('My color').tabIndex]).toEqual([-1, 0]);
+    expect(code().value).toBe('#ff8800');
+    expect(container.querySelector('[class*="swatch"]')?.getAttribute('style')).toContain('#FF8800');
+  });
+
+  test('"my color" starts from the violet of the rainbow, and choosing what is chosen changes nothing', () => {
+    const { onChange } = renderAccent();
+    fireEvent.click(radio('My color'));
+    expect(onChange.mock.calls).toEqual([['#A98BFF']]);
+    fireEvent.click(radio('Kaleido'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test('the rainbow is saved with its word', () => {
+    const { onChange } = renderAccent('#ff8800');
+    fireEvent.click(radio('Kaleido'));
+    expect(onChange.mock.calls).toEqual([['kaleido']]);
+    fireEvent.click(radio('My color'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test('the colour the user had comes back', () => {
+    const { onChange, rerender } = renderAccent('#ff8800');
+    rerender(
+      <>
+        <span id="label">Accent</span>
+        <AccentField id="accent" labelId="label" value="kaleido" onChange={onChange} />
+      </>,
+    );
+    fireEvent.click(radio('My color'));
+    expect(onChange.mock.calls).toEqual([['#ff8800']]);
+  });
+
+  test('the arrows move between the two and choose, and are handled, so that mpv does not get them', () => {
+    const { onChange } = renderAccent();
+    act(() => {
+      radio('Kaleido').focus();
+    });
+    expect(fireEvent.keyDown(radio('Kaleido'), { key: 'ArrowRight' })).toBe(false);
+    expect(document.activeElement).toBe(radio('My color'));
+    expect(onChange.mock.calls).toEqual([['#A98BFF']]);
+    // Round the end.
+    expect(fireEvent.keyDown(radio('My color'), { key: 'ArrowDown' })).toBe(false);
+    expect(document.activeElement).toBe(radio('Kaleido'));
+    // Other keys, and keys with a modifier, are left alone.
+    expect(fireEvent.keyDown(radio('Kaleido'), { key: 'a' })).toBe(true);
+    expect(fireEvent.keyDown(radio('Kaleido'), { key: 'ArrowRight', ctrlKey: true })).toBe(true);
+  });
+
+  test('a colour is saved when the field is left, in capitals; what is no colour is not sent', () => {
+    const { onChange, onInvalid } = renderAccent('#ff8800');
+    fireEvent.change(code(), { target: { value: '12345' } });
+    fireEvent.blur(code());
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInvalid).toHaveBeenLastCalledWith('settings.errors.invalidColorOpaque');
+    expect(code().value).toBe('12345');
+
+    // #AARRGGBB is not an accent.
+    fireEvent.change(code(), { target: { value: '#80ff8800' } });
+    fireEvent.blur(code());
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.change(code(), { target: { value: '00ff00' } });
+    fireEvent.keyDown(code(), { key: 'Enter' });
+    expect(onChange.mock.calls).toEqual([['#00FF00']]);
+  });
+
+  test('is off when the row is', () => {
+    renderAccent('#ff8800', { disabled: true });
+    expect(radio('Kaleido').disabled).toBe(true);
+    expect(radio('My color').disabled).toBe(true);
+    expect(code().disabled).toBe(true);
+  });
+
+  test('says when the last change was refused', () => {
+    renderAccent('#ff8800', { invalid: true });
+    expect(radio('Kaleido').hasAttribute('data-invalid')).toBe(true);
+    expect(code().getAttribute('aria-invalid')).toBe('true');
+  });
+
+  test('a pointer click leaves nothing focused, so that Space goes to mpv', () => {
+    renderAccent();
+    radio('Kaleido').focus();
+    fireEvent.pointerUp(radio('Kaleido'));
+    expect(document.activeElement).not.toBe(radio('Kaleido'));
   });
 });

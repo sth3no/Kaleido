@@ -120,6 +120,11 @@ export function isColor(text: string): boolean {
   return /^#(?:[0-9a-f]{2})?[0-9a-f]{6}$/i.test(text);
 }
 
+/** Whether `text` is a colour with no alpha, `#RRGGBB` (the accent and the glass tint; what Rust checks too). */
+export function isOpaqueColor(text: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(text);
+}
+
 /** A colour of mpv's (`#AARRGGBB`, alpha first) as CSS (`#RRGGBBAA`); `undefined` for what is no colour. */
 export function cssColor(text: string): string | undefined {
   const match = /^#(?:([0-9a-f]{2}))?([0-9a-f]{6})$/i.exec(text);

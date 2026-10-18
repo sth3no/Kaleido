@@ -136,9 +136,10 @@ export interface Tokens {
 
 const LIGHT_TEXT = '#ffffff';
 const DARK_TEXT = '#1b1730';
-const KALEIDO_SOLID = '#a98bff';
+/** The one colour of the "kaleido" accent, and the gradient that goes with it (the settings show both). */
+export const KALEIDO_SOLID = '#a98bff';
 /** The progress bar of the mockups: cyan to violet to pink. */
-const KALEIDO_GRADIENT = 'linear-gradient(90deg, #7fd8ff, #a98bff, #ff8fd0)';
+export const KALEIDO_GRADIENT = 'linear-gradient(90deg, #7fd8ff, #a98bff, #ff8fd0)';
 /** The text of the mockups' white buttons: a dark violet. */
 const ON_ACCENT_DARK = '#2a1d4d';
 /** The glass tint of the light mode when the user has not chosen one (Ruling R35): white glass, as in the mockups. */

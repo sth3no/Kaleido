@@ -5,6 +5,7 @@
  */
 
 import type { SettingDescriptor } from './descriptors';
+import AccentField from './fields/AccentField';
 import ColorField from './fields/ColorField';
 import DeviceField from './fields/DeviceField';
 import type { FieldProps } from './fields/FieldProps';
@@ -37,10 +38,13 @@ export default function SettingField({ descriptor, value, ...common }: SettingFi
           max={field.max}
           step={field.step}
           unitKey={field.unitKey}
+          percent={field.percent}
         />
       );
     case 'color':
-      return <ColorField {...common} value={asString(value)} />;
+      return <ColorField {...common} value={asString(value)} alpha={field.alpha !== false} />;
+    case 'accent':
+      return <AccentField {...common} value={asString(value)} />;
     case 'font':
       return <FontField {...common} value={asString(value)} />;
     case 'langList':

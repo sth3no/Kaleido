@@ -12,6 +12,7 @@ import {
   formatShaders,
   isColor,
   isLanguages,
+  isOpaqueColor,
   normalizeColor,
   normalizeLanguages,
   parseShaders,
@@ -145,6 +146,19 @@ describe('what can be sent', () => {
     // What the field makes of typed text is a colour where the text was one.
     expect(isColor(normalizeColor('ff8800'))).toBe(true);
     expect(isColor(normalizeColor('red'))).toBe(false);
+  });
+
+  test('the accent and the glass tint are #RRGGBB, with no alpha', () => {
+    for (const good of ['#FFFFFF', '#ffcc00', '#A98BFF']) {
+      expect(isOpaqueColor(good), good).toBe(true);
+    }
+    for (const bad of ['#80000000', '#12', '#12345', '#1234567', 'FFFFFF', '#GG0000', '', '#', 'kaleido']) {
+      expect(isOpaqueColor(bad), bad).toBe(false);
+    }
+    // A colour of mpv's with an alpha is a colour there and none here.
+    expect(isColor('#80000000')).toBe(true);
+    expect(isOpaqueColor(normalizeColor('ff8800'))).toBe(true);
+    expect(isOpaqueColor(normalizeColor('#80ff8800'))).toBe(false);
   });
 
   test('languages are two or three letters each', () => {

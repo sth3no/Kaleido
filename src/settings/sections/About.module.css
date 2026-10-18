@@ -1,0 +1,171 @@
+/*
+ * The About section (About.tsx): the versions, the buttons, the way to the sources and the list of
+ * licenses. It sits on the settings page's glass card, so the text colour is the glass' own and the
+ * quieter tones are that colour at a lower strength.
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--k-space-s);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--k-space-xs) var(--k-space-xl);
+  margin: 0;
+}
+
+/* Each name and its version are one row of the grid. */
+.fact {
+  display: contents;
+}
+
+.factName {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.factValue {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.heading {
+  margin: var(--k-space-l) 0 0;
+  font-size: var(--k-font-size-m);
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-s);
+}
+
+.button {
+  padding: var(--k-space-s) var(--k-space-l);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--k-color-selected);
+}
+
+.button:disabled {
+  opacity: 0.5;
+}
+
+.status {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+}
+
+.status:empty {
+  display: none;
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+.search {
+  box-sizing: border-box;
+  width: min(100%, 320px);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-m);
+}
+
+.search::placeholder {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* The list scrolls in the page; it takes the focus, and the ring is the global :focus-visible. */
+.licenses {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 22rem;
+  overflow-y: auto;
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+}
+
+.licenseList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.license {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--k-space-l);
+  padding: var(--k-space-s) var(--k-space-m);
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.license:first-child {
+  border-top: 0;
+}
+
+.licenseName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.licenseVersion {
+  margin-inline-start: var(--k-space-s);
+  font-weight: 400;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.licenseId {
+  text-align: end;
+  font-size: var(--k-font-size-s);
+}
+
+.licenseUrl {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--k-font-size-xs);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* High contrast: system colours. */
+@media (forced-colors: active) {
+  .button,
+  .search,
+  .licenses {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .error {
+    border-inline-start-color: CanvasText;
+  }
+}

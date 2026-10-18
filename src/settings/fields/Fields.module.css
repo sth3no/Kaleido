@@ -188,6 +188,57 @@
     repeating-conic-gradient(#8884 0% 25%, transparent 0% 50%) 0 0 / 10px 10px;
 }
 
+/* Accent: the rainbow or a colour of the user's, as two choices, and the colour's text under them. */
+.accent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  width: 100%;
+}
+
+.choices {
+  display: flex;
+  gap: var(--k-space-xs);
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.choice:hover:not(:disabled) {
+  background: var(--k-color-hover);
+}
+
+.choice[aria-checked='true'] {
+  border-color: transparent;
+  background: var(--k-color-selected);
+  font-weight: 600;
+}
+
+.choice[data-invalid] {
+  border-color: var(--k-color-danger);
+}
+
+.choice:disabled {
+  opacity: 0.5;
+}
+
+.rainbow {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
 /* Slider: the panels' slider with its value beside it. */
 .slider {
   display: flex;
@@ -242,10 +293,18 @@
   .trigger,
   .input,
   .retry,
+  .choice,
   .panel {
     border-color: ButtonText;
     background: ButtonFace;
     color: ButtonText;
+  }
+
+  /* The chosen one is the one painted Highlight. */
+  .choice[aria-checked='true'] {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
   }
 
   .switch::after {
@@ -262,6 +321,7 @@
   }
 
   .trigger[data-invalid],
+  .choice[data-invalid],
   .input[aria-invalid='true'] {
     border-width: 2px;
   }

@@ -10,6 +10,10 @@
  *   so that the number shown is the number saved and Rust is not asked for every step.
  * - Set by something that is neither (a screen reader), it is saved at once.
  * A value held back also goes when the page closes.
+ *
+ * `onPreview` is told the value the slider shows, also while it is dragged and nothing is saved yet
+ * (the appearance's preview follows the thumb). With `percent` the range is a fraction (0.3 to 0.95)
+ * that is written as a percentage (30 to 95 %).
  */
 
 import {
@@ -40,6 +44,8 @@ export interface SliderProps extends FieldProps<number> {
   step: number;
   /** The key of a text with a `{{value}}` in it (`{{value}}%`); left out, the number stands alone. */
   unitKey?: string;
+  /** The range is a fraction, written as a percentage. */
+  percent?: boolean;
 }
 
 export default function Slider({
@@ -54,6 +60,8 @@ export default function Slider({
   max,
   step,
   unitKey,
+  percent = false,
+  onPreview,
 }: SliderProps) {
   const { t } = useTranslation();
   /** Where the thumb is while the user moves it, ahead of what has been saved. */
@@ -63,9 +71,9 @@ export default function Slider({
   /** The newest place the thumb was moved to. */
   const latest = useRef<number | null>(null);
   const stopWatching = useRef<AbortController | null>(null);
-  const current = useRef({ value, onChange });
+  const current = useRef({ value, onChange, onPreview });
   useLayoutEffect(() => {
-    current.current = { value, onChange };
+    current.current = { value, onChange, onPreview };
   });
 
   const send = useMemo(
@@ -119,8 +127,17 @@ export default function Slider({
   };
 
   const shown = cleanNumber(moving ?? value, min, max, step);
-  const formatted = formatNumber(shown, { maximumFractionDigits: decimalsOf(step) });
+  // A step of 0.05 as a percentage has no decimals; the digits of the fraction beyond two are the percentage's.
+  const formatted = percent
+    ? formatNumber(shown * 100, { maximumFractionDigits: Math.max(0, decimalsOf(step) - 2) })
+    : formatNumber(shown, { maximumFractionDigits: decimalsOf(step) });
   const text = unitKey === undefined ? formatted : t(unitKey, { value: formatted });
+
+  // What the slider shows is what the preview follows: the thumb while it is moved, then the value
+  // being saved (the field holds it), then the stored one.
+  useEffect(() => {
+    current.current.onPreview?.(shown);
+  }, [shown]);
   const fill = max > min ? (shown - min) / (max - min) : 0;
 
   return (

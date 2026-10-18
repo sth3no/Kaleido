@@ -43,6 +43,10 @@ export function errorText(field: FieldKind, reason: unknown): string {
   if (!isSettingsError(reason)) return 'settings.errors.generic';
   switch (reason.type) {
     case 'invalid':
+      // A colour with no alpha (the accent, the glass tint) is told in the words of that colour.
+      if (field.kind === 'accent' || (field.kind === 'color' && field.alpha === false)) {
+        return 'settings.errors.invalidColorOpaque';
+      }
       return INVALID_TEXT[field.kind] ?? 'settings.errors.invalid';
     case 'notAllowed':
       return 'settings.errors.notAllowed';

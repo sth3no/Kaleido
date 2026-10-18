@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import mpvKeysSource from '../../src-tauri/src/settings/mpv_keys.rs?raw';
+import storeSource from '../../src-tauri/src/settings/store.rs?raw';
 import cs from '../i18n/locales/cs.json';
 import en from '../i18n/locales/en.json';
 import {
@@ -102,8 +103,21 @@ describe('the descriptors', () => {
       'profile',
       'glsl-shaders',
     ]);
-    // Task 23 adds these.
-    expect(ids('appearance')).toEqual([]);
+    // The language is with the look (Ruling R48); the glass and the scale follow spec 8.5 point 4.
+    expect(ids('appearance')).toEqual([
+      'language',
+      'appearance.mode',
+      'appearance.accent',
+      'appearance.glassTint',
+      'appearance.glassOpacity',
+      'appearance.blur',
+      'appearance.saturation',
+      'appearance.radius',
+      'appearance.mica',
+      'appearance.reduceTransparency',
+      'appearance.uiScale',
+    ]);
+    // Lists of their own, not rows of settings (sections/Shortcuts.tsx, sections/About.tsx).
     expect(ids('shortcuts')).toEqual([]);
     expect(ids('about')).toEqual([]);
     expect(SECTIONS).toEqual([
@@ -299,17 +313,133 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
     expect(hinted.sort()).toEqual(atStartInRust.sort());
   });
 
-  test('Kaleido\'s own setting is a path into the settings', () => {
+  test('Kaleido\'s own settings are paths into the settings', () => {
     const own = DESCRIPTORS.filter((descriptor) => !isMpvTarget(descriptor.target));
     expect(own.map((descriptor) => descriptor.target)).toEqual([
       { kaleido: 'playback.openWhilePlaying' },
+      { kaleido: 'language' },
+      { kaleido: 'appearance.mode' },
+      { kaleido: 'appearance.accent' },
+      { kaleido: 'appearance.glassTint' },
+      { kaleido: 'appearance.glassOpacity' },
+      { kaleido: 'appearance.blur' },
+      { kaleido: 'appearance.saturation' },
+      { kaleido: 'appearance.radius' },
+      { kaleido: 'appearance.mica' },
+      { kaleido: 'appearance.reduceTransparency' },
+      { kaleido: 'appearance.uiScale' },
     ]);
+    // The id of each is its path (the id of an mpv option is the option).
+    for (const descriptor of own) {
+      const path = isMpvTarget(descriptor.target) ? '' : descriptor.target.kaleido;
+      expect(descriptor.id, descriptor.id).toBe(path);
+    }
     const field = own[0]?.field;
     expect(field?.kind).toBe('select');
     if (field?.kind === 'select') {
       // `LoadMode` of ipc/types.ts.
       expect(field.options.map((option) => option.value)).toEqual(['replace', 'append']);
     }
+  });
+});
+
+/**
+ * What Rust accepts of the appearance and the language: the ranges and the enums of
+ * src-tauri/src/settings/store.rs, read from the source itself and compared with the descriptors, so
+ * that a bound or a word that changes on one side and not on the other fails here.
+ */
+describe('the appearance against store.rs', () => {
+  /** `pub const GLASS_OPACITY: RangeInclusive<f64> = 0.3..=0.95;` as `[0.3, 0.95]`. */
+  function rangeOf(name: string): [number, number] {
+    const pattern = new RegExp(`pub const ${name}: RangeInclusive<f64> = (-?[\\d.]+)\\.\\.=(-?[\\d.]+);`);
+    const found = pattern.exec(storeSource);
+    if (!found) throw new Error(`store.rs has no range ${name} where this test looks for it`);
+    return [Number(found[1]), Number(found[2])];
+  }
+
+  /** The variants of `pub enum Name { ... }`, as the lower case words serde writes. */
+  function wordsOf(name: string): string[] {
+    const body = new RegExp(`pub enum ${name} \\{([^}]*)\\}`).exec(storeSource)?.[1];
+    if (body === undefined) throw new Error(`store.rs has no enum ${name} where this test looks for it`);
+    return body
+      .replace(/\/\/.*$/gm, '')
+      .replace(/#\[[^\]]*\]/g, '')
+      .split(',')
+      .map((variant) => variant.trim().toLowerCase())
+      .filter((variant) => variant !== '');
+  }
+
+  const own = (id: string): SettingDescriptor => {
+    const found = DESCRIPTORS.find((descriptor) => descriptor.id === id);
+    if (!found) throw new Error(`no descriptor ${id}`);
+    return found;
+  };
+  const optionsOf = (id: string): string[] => {
+    const { field } = own(id);
+    if (field.kind !== 'select') throw new Error(`${id} is not a select`);
+    return field.options.map((option) => option.value);
+  };
+
+  test('the ranges are read from the Rust source', () => {
+    expect(rangeOf('GLASS_OPACITY')).toEqual([0.3, 0.95]);
+    expect(rangeOf('BLUR')).toEqual([0, 40]);
+    expect(rangeOf('UI_SCALE')).toEqual([0.9, 1.5]);
+  });
+
+  test('the sliders have the ranges Rust checks, and their steps end on the maximum', () => {
+    const sliders: [id: string, range: string][] = [
+      ['appearance.glassOpacity', 'GLASS_OPACITY'],
+      ['appearance.blur', 'BLUR'],
+      ['appearance.saturation', 'SATURATION'],
+      ['appearance.radius', 'RADIUS'],
+      ['appearance.uiScale', 'UI_SCALE'],
+    ];
+    for (const [id, range] of sliders) {
+      const { field } = own(id);
+      expect(field.kind, id).toBe('slider');
+      if (field.kind !== 'slider') continue;
+      expect([field.min, field.max], id).toEqual(rangeOf(range));
+      expect(field.step, id).toBeGreaterThan(0);
+      // The maximum can be reached (the float arithmetic is allowed its last digits).
+      const steps = (field.max - field.min) / field.step;
+      expect(Math.abs(steps - Math.round(steps)), id).toBeLessThan(1e-9);
+    }
+    // The ones that are fractions are written as percentages; the others have a unit of their own.
+    const percent = DESCRIPTORS.flatMap((descriptor) =>
+      descriptor.field.kind === 'slider' && descriptor.field.percent ? [descriptor.id] : [],
+    );
+    expect(percent).toEqual(['appearance.glassOpacity', 'appearance.saturation', 'appearance.uiScale']);
+  });
+
+  test('the selects offer the words of the enums Rust has, and only those', () => {
+    expect(wordsOf('Language')).toEqual(['system', 'cs', 'en']);
+    expect(optionsOf('language')).toEqual(wordsOf('Language'));
+    expect(optionsOf('appearance.mode')).toEqual(wordsOf('ThemeMode'));
+    expect(optionsOf('appearance.reduceTransparency')).toEqual(wordsOf('ReduceTransparency'));
+  });
+
+  test('the accent, the tint and Mica are the kinds of field their values are', () => {
+    expect(own('appearance.accent').field).toEqual({ kind: 'accent' });
+    // #RRGGBB: Rust checks the tint with six digits only.
+    expect(own('appearance.glassTint').field).toEqual({ kind: 'color', alpha: false });
+    expect(own('appearance.mica').field).toEqual({ kind: 'toggle' });
+  });
+
+  test('the language uses the texts of the language picker, which exist since Task 15', () => {
+    const { field, labelKey } = own('language');
+    expect(labelKey).toBe('settings.language.label');
+    expect(field.kind === 'select' && field.options.map((option) => option.labelKey)).toEqual([
+      'settings.language.system',
+      'settings.language.cs',
+      'settings.language.en',
+    ]);
+  });
+
+  test('Mica has a text for the hint and one for why it is off, in both languages', () => {
+    for (const key of ['settings.items.mica.hint', 'settings.items.mica.unavailable']) {
+      for (const tree of [cs, en]) expect(typeof textAt(tree, key), key).toBe('string');
+    }
+    expect(own('appearance.mica').hintKey).toBe('settings.items.mica.hint');
   });
 });
 

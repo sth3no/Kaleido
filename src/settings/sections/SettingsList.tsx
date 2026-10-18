@@ -9,7 +9,7 @@
  */
 
 import { descriptorsOf, type SectionId } from '../descriptors';
-import SettingRow from '../SettingRow';
+import SettingRow, { type SettingRowProps, type Unavailable } from '../SettingRow';
 import { isLoaded, useSourcesLoaded } from '../store';
 
 /** What the body of a section takes. */
@@ -18,7 +18,15 @@ export interface SectionProps {
   only?: ReadonlySet<string>;
 }
 
-export default function SettingsList({ section, only }: SectionProps & { section: SectionId }) {
+export interface SettingsListProps extends SectionProps {
+  section: SectionId;
+  /** The settings (by id) that are off here, with why. */
+  unavailable?: Readonly<Record<string, Unavailable>>;
+  /** A slider of a row shows a value now (see `SettingRow`). */
+  onPreview?: SettingRowProps['onPreview'];
+}
+
+export default function SettingsList({ section, only, unavailable, onPreview }: SettingsListProps) {
   const sources = useSourcesLoaded();
   return (
     <div>
@@ -26,7 +34,12 @@ export default function SettingsList({ section, only }: SectionProps & { section
         .filter((descriptor) => only === undefined || only.has(descriptor.id))
         .filter((descriptor) => isLoaded(sources, descriptor.target))
         .map((descriptor) => (
-          <SettingRow key={descriptor.id} descriptor={descriptor} />
+          <SettingRow
+            key={descriptor.id}
+            descriptor={descriptor}
+            unavailable={unavailable?.[descriptor.id]}
+            onPreview={onPreview}
+          />
         ))}
     </div>
   );

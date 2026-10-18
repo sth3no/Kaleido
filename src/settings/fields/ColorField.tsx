@@ -6,19 +6,24 @@
  *
  * Text that is no colour is not sent: the row says so (`onInvalid`) and the text stays in the field
  * to be corrected (see `useDraft`). An empty field takes the option out of mpv.conf.
+ *
+ * With `alpha: false` only `#RRGGBB` is a colour (the glass tint).
  */
 
 import type { CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cssColor, isColor, normalizeColor } from '../values';
+import { cssColor, isColor, isOpaqueColor, normalizeColor } from '../values';
 import styles from './Fields.module.css';
 import type { FieldProps } from './FieldProps';
 import { useDraft } from './useDraft';
 
 const same = (value: string) => value;
 
-const INVALID_TEXT = 'settings.errors.invalidColor';
+export interface ColorFieldProps extends FieldProps<string> {
+  /** `#AARRGGBB` is a colour too; left out, it is. */
+  alpha?: boolean;
+}
 
 export default function ColorField({
   id,
@@ -29,15 +34,16 @@ export default function ColorField({
   describedBy,
   invalid,
   disabled,
-}: FieldProps<string>) {
+  alpha = true,
+}: ColorFieldProps) {
   const { t } = useTranslation();
   const draft = useDraft({
     value,
     show: same,
     clean: normalizeColor,
     save: onChange,
-    check: isColor,
-    invalidText: INVALID_TEXT,
+    check: alpha ? isColor : isOpaqueColor,
+    invalidText: alpha ? 'settings.errors.invalidColor' : 'settings.errors.invalidColorOpaque',
     onInvalid,
   });
   const swatch = cssColor(normalizeColor(draft.text));
@@ -54,7 +60,9 @@ export default function ColorField({
         type="text"
         className={styles.input}
         value={draft.text}
-        placeholder={t('settings.fields.color.placeholder')}
+        placeholder={t(
+          alpha ? 'settings.fields.color.placeholder' : 'settings.fields.color.placeholderOpaque',
+        )}
         aria-labelledby={labelId}
         aria-describedby={describedBy}
         aria-invalid={invalid ? true : undefined}

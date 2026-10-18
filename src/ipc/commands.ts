@@ -17,6 +17,7 @@ import type {
   LoadMode,
   PlayerCommand,
   SettingsPatch,
+  SourcePage,
   ThumbFrame,
 } from './types';
 
@@ -119,6 +120,12 @@ export const systemPaste = () => call('system_paste');
 export const systemOpenText = (text: string) => call('system_open_text', { text });
 
 export const systemOpenRoadmap = () => call('system_open_roadmap');
+
+/**
+ * Opens a page about the sources of what Kaleido ships in the browser: its releases, or the libmpv
+ * build (spec 11.6). Rust has the addresses.
+ */
+export const systemOpenSource = (which: SourcePage) => call('system_open_source', { which });
 
 // --- Settings --------------------------------------------------------------------------------
 

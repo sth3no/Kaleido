@@ -26,6 +26,16 @@ describe('what Rust refuses with', () => {
     expect(errorText({ kind: 'color' }, { type: 'invalid', key: 'sub-color', reason: 'x' })).toBe(
       'settings.errors.invalidColor',
     );
+    // A colour with no alpha (the glass tint, the accent) is told in the words of that colour.
+    expect(
+      errorText({ kind: 'color', alpha: false }, { type: 'invalid', key: 'appearance.glassTint', reason: 'x' }),
+    ).toBe('settings.errors.invalidColorOpaque');
+    expect(errorText({ kind: 'color', alpha: true }, { type: 'invalid', key: 'sub-color', reason: 'x' })).toBe(
+      'settings.errors.invalidColor',
+    );
+    expect(errorText({ kind: 'accent' }, { type: 'invalid', key: 'appearance.accent', reason: 'x' })).toBe(
+      'settings.errors.invalidColorOpaque',
+    );
     expect(errorText(SLIDER, { type: 'invalid', key: 'volume', reason: 'x' })).toBe(
       'settings.errors.invalid',
     );
@@ -44,6 +54,7 @@ describe('what Rust refuses with', () => {
       'invalid',
       'invalidLangList',
       'invalidColor',
+      'invalidColorOpaque',
       'notAllowed',
       'io',
       'unavailable',

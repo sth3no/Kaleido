@@ -90,8 +90,11 @@ const DARK_SCHEME = '(prefers-color-scheme: dark)';
 const darkQuery = (): MediaQueryList | null =>
   typeof window.matchMedia === 'function' ? window.matchMedia(DARK_SCHEME) : null;
 
-/** Whether the WebView, which follows Windows, wants the dark scheme. Dark where it cannot tell. */
-function usePrefersDark(): boolean {
+/**
+ * Whether the WebView, which follows Windows, wants the dark scheme. Dark where it cannot tell. The
+ * settings' preview needs it too, to draw the mode "system" as the root does.
+ */
+export function usePrefersDark(): boolean {
   const [dark, setDark] = useState(() => darkQuery()?.matches ?? true);
   useEffect(() => {
     const query = darkQuery();

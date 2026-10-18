@@ -70,6 +70,7 @@ pub fn run() {
             commands::system_paste,
             commands::system_open_text,
             commands::system_open_roadmap,
+            commands::system_open_source,
             commands::surface_set_layout,
             commands::surface_set_caption_buttons,
             commands::glass_set_regions,

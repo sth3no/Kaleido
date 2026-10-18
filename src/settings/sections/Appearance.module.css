@@ -1,0 +1,50 @@
+/*
+ * The appearance section (Appearance.tsx): the toolbar under the preview. The preview is
+ * AppearancePreview.module.css, the rows are SettingRow.module.css.
+ */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  margin: 0 0 var(--k-space-s);
+}
+
+.reset {
+  padding: var(--k-space-xs) var(--k-space-l);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.reset:hover:not(:disabled) {
+  background: var(--k-color-selected);
+}
+
+.reset:disabled {
+  opacity: 0.5;
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+@media (forced-colors: active) {
+  .reset {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .error {
+    border-inline-start-color: CanvasText;
+  }
+}

@@ -26,13 +26,13 @@ function ownsTyping(target: EventTarget | null): boolean {
 }
 
 /** Keys that belong to Windows: closing and switching windows, the window menu, the Win key. */
-function isSystemShortcut(e: KeyboardEvent): boolean {
+export function isSystemShortcut(e: KeyboardEvent): boolean {
   if (e.metaKey) return true;
   return e.altKey && (e.key === 'F4' || e.key === 'Tab' || e.key === ' ' || e.code === 'Space');
 }
 
 /** Tab and Shift+Tab move the focus through the UI (spec 8.9); mpv never gets them. */
-function isFocusMove(e: KeyboardEvent): boolean {
+export function isFocusMove(e: KeyboardEvent): boolean {
   return e.key === 'Tab' && !e.ctrlKey;
 }
 

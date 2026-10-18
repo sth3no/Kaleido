@@ -129,7 +129,8 @@
     "playerNotReady": "The player is not ready yet, so its settings cannot be shown.",
     "retry": "Try again",
     "units": {
-      "percent": "{{value}}%"
+      "percent": "{{value}}%",
+      "px": "{{value}} px"
     },
     "hints": {
       "atStart": "Applies from the next start."
@@ -141,7 +142,8 @@
       "notAllowed": "Kaleido does not accept that value.",
       "io": "The setting could not be saved. Check that the settings folder can be written to.",
       "unavailable": "The player is not running yet. Try again in a moment.",
-      "generic": "The setting could not be saved."
+      "generic": "The setting could not be saved.",
+      "invalidColorOpaque": "Use #RRGGBB."
     },
     "fields": {
       "listFailed": "The list could not be read.",
@@ -154,13 +156,19 @@
         "none": "No font matches"
       },
       "color": {
-        "placeholder": "#RRGGBB or #AARRGGBB"
+        "placeholder": "#RRGGBB or #AARRGGBB",
+        "placeholderOpaque": "#RRGGBB"
       },
       "langList": {
         "placeholder": "e.g. cs, en"
       },
       "shaders": {
         "empty": "The shaders folder has no files yet."
+      },
+      "accent": {
+        "kaleido": "Kaleido",
+        "custom": "My color",
+        "colour": "Accent color code"
       }
     },
     "items": {
@@ -280,6 +288,132 @@
         "label": "Shaders",
         "keywords": "glsl, filter, upscale, sharpen, anime4k, fsr, ravu, hook",
         "hint": "Applied in the order you turn them on. Put the files in %APPDATA%\\Kaleido\\shaders."
+      },
+      "language": {
+        "keywords": "locale, translation, czech, english, system language, interface language"
+      },
+      "mode": {
+        "label": "Color mode",
+        "keywords": "dark, light, theme, night, day, color scheme, windows",
+        "options": {
+          "system": "Follow Windows",
+          "dark": "Dark",
+          "light": "Light"
+        }
+      },
+      "accent": {
+        "label": "Accent color",
+        "keywords": "accent, colour, highlight, rainbow, kaleido, custom, hex"
+      },
+      "glassTint": {
+        "label": "Glass tint",
+        "keywords": "tint, glass, colour, color, panel, background, hex"
+      },
+      "glassOpacity": {
+        "label": "Glass opacity",
+        "keywords": "opacity, transparency, transparent, glass, alpha, see-through"
+      },
+      "blur": {
+        "label": "Glass blur",
+        "keywords": "blur, frosted, glass, gaussian, soft"
+      },
+      "saturation": {
+        "label": "Glass saturation",
+        "keywords": "saturation, vivid, colours, colors, glass, intense"
+      },
+      "radius": {
+        "label": "Glass corner radius",
+        "keywords": "radius, corners, round, rounded, square, glass, shape"
+      },
+      "mica": {
+        "label": "Mica",
+        "keywords": "mica, window background, wallpaper, windows 11, material, backdrop",
+        "hint": "Windows 11 only. The window background shows your wallpaper softly through it.",
+        "unavailable": "Mica needs Windows 11. On Windows 10 the window has an opaque gradient background instead."
+      },
+      "reduceTransparency": {
+        "label": "Reduce transparency",
+        "keywords": "transparency, opaque, solid, accessibility, performance, effects, glass",
+        "options": {
+          "auto": "Automatic (follow Windows)",
+          "on": "On",
+          "off": "Off"
+        }
+      },
+      "uiScale": {
+        "label": "Interface scale",
+        "keywords": "scale, size, zoom, dpi, bigger, smaller, interface, ui"
+      }
+    },
+    "appearance": {
+      "reset": "Reset to default",
+      "preview": {
+        "label": "Preview of the interface with these settings",
+        "title": "Sample video.mkv",
+        "card": "Subtitles",
+        "optionOne": "English",
+        "optionTwo": "Czech"
+      }
+    },
+    "shortcuts": {
+      "intro": "Every key and what it does, including the ones plugins add. Choose Change, then press the new key; Esc cancels.",
+      "search": {
+        "label": "Search shortcuts",
+        "none": "No shortcuts match “{{query}}”."
+      },
+      "groups": {
+        "kaleido": "Kaleido",
+        "user": "Custom",
+        "mpv": "mpv"
+      },
+      "disabled": "Disabled",
+      "change": "Change",
+      "changeLabel": "Change shortcut {{key}}",
+      "reset": "Reset",
+      "resetLabel": "Reset shortcut {{key}}",
+      "waiting": "Press the new key for {{key}}. Esc cancels.",
+      "reserved": "That key belongs to Windows or moves the focus, so a shortcut cannot use it. Press another key.",
+      "cancel": "Cancel",
+      "conflict": "{{key}} already does this: {{command}}. Replace it?",
+      "replace": "Replace",
+      "changed": "Shortcut moved from {{from}} to {{to}}.",
+      "wasReset": "Shortcut {{key}} reset.",
+      "readFailed": "The shortcuts could not be read.",
+      "refreshFailed": "The list could not be refreshed.",
+      "notReady": "The player is not ready yet, so its shortcuts cannot be shown.",
+      "errors": {
+        "badKey": "mpv does not accept that key. Press another key.",
+        "cannotChange": "This shortcut cannot be changed.",
+        "io": "The shortcut could not be saved. Check that the settings folder can be written to.",
+        "generic": "The shortcut could not be changed."
+      }
+    },
+    "about": {
+      "versions": {
+        "kaleido": "Kaleido",
+        "libmpv": "libmpv",
+        "ffmpeg": "FFmpeg"
+      },
+      "unknown": "Unknown",
+      "screenshotNote": "A screenshot that a plugin takes with the screenshot command includes the glass. Screenshots from Kaleido’s own shortcuts do not.",
+      "openLogs": "Open logs folder",
+      "copyDiagnostics": "Copy diagnostics",
+      "copied": "The diagnostics are on the clipboard.",
+      "copyFailed": "The diagnostics could not be copied: {{reason}}",
+      "openFailed": "It could not be opened.",
+      "sources": {
+        "title": "Sources",
+        "text": "Kaleido is free software under the GPL-3.0-or-later. The libmpv it ships is a GPL build. Every release points to the tag of its sources and to the sources of that libmpv build.",
+        "kaleido": "Releases and sources of Kaleido",
+        "libmpv": "Sources of the libmpv build"
+      },
+      "licenses": {
+        "title": "Third-party licenses",
+        "note": "The software Kaleido is built on. The full license texts come in a later version.",
+        "search": "Search licenses",
+        "none": "No license matches “{{query}}”.",
+        "count": "Total: {{total}}",
+        "list": "List of licenses"
       }
     }
   },

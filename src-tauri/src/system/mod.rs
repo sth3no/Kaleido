@@ -18,7 +18,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -29,6 +29,38 @@ use open_queue::{Batch, OpenQueue, OpenRequest};
 /// Kaleido's public roadmap (spec 11.7): the GitHub Project in the Kaleido repository, which the
 /// repository's projects page shows once it exists.
 pub const ROADMAP_URL: &str = "https://github.com/sth3no/Kaleido/projects";
+
+/// Where every release of Kaleido is, with the tag of its sources (spec 11.6).
+pub const KALEIDO_RELEASES_URL: &str = "https://github.com/sth3no/Kaleido/releases";
+
+/// The sources of the libmpv build Kaleido ships (spec 11.6: the GPL asks for them). It is the
+/// `url` of libmpv in `resources/licenses/extra.json`, which `libmpv_link_is_the_one_in_the_license_list`
+/// holds to this constant, so the build is bumped in one place and a test says when this one is missed.
+pub const LIBMPV_SOURCE_URL: &str =
+    "https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261011";
+
+/// A page about the sources of what Kaleido ships, which "About" opens in the browser. The UI
+/// names the page, never the address: no command opens a link the UI makes up.
+// `Serialize` only for the IPC contract test, which writes what it read back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+#[serde(rename_all = "camelCase")]
+pub enum SourcePage {
+    /// The releases of Kaleido and the tag of the sources of each.
+    Kaleido,
+    /// The sources of the libmpv build.
+    Libmpv,
+}
+
+impl SourcePage {
+    /// The address of the page.
+    pub const fn url(self) -> &'static str {
+        match self {
+            SourcePage::Kaleido => KALEIDO_RELEASES_URL,
+            SourcePage::Libmpv => LIBMPV_SOURCE_URL,
+        }
+    }
+}
 
 /// Requests this close together make one playlist (spec 9.3).
 pub const JOIN_WINDOW: Duration = Duration::from_millis(300);
@@ -188,6 +220,30 @@ mod tests {
     use crate::player::load::{LoadOptions, Source};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn the_source_pages_are_secure_links_of_their_own() {
+        assert_eq!(SourcePage::Kaleido.url(), KALEIDO_RELEASES_URL);
+        assert_eq!(SourcePage::Libmpv.url(), LIBMPV_SOURCE_URL);
+        assert_ne!(KALEIDO_RELEASES_URL, LIBMPV_SOURCE_URL);
+        for page in [SourcePage::Kaleido, SourcePage::Libmpv] {
+            assert!(page.url().starts_with("https://"), "{page:?}");
+        }
+    }
+
+    #[test]
+    fn libmpv_link_is_the_one_in_the_license_list() {
+        let listed: Vec<diagnostics::License> =
+            serde_json::from_str(include_str!("../../../resources/licenses/extra.json")).unwrap();
+        let libmpv = listed
+            .iter()
+            .find(|license| license.name == "libmpv")
+            .expect("extra.json lists libmpv");
+        assert_eq!(
+            libmpv.url, LIBMPV_SOURCE_URL,
+            "the libmpv build changed: bump LIBMPV_SOURCE_URL with extra.json"
+        );
+    }
 
     fn request(name: &str) -> OpenRequest {
         OpenRequest {

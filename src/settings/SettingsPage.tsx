@@ -20,8 +20,9 @@
  * not while the player is not up): no row shows a fallback for a value, and the page says why rows are
  * missing and offers to read again. The search counts and enters only the rows that are drawn.
  *
- * Appearance, Shortcuts and About are in the list but have no body yet (Task 23): `BODIES` is
- * where they are added, and their descriptors go in `descriptors.ts`.
+ * Appearance has rows like the others (and a preview above them), Shortcuts and About are lists of
+ * their own; `BODIES` is where a section's body is named. The search finds the settings of
+ * Appearance (the language among them) with the rest; Shortcuts and About have a search of their own.
  *
  * The top of a docked page is the window's title bar (a drag strip over it), so nothing of the page
  * is there. While a video plays, the mini player is in the corner and the shell clips the page
@@ -49,9 +50,12 @@ import { MINI } from '../surface/mini';
 import glass from '../theme/glass.module.css';
 import { SECTIONS, type SectionId } from './descriptors';
 import { searchSettings } from './search';
+import About from './sections/About';
+import Appearance from './sections/Appearance';
 import Audio from './sections/Audio';
 import Playback from './sections/Playback';
 import type { SectionProps } from './sections/SettingsList';
+import Shortcuts from './sections/Shortcuts';
 import Subtitles from './sections/Subtitles';
 import Video from './sections/Video';
 import styles from './SettingsPage.module.css';
@@ -60,12 +64,15 @@ import { isLoaded, useSettingsStore, useSourcesLoaded } from './store';
 /** What the first control of a result is found by (the ones that can take the focus now). */
 const CONTROLS = 'button:not(:disabled), input:not(:disabled)';
 
-/** The body of each section; a section with none shows its heading alone (Task 23 fills them in). */
+/** The body of each section; a section with none shows its heading alone. */
 const BODIES: Partial<Record<SectionId, ComponentType<SectionProps>>> = {
   playback: Playback,
   subtitles: Subtitles,
   audio: Audio,
   video: Video,
+  appearance: Appearance,
+  shortcuts: Shortcuts,
+  about: About,
 };
 
 interface SectionViewProps {

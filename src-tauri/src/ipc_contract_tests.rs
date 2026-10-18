@@ -48,7 +48,7 @@ use crate::surface::{CaptionButton, Layout};
 use crate::system::clipboard::PasteOutcome;
 use crate::system::diagnostics::License;
 use crate::system::dialog::DialogPurpose;
-use crate::system::{self, OpenRequestEvent};
+use crate::system::{self, OpenRequestEvent, SourcePage};
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbReady};
 
@@ -310,6 +310,10 @@ variants!(load_mode_name, LOAD_MODE_NAMES: LoadMode {
 variants!(dialog_purpose_name, DIALOG_PURPOSE_NAMES: DialogPurpose {
     DialogPurpose::Media => "media",
     DialogPurpose::Subtitle => "subtitle",
+});
+variants!(source_page_name, SOURCE_PAGE_NAMES: SourcePage {
+    SourcePage::Kaleido => "kaleido",
+    SourcePage::Libmpv => "libmpv",
 });
 variants!(layout_name, LAYOUT_NAMES: Layout {
     Layout::Full => "full",
@@ -609,6 +613,21 @@ fn check_command(command: &str, calls: &[Value]) {
             column::<String>(command, calls, "text"),
             ["https://example.com/watch?v=abc", "  not a link  "]
         ),
+        "system_open_source" => {
+            let pages = column::<SourcePage>(command, calls, "which");
+            assert_eq!(pages, [SourcePage::Kaleido, SourcePage::Libmpv]);
+            covers(
+                "SourcePage",
+                &pages,
+                source_page_name,
+                SOURCE_PAGE_NAMES,
+                None,
+            );
+            // The addresses are Rust's: the UI names a page and never an address.
+            for page in &pages {
+                assert!(page.url().starts_with("https://"), "{page:?}");
+            }
+        }
         "surface_set_layout" => {
             let layouts = column::<Layout>(command, calls, "layout");
             assert_eq!(

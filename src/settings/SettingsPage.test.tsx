@@ -4,13 +4,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 
 import { initI18n, setLanguage } from '../i18n';
 import { attachVideoInput } from '../input/forward';
-import type { Settings } from '../ipc/types';
+import type { Binding, License, Settings } from '../ipc/types';
 import { MINI } from '../surface/mini';
 import { DEFAULT_APPEARANCE } from '../theme/tokens';
 import SettingsPage from './SettingsPage';
 import { useSettingsStore } from './store';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(() => Promise.resolve('0.1.0')) }));
 const events = vi.hoisted(() => ({
   handlers: new Map<string, (event: { payload: unknown }) => void>(),
 }));
@@ -51,6 +52,15 @@ const MPV: Record<string, string | null> = {
   'glsl-shaders': '',
 };
 
+const BINDINGS: Binding[] = [
+  { key: 'RIGHT', command: 'no-osd seek 5', source: { type: 'kaleido' }, comment: null },
+  { key: 'f', command: 'cycle fullscreen', source: { type: 'mpv' }, comment: null },
+];
+
+const LICENSES: License[] = [
+  { name: 'libmpv', version: '0.41.0', license: 'GPL-3.0-or-later', url: 'https://mpv.io' },
+];
+
 const DEVICES = [
   { name: 'auto', description: 'Autoselect device' },
   { name: 'wasapi/{0.0.0.00000000}.{abc}', description: 'Speakers (Realtek)' },
@@ -68,6 +78,10 @@ function rust(answers: Answers = {}) {
     settings_audio_devices: () => DEVICES,
     settings_list_shaders: () => ['Anime4K.glsl', 'ravu.hook'],
     system_fonts: () => ['Arial', 'Segoe UI'],
+    system_appearance: () => ({ transparencyEffects: true, highContrast: false, windowsBuild: 22631 }),
+    settings_bindings: () => BINDINGS,
+    system_diagnostics: () => 'Kaleido: 0.1.0\nlibmpv: mpv v0.41.0\nFFmpeg: n7.1\n',
+    system_licenses: () => LICENSES,
     ...answers,
   };
   vi.mocked(invoke).mockImplementation(((command: string, args?: unknown) =>
@@ -227,15 +241,72 @@ describe('the page', () => {
     expect(picker('Quality preset').textContent).toBe('None');
   });
 
-  test('appearance, shortcuts and about are listed with a heading and nothing else yet', async () => {
+  test('appearance is the language and the look, with a preview and a reset above the rows', async () => {
     await open();
-    for (const name of ['Appearance', 'Shortcuts', 'About']) {
-      fireEvent.click(sectionButton(name));
-      const region = screen.getByRole('region', { name });
-      expect(within(region).getByRole('heading', { level: 2 }).textContent).toBe(name);
-      expect(region.children).toHaveLength(1);
-      expect(shownIds()).toEqual([]);
-    }
+    fireEvent.click(sectionButton('Appearance'));
+
+    const region = screen.getByRole('region', { name: 'Appearance' });
+    expect(within(region).getByRole('heading', { level: 2 }).textContent).toBe('Appearance');
+    expect(shownIds()).toEqual([
+      'language',
+      'appearance.mode',
+      'appearance.accent',
+      'appearance.glassTint',
+      'appearance.glassOpacity',
+      'appearance.blur',
+      'appearance.saturation',
+      'appearance.radius',
+      'appearance.mica',
+      'appearance.reduceTransparency',
+      'appearance.uiScale',
+    ]);
+    expect(screen.getByRole('img', { name: 'Preview of the interface with these settings' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reset to default' })).toBeTruthy();
+    expect(picker('Language').textContent).toBe('Follow the system');
+    expect(picker('Color mode').textContent).toBe('Follow Windows');
+    expect((screen.getByRole('slider', { name: 'Glass blur' }) as HTMLInputElement).value).toBe('24');
+  });
+
+  test('shortcuts lists the bindings Rust gives, grouped', async () => {
+    await open();
+    fireEvent.click(sectionButton('Shortcuts'));
+
+    const region = screen.getByRole('region', { name: 'Shortcuts' });
+    expect(within(region).getByRole('heading', { level: 2 }).textContent).toBe('Shortcuts');
+    expect(await within(region).findByRole('heading', { level: 3, name: 'Kaleido' })).toBeTruthy();
+    expect(within(region).getByRole('heading', { level: 3, name: 'mpv' })).toBeTruthy();
+    expect(within(region).getByRole('button', { name: 'Change shortcut RIGHT' })).toBeTruthy();
+    expect(sent('settings_bindings')).toHaveLength(1);
+    // No setting rows: it is a list of its own.
+    expect(shownIds()).toEqual([]);
+  });
+
+  test('about shows the versions, the buttons and the licenses', async () => {
+    await open();
+    fireEvent.click(sectionButton('About'));
+
+    const region = screen.getByRole('region', { name: 'About' });
+    expect(within(region).getByRole('heading', { level: 2 }).textContent).toBe('About');
+    expect(await within(region).findByText('mpv v0.41.0')).toBeTruthy();
+    expect(within(region).getByText('0.1.0')).toBeTruthy();
+    expect(within(region).getByRole('button', { name: 'Open logs folder' })).toBeTruthy();
+    expect(await within(region).findByText('Total: 1')).toBeTruthy();
+    expect(shownIds()).toEqual([]);
+  });
+
+  test('a section that reads from Rust on its own says so when it fails, and the others are not affected', async () => {
+    rust({ settings_bindings: () => Promise.reject('no player') });
+    await open();
+    fireEvent.click(sectionButton('Shortcuts'));
+    expect((await screen.findByText('The shortcuts could not be read.')).closest('[role="alert"]')).toBeTruthy();
+    // Back to a section of settings: nothing of it is lost.
+    fireEvent.click(sectionButton('Playback'));
+    expect(shownIds()).toEqual([
+      'hwdec',
+      'autocreate-playlist',
+      'save-position-on-quit',
+      'playback.openWhilePlaying',
+    ]);
   });
 
   test('listens for settings:changed before it reads, and keeps room for the mini player', async () => {
@@ -894,11 +965,35 @@ describe('the search', () => {
     expect(sectionHeadings()).toEqual(['Audio']);
     expect(searchStatus()?.textContent).toBe('Found: 2');
 
-    // Settings of two sections, in the order of the sections.
+    // Settings of three sections, in the order of the sections: the language of the interface is with the look.
     fireEvent.change(searchField(), { target: { value: 'language' } });
-    expect(sectionHeadings()).toEqual(['Subtitles', 'Audio']);
-    expect(shownIds()).toEqual(['slang', 'alang']);
-    expect(searchStatus()?.textContent).toBe('Found: 2');
+    expect(sectionHeadings()).toEqual(['Subtitles', 'Audio', 'Appearance']);
+    expect(shownIds()).toEqual(['slang', 'alang', 'language']);
+    expect(searchStatus()?.textContent).toBe('Found: 3');
+  });
+
+  test('the settings of the appearance are found too, and only their rows are shown, without the preview', async () => {
+    await open();
+
+    fireEvent.change(searchField(), { target: { value: 'blur' } });
+    expect(shownIds()).toEqual(['appearance.blur']);
+    expect(sectionHeadings()).toEqual(['Appearance']);
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset to default' })).toBeNull();
+    expect(searchStatus()?.textContent).toBe('Found: 1');
+
+    // By a keyword, and by the name of the section.
+    fireEvent.change(searchField(), { target: { value: 'wallpaper' } });
+    expect(shownIds()).toEqual(['appearance.mica']);
+    fireEvent.change(searchField(), { target: { value: 'appearance' } });
+    expect(shownIds()).toHaveLength(11);
+    fireEvent.change(searchField(), { target: { value: 'czech' } });
+    expect(shownIds()).toEqual(['language']);
+
+    // A found setting works there: the language of the interface is saved as the setting's word.
+    fireEvent.click(picker('Language'));
+    fireEvent.click(screen.getByRole('option', { name: 'English' }));
+    expect(sent('settings_set')).toEqual([['settings_set', { patch: { language: 'en' } }]]);
   });
 
   test('a match is found by its keywords, in any case', async () => {

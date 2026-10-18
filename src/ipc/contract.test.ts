@@ -60,6 +60,7 @@ import systemOpenDialogJson from '../../src-tauri/tests/fixtures/ipc/system_open
 import systemOpenLogsJson from '../../src-tauri/tests/fixtures/ipc/system_open_logs.json';
 import systemOpenRequestEventJson from '../../src-tauri/tests/fixtures/ipc/system.open-request.json';
 import systemOpenRoadmapJson from '../../src-tauri/tests/fixtures/ipc/system_open_roadmap.json';
+import systemOpenSourceJson from '../../src-tauri/tests/fixtures/ipc/system_open_source.json';
 import systemOpenTextJson from '../../src-tauri/tests/fixtures/ipc/system_open_text.json';
 import systemPasteEventJson from '../../src-tauri/tests/fixtures/ipc/system.paste-empty.json';
 import systemPasteJson from '../../src-tauri/tests/fixtures/ipc/system_paste.json';
@@ -103,6 +104,7 @@ import type {
   Settings,
   SettingsError,
   SourceError,
+  SourcePage,
   SystemAppearance,
   ThemeMode,
   ThumbReady,
@@ -162,6 +164,7 @@ const commandFixtures = {
   system_open_dialog: systemOpenDialogJson,
   system_open_logs: systemOpenLogsJson,
   system_open_roadmap: systemOpenRoadmapJson,
+  system_open_source: systemOpenSourceJson,
   system_open_text: systemOpenTextJson,
   system_paste: systemPasteJson,
   system_ui_ready: systemUiReadyJson,
@@ -396,6 +399,7 @@ const WHEEL_KEYS = names<WheelKey>({
 });
 const LOAD_MODES = names<LoadMode>({ replace: true, append: true });
 const DIALOG_PURPOSES = names<DialogPurpose>({ media: true, subtitle: true });
+const SOURCE_PAGES = names<SourcePage>({ kaleido: true, libmpv: true });
 const END_REASONS = names<EndReason>({ eof: true, stop: true, quit: true, error: true, redirect: true });
 const LOG_LEVELS = names<LogLine['level']>({ warn: true, error: true, fatal: true });
 const GLASS_REASONS = names<GlassReason>({ user: true, system: true, gpuFailure: true });
@@ -450,9 +454,14 @@ describe('fixtures type-check against the IPC types', () => {
     expectKnown(fieldOf(inputs, 'type', 'wheel', 'key'), WHEEL_KEYS, 'wheel key');
   });
 
-  test('player_load, system_open_dialog and surface_set_layout', () => {
+  test('player_load, system_open_dialog, system_open_source and surface_set_layout', () => {
     expectAll(commandFixtures.player_load.map(({ mode }) => mode), LOAD_MODES, 'load mode');
     expectAll(commandFixtures.system_open_dialog.map(({ purpose }) => purpose), DIALOG_PURPOSES, 'purpose');
+    // The UI names a page; the address is Rust's, so it is the page name and nothing else that is sent.
+    expectAll(commandFixtures.system_open_source.map(({ which }) => which), SOURCE_PAGES, 'source page');
+    for (const sample of commandFixtures.system_open_source) {
+      expect(Object.keys(sample), 'system_open_source').toEqual(['which']);
+    }
     expectVariants(
       commandFixtures.surface_set_layout.map(({ layout }) => layout),
       'kind',
@@ -602,6 +611,7 @@ const wrappers = {
   system_open_dialog: ({ purpose }) => commands.systemOpenDialog(purpose),
   system_open_logs: () => commands.systemOpenLogs(),
   system_open_roadmap: () => commands.systemOpenRoadmap(),
+  system_open_source: ({ which }) => commands.systemOpenSource(which),
   system_open_text: ({ text }) => commands.systemOpenText(text),
   system_paste: () => commands.systemPaste(),
   system_ui_ready: () => commands.systemUiReady(),

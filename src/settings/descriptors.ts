@@ -8,6 +8,9 @@
  * src-tauri/src/settings/mpv_keys.rs. Rust checks every value again; the field keeps the user from
  * choosing one it would refuse. Every text is an i18n key (`labelKey`, `keywordsKey`, `hintKey`,
  * the options' `labelKey` and a slider's `unitKey`), in both locale files.
+ *
+ * Shortcuts and About have no descriptors: they are lists of bindings and of facts, not rows of
+ * settings (sections/Shortcuts.tsx, sections/About.tsx).
  */
 
 import type { SettingsPatch } from '../ipc/types';
@@ -42,9 +45,19 @@ export type FieldKind =
   /** `on` and `off` are the words mpv.conf has for the two states (`yes` and `no` where left out). */
   | { kind: 'toggle'; on?: string; off?: string }
   | { kind: 'select'; options: readonly SelectOption[] }
-  | { kind: 'slider'; min: number; max: number; step: number; unitKey?: string }
-  /** `#RRGGBB` or `#AARRGGBB`. */
-  | { kind: 'color' }
+  | {
+      kind: 'slider';
+      min: number;
+      max: number;
+      step: number;
+      unitKey?: string;
+      /** The range is a fraction (0.3 to 0.95) that the field writes as a percentage (30 to 95 %). */
+      percent?: boolean;
+    }
+  /** `#RRGGBB` or `#AARRGGBB`; with `alpha: false` `#RRGGBB` only. */
+  | { kind: 'color'; alpha?: boolean }
+  /** The accent: `kaleido` (the rainbow), or one colour as `#RRGGBB`. */
+  | { kind: 'accent' }
   /** A font family out of the installed ones. */
   | { kind: 'font' }
   /** Language codes separated by commas. */
@@ -92,6 +105,10 @@ const option = (name: string, value: string, key: string): SelectOption => ({
 const AT_START_HINT = 'settings.hints.atStart';
 
 const PERCENT = 'settings.units.percent';
+const PIXELS = 'settings.units.px';
+
+/** An option of the language picker, whose texts (`settings.language.*`) exist since Task 15. */
+const language = (value: string): SelectOption => ({ value, labelKey: `settings.language.${value}` });
 
 export const DESCRIPTORS: readonly SettingDescriptor[] = [
   // Playback
@@ -295,6 +312,105 @@ export const DESCRIPTORS: readonly SettingDescriptor[] = [
     hintKey: 'settings.items.shaders.hint',
     field: { kind: 'shaderList' },
     target: { mpv: 'glsl-shaders' },
+  },
+
+  // Appearance (Kaleido's settings.json). The language is here too (Ruling R48). The words and the
+  // bounds mirror Rust's `Language`, `ThemeMode`, `ReduceTransparency` and `GLASS_OPACITY` and the
+  // other ranges in src-tauri/src/settings/store.rs; Rust checks every value again.
+  {
+    id: 'language',
+    section: 'appearance',
+    // Texts of the language picker, which exist since Task 15.
+    labelKey: 'settings.language.label',
+    keywordsKey: 'settings.items.language.keywords',
+    field: { kind: 'select', options: [language('system'), language('cs'), language('en')] },
+    target: { kaleido: 'language' },
+  },
+  {
+    id: 'appearance.mode',
+    section: 'appearance',
+    ...texts('mode'),
+    field: {
+      kind: 'select',
+      options: [
+        option('mode', 'system', 'system'),
+        option('mode', 'dark', 'dark'),
+        option('mode', 'light', 'light'),
+      ],
+    },
+    target: { kaleido: 'appearance.mode' },
+  },
+  {
+    id: 'appearance.accent',
+    section: 'appearance',
+    ...texts('accent'),
+    field: { kind: 'accent' },
+    target: { kaleido: 'appearance.accent' },
+  },
+  {
+    id: 'appearance.glassTint',
+    section: 'appearance',
+    ...texts('glassTint'),
+    field: { kind: 'color', alpha: false },
+    target: { kaleido: 'appearance.glassTint' },
+  },
+  {
+    id: 'appearance.glassOpacity',
+    section: 'appearance',
+    ...texts('glassOpacity'),
+    field: { kind: 'slider', min: 0.3, max: 0.95, step: 0.05, unitKey: PERCENT, percent: true },
+    target: { kaleido: 'appearance.glassOpacity' },
+  },
+  {
+    id: 'appearance.blur',
+    section: 'appearance',
+    ...texts('blur'),
+    field: { kind: 'slider', min: 0, max: 40, step: 1, unitKey: PIXELS },
+    target: { kaleido: 'appearance.blur' },
+  },
+  {
+    id: 'appearance.saturation',
+    section: 'appearance',
+    ...texts('saturation'),
+    field: { kind: 'slider', min: 0.5, max: 2, step: 0.05, unitKey: PERCENT, percent: true },
+    target: { kaleido: 'appearance.saturation' },
+  },
+  {
+    id: 'appearance.radius',
+    section: 'appearance',
+    ...texts('radius'),
+    field: { kind: 'slider', min: 0, max: 28, step: 1, unitKey: PIXELS },
+    target: { kaleido: 'appearance.radius' },
+  },
+  {
+    // Windows 11 only: the section says why it is off on Windows 10 (`Appearance`).
+    id: 'appearance.mica',
+    section: 'appearance',
+    ...texts('mica'),
+    hintKey: 'settings.items.mica.hint',
+    field: { kind: 'toggle' },
+    target: { kaleido: 'appearance.mica' },
+  },
+  {
+    id: 'appearance.reduceTransparency',
+    section: 'appearance',
+    ...texts('reduceTransparency'),
+    field: {
+      kind: 'select',
+      options: [
+        option('reduceTransparency', 'auto', 'auto'),
+        option('reduceTransparency', 'on', 'on'),
+        option('reduceTransparency', 'off', 'off'),
+      ],
+    },
+    target: { kaleido: 'appearance.reduceTransparency' },
+  },
+  {
+    id: 'appearance.uiScale',
+    section: 'appearance',
+    ...texts('uiScale'),
+    field: { kind: 'slider', min: 0.9, max: 1.5, step: 0.05, unitKey: PERCENT, percent: true },
+    target: { kaleido: 'appearance.uiScale' },
   },
 ];
 
