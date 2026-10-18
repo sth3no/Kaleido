@@ -6,3 +6,4 @@ pub mod names;
 pub mod registry;
 pub mod scan;
 pub mod schema;
+pub mod script_opts;

@@ -16,33 +16,9 @@
 use std::collections::HashMap;
 
 use super::SettingsError;
+use super::lines::{self, Line};
 use crate::input::valid_key;
 use crate::player::options::DEFAULT_INPUT_CONF;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Ending {
-    /// The last line of a file that does not end with a line break.
-    None,
-    Lf,
-    CrLf,
-}
-
-impl Ending {
-    fn as_str(self) -> &'static str {
-        match self {
-            Ending::None => "",
-            Ending::Lf => "\n",
-            Ending::CrLf => "\r\n",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Line {
-    /// Without the line ending.
-    text: String,
-    ending: Ending,
-}
 
 /// An input.conf as lines. [`InputConf::render`] gives back the text it was parsed from, byte
 /// for byte, until something is changed.
@@ -134,35 +110,19 @@ impl InputConf {
             Some(rest) => (true, rest),
             None => (false, text),
         };
-        let lines = text
-            .split_inclusive('\n')
-            .map(|segment| {
-                let (text, ending) = if let Some(text) = segment.strip_suffix("\r\n") {
-                    (text, Ending::CrLf)
-                } else if let Some(text) = segment.strip_suffix('\n') {
-                    (text, Ending::Lf)
-                } else {
-                    (segment, Ending::None)
-                };
-                Line {
-                    text: text.to_owned(),
-                    ending,
-                }
-            })
-            .collect();
-        InputConf { bom, lines }
+        InputConf {
+            bom,
+            lines: lines::split(text),
+        }
     }
 
     pub fn render(&self) -> String {
-        let mut text = String::new();
+        let text = lines::join(&self.lines);
         if self.bom {
-            text.push('\u{feff}');
+            format!("\u{feff}{text}")
+        } else {
+            text
         }
-        for line in &self.lines {
-            text.push_str(&line.text);
-            text.push_str(line.ending.as_str());
-        }
-        text
     }
 
     /// The command the last line binding `key` gives it.
@@ -192,7 +152,7 @@ impl InputConf {
             Some(found) => {
                 self.lines[found.index].text = format!("{}{key} {command}", found.indent);
             }
-            None => self.append(format!("{key} {command}")),
+            None => lines::push(&mut self.lines, format!("{key} {command}")),
         }
         Ok(())
     }
@@ -240,33 +200,6 @@ impl InputConf {
                 })
             })
             .collect()
-    }
-
-    /// A new last line, with the file's usual line ending. The line before it gets one if it
-    /// was the last line without.
-    fn append(&mut self, text: String) {
-        let ending = self.usual_ending();
-        if let Some(last) = self.lines.last_mut()
-            && last.ending == Ending::None
-        {
-            last.ending = ending;
-        }
-        self.lines.push(Line { text, ending });
-    }
-
-    /// CRLF if most lines end so, otherwise LF.
-    fn usual_ending(&self) -> Ending {
-        let count = |wanted| {
-            self.lines
-                .iter()
-                .filter(|line| line.ending == wanted)
-                .count()
-        };
-        if count(Ending::CrLf) > count(Ending::Lf) {
-            Ending::CrLf
-        } else {
-            Ending::Lf
-        }
     }
 }
 

@@ -10,36 +10,12 @@
 //! or `%N%…` (N bytes).
 
 use super::SettingsError;
+use super::lines::{self, Line};
 
 /// The line that opens Kaleido's block in the main section.
 pub const BLOCK_MARKER: &str = "# --- Kaleido ---";
 /// The option that applies a profile where it stands; what follows it overrides the profile.
 const PROFILE: &str = "profile";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Ending {
-    /// The last line of a file that does not end with a line break.
-    None,
-    Lf,
-    CrLf,
-}
-
-impl Ending {
-    fn as_str(self) -> &'static str {
-        match self {
-            Ending::None => "",
-            Ending::Lf => "\n",
-            Ending::CrLf => "\r\n",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Line {
-    /// Without the line ending.
-    text: String,
-    ending: Ending,
-}
 
 /// An mpv.conf as lines. [`MpvConf::render`] gives back the text it was parsed from, byte for
 /// byte, until something is set.
@@ -184,35 +160,19 @@ impl MpvConf {
             Some(rest) => (true, rest),
             None => (false, text),
         };
-        let lines = text
-            .split_inclusive('\n')
-            .map(|segment| {
-                let (text, ending) = if let Some(text) = segment.strip_suffix("\r\n") {
-                    (text, Ending::CrLf)
-                } else if let Some(text) = segment.strip_suffix('\n') {
-                    (text, Ending::Lf)
-                } else {
-                    (segment, Ending::None)
-                };
-                Line {
-                    text: text.to_owned(),
-                    ending,
-                }
-            })
-            .collect();
-        MpvConf { bom, lines }
+        MpvConf {
+            bom,
+            lines: lines::split(text),
+        }
     }
 
     pub fn render(&self) -> String {
-        let mut text = String::new();
+        let text = lines::join(&self.lines);
         if self.bom {
-            text.push('\u{feff}');
+            format!("\u{feff}{text}")
+        } else {
+            text
         }
-        for line in &self.lines {
-            text.push_str(&line.text);
-            text.push_str(line.ending.as_str());
-        }
-        text
     }
 
     /// The value the main section gives `key` (its last occurrence there), as mpv reads it.
@@ -255,7 +215,7 @@ impl MpvConf {
                 // A profile is a preset: Kaleido's explicit settings after it override it
                 // (Ruling R24).
                 let at = self.block_position(key == PROFILE);
-                self.insert(at, written);
+                lines::insert(&mut self.lines, at, written);
             }
         }
     }
@@ -321,37 +281,8 @@ impl MpvConf {
             .iter()
             .rposition(|line| !matches!(parse_line(&line.text), Parsed::Blank))
             .map_or(end, |index| index + 1);
-        self.insert(at, BLOCK_MARKER.to_owned());
+        lines::insert(&mut self.lines, at, BLOCK_MARKER.to_owned());
         at + 1
-    }
-
-    /// A new line at `at`, with the file's usual line ending. The line before it gets one if it
-    /// was the last line without.
-    fn insert(&mut self, at: usize, text: String) {
-        let ending = self.usual_ending();
-        if let Some(before) = at
-            .checked_sub(1)
-            .and_then(|index| self.lines.get_mut(index))
-            && before.ending == Ending::None
-        {
-            before.ending = ending;
-        }
-        self.lines.insert(at, Line { text, ending });
-    }
-
-    /// CRLF if most lines end so, otherwise LF.
-    fn usual_ending(&self) -> Ending {
-        let crlf = self
-            .lines
-            .iter()
-            .filter(|line| line.ending == Ending::CrLf)
-            .count();
-        let lf = self
-            .lines
-            .iter()
-            .filter(|line| line.ending == Ending::Lf)
-            .count();
-        if crlf > lf { Ending::CrLf } else { Ending::Lf }
     }
 }
 

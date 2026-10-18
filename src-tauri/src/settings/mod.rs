@@ -8,6 +8,7 @@
 pub mod bindings;
 pub mod fonts;
 pub mod input_conf;
+pub(crate) mod lines;
 pub mod mpv_conf;
 pub mod mpv_keys;
 pub mod store;
