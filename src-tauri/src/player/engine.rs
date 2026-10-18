@@ -20,8 +20,13 @@ pub const ENGINE_OBSERVE_BASE: u64 = 1_000_000;
 /// mpv's `sub-margin-y` property.
 const SUB_MARGIN_Y: &str = "sub-margin-y";
 
-/// mpv's own `sub-margin-y`, for when it cannot be read.
-const MPV_SUB_MARGIN: i64 = 22;
+/// Where this mpv keeps the default of `sub-margin-y` (it changed between mpv versions: 22
+/// before, 34 in the pinned build).
+const SUB_MARGIN_Y_DEFAULT: &str = "option-info/sub-margin-y/default-value";
+
+/// mpv's own `sub-margin-y` in the pinned build, only for when neither the property nor its
+/// default can be read.
+const MPV_SUB_MARGIN: i64 = 34;
 
 /// What the core is started with.
 #[derive(Debug, Clone)]
@@ -150,7 +155,7 @@ impl Engine {
     }
 
     /// Sets `sub-margin-y` to `margin`, but never below the margin this core had before the first
-    /// call (mpv's own 22, or the one in the user's mpv.conf): the UI asks for 0 while its controls
+    /// call (mpv's own default, or the one in the user's mpv.conf): the UI asks for 0 while its controls
     /// are hidden, which means "nothing of mine is in the way", not "subtitles on the bottom edge"
     /// (Ruling R38). The first call reads the margin and writes in the same request, so nothing
     /// queued by anyone else comes between; the margin is remembered for the life of the engine.
@@ -164,7 +169,11 @@ impl Engine {
                     .ok()
                     .map(|own| *remembered.get_or_init(|| own))
             });
-            let value = margin.max(own.unwrap_or(MPV_SUB_MARGIN));
+            let own = own.unwrap_or_else(|| {
+                tracing::warn!("sub-margin-y cannot be read; using mpv's default as the floor");
+                mpv.get_i64(SUB_MARGIN_Y_DEFAULT).unwrap_or(MPV_SUB_MARGIN)
+            });
+            let value = margin.max(own);
             if let Err(error) = mpv.set_property(SUB_MARGIN_Y, &value.to_string()) {
                 tracing::warn!("mpv request failed: {error}");
             }

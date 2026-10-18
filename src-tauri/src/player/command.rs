@@ -695,14 +695,20 @@ mod tests {
         assert_eq!(margin(), 40, "below it never goes");
     }
 
-    /// Without an mpv.conf the floor is mpv's own default.
+    /// Without an mpv.conf the floor is mpv's own default — whatever this mpv says it is (22 in
+    /// older builds, 34 in the pinned one), not a number written down here.
     #[test]
     fn sub_margin_floor_is_mpvs_default_without_a_config() {
         let tmp = tempfile::tempdir().unwrap();
         let engine = Engine::start(headless(temp_paths(tmp.path())), NoEvents).unwrap();
         let margin = || engine.call(|mpv| mpv.get_i64("sub-margin-y").unwrap());
         let own = margin();
-        assert_eq!(own, 22);
+        let default = engine.call(|mpv| {
+            mpv.get_i64("option-info/sub-margin-y/default-value")
+                .unwrap()
+        });
+        assert_eq!(own, default);
+        assert!(own > 0, "a floor of 0 would prove nothing");
 
         send(&engine, &PlayerCommand::SetSubMargin { margin: 0 }).unwrap();
         assert_eq!(margin(), own);
