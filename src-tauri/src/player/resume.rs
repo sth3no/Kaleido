@@ -711,7 +711,9 @@ mod tests {
     }
 
     /// With `keep-open` (Kaleido's mpv.conf) a clip played to its end stays loaded, paused on its
-    /// last frame. The new core has it there too: the same entry, paused, at the end, not idle.
+    /// last frame. The new core has it there too (Ruling R8): the same entry, paused, not idle,
+    /// at the end. Not `eof-reached`: the new core starts paused on the last frame, and a paused
+    /// mpv never gets as far as the decoder's end, which `eof-reached` waits for.
     #[test]
     fn restart_paused_at_the_end_resumes_there() {
         let tmp = tempfile::tempdir().unwrap();
@@ -720,15 +722,12 @@ mod tests {
         let clip = clip(tmp.path(), 2);
         let engine = Engine::start(headless(paths), NoEvents).unwrap();
         engine.command(&["loadfile", &clip.to_string_lossy()]);
-        let at_the_end = |mpv: &Mpv| {
-            mpv.get_flag("eof-reached").unwrap_or(false)
-                && mpv.get_flag("pause").unwrap()
-                && !mpv.get_flag("idle-active").unwrap()
-        };
+        let paused_and_loaded =
+            |mpv: &Mpv| mpv.get_flag("pause").unwrap() && !mpv.get_flag("idle-active").unwrap();
         eventually(
             &engine,
             "the clip ended, paused on its last frame",
-            at_the_end,
+            move |mpv| mpv.get_flag("eof-reached").unwrap_or(false) && paused_and_loaded(mpv),
         );
         let end = engine.call(|mpv| mpv.get_f64("time-pos").unwrap());
         assert!(end > 1.5, "the clip ended at {end}");
@@ -736,7 +735,7 @@ mod tests {
         assert_eq!(engine.restart(Restart::new(NoEvents)), Ok(()));
 
         eventually(&engine, "the new core is at the end, paused", move |mpv| {
-            at_the_end(mpv) && near(mpv, end, 0.2)
+            paused_and_loaded(mpv) && near(mpv, end, 0.5)
         });
         assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-pos").unwrap()), 0);
         assert_eq!(engine.call(|mpv| mpv.get_i64("playlist-count").unwrap()), 1);

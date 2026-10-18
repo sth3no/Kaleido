@@ -301,8 +301,11 @@ impl Engine {
     /// Never call it on the engine's own threads, from an [`EventLoop`] or a [`Restart`]'s
     /// closures: queued, the call would wait for the request thread, which is the caller itself
     /// or waits for it (a restart joins the old event thread). There it is a bug, logged as an
-    /// error, and a panic in debug builds (caught: the event thread and the request thread go
-    /// on). A release build does not wait: it runs `f` at once on the core that thread serves,
+    /// error, and a panic in debug builds. The panic is caught, loudly by design: on the request
+    /// thread by the `catch_unwind` around the closure or the restart's guard; on the event thread
+    /// it is one panic of the loop toward [`PANICS_LET_PASS`], and the UI gets an error notice
+    /// (`AppSink::failed`), so a loop that calls it at every event stops the event thread after
+    /// ten. A release build does not wait: it runs `f` at once on the core that thread serves,
     /// out of the queue's order, and panics only where that thread serves none (in a restart,
     /// between the old core and the new).
     pub fn call<T: Send + 'static>(&self, f: impl FnOnce(&Mpv) -> T + Send + 'static) -> T {
