@@ -4,7 +4,8 @@
  * island's height in window px is scaled to that. With the controls hidden the UI asks for 0.
  *
  * Rust takes the larger of the margin asked for and the one mpv had before the first request (its
- * own 22, or the one in the user's mpv.conf; `Engine::set_sub_margin`, Ruling R38): 0 means
+ * own default, 34 in the libmpv Kaleido ships, or the one in the user's mpv.conf;
+ * `Engine::set_sub_margin`, Ruling R38): 0 means
  * "nothing of mine is in the way", so the subtitles go back to where the user has them.
  */
 

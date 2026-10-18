@@ -128,7 +128,7 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   video (na prvním a posledním mpv nic neudělá).
 - [ ] **Titulky nad ostrůvkem:** u videa s titulky leží titulky nad spodním ostrůvkem a nedotýkají se
   ho; po skrytí ostrůvku sjedou dolů, ale **ne na spodní hranu**: na vlastní okraj mpv (výchozí
-  `sub-margin-y=22`, nebo hodnota z `mpv.conf`; zkusit `sub-margin-y=60` a ověřit, že skrytí
+  `sub-margin-y=34` u přibaleného libmpv, nebo hodnota z `mpv.conf`; zkusit `sub-margin-y=60` a ověřit, že skrytí
   ostrůvku nechá titulky ve výšce 60, ne níž); po návratu ostrůvku zase nahoru; stejně po změně
   velikosti okna a ve fullscreenu. (Tlačítka Titulky a Playlist zatím jen nastaví, který panel je otevřený:
   panely přijdou s Task 20; tlačítko Titulky má `aria-expanded`.)
