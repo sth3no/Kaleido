@@ -75,7 +75,8 @@ describe('Kaleido started with a clip', () => {
   it('a second `Kaleido.exe <clip>` hands the clip over and ends, and the clip is in the title island within 5 s', async () => {
     // tauri-driver started the app without the clip (wdio.conf.ts): this start hands its command
     // line to the running app (single instance), as opening a file from Explorer does, and ends.
-    // `--start=0`: a position an earlier run saved must not move the clip towards its end.
+    // `--start=0` goes through the command line's options; the position an earlier run saved is
+    // removed before the run (`CLIP_POSITION`), which the option alone does not override.
     const started = Date.now();
     const second = spawn(APP, ['--start=0', '--', CLIP], { stdio: 'ignore' });
     const ended = new Promise<number | null>((resolve) => {

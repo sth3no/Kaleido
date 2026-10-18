@@ -4,6 +4,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,6 +21,21 @@ export const APP = path.join(ROOT, 'target', 'debug', 'Kaleido.exe');
 
 /** The clip `e2e/make-media.ps1` writes. */
 export const CLIP = path.join(ROOT, 'e2e', 'media', 'kaleido-e2e.mkv');
+
+/**
+ * The clip's saved position (Kaleido's mpv.conf has `save-position-on-quit`): the file in mpv's
+ * `watch_later` folder named by the MD5 of the clip's path. A run that closed the app at the end of
+ * the clip leaves it there, and the next run would start at the end, paused. `--start=0` on the
+ * command line does not prevent that: mpv opens the clip's folder as the playlist
+ * (`autocreate-playlist`), and the entry it plays has lost the option. `onPrepare` removes it.
+ */
+export const CLIP_POSITION = path.join(
+  process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local'),
+  'Kaleido',
+  'state',
+  'watch_later',
+  createHash('md5').update(CLIP, 'utf8').digest('hex').toUpperCase(),
+);
 
 /** Microsoft Edge WebDriver in the WebView2 runtime's version (`e2e/fetch-driver.ps1`). */
 export const EDGE_DRIVER =

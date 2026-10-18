@@ -13,11 +13,11 @@
  */
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import { SevereServiceError } from 'webdriverio';
 
-import { APP, CLIP, EDGE_DRIVER, kaleidoProcesses, TAURI_DRIVER } from './support';
+import { APP, CLIP, CLIP_POSITION, EDGE_DRIVER, kaleidoProcesses, TAURI_DRIVER } from './support';
 
 const PORT = 4444;
 const NATIVE_PORT = 4445;
@@ -100,6 +100,8 @@ export const config: WebdriverIO.Config = {
       const list = running.map((p) => `  ${p.path || '?'} (process ${String(p.pid)})`).join('\n');
       throw new SevereServiceError(`Close Kaleido first:\n${list}`);
     }
+    // The position the last run saved for the clip: the clip starts from its beginning.
+    rmSync(CLIP_POSITION, { force: true });
   },
 
   async beforeSession() {
