@@ -12,6 +12,8 @@
  *   reaches, with its ✕ beside it.
  * - After a move the focus stays on the entry that moved; after ✕ it goes to the entry that takes
  *   the place of the one removed, or to the one before when the last was removed.
+ * - A line under the list says how to move an entry by the keyboard (the grip is the pointer's;
+ *   its tooltip is not for a keyboard user), and the list is described by it.
  *
  * The rows are kept by their place, not by what is in them: mpv sends the playlist anew after a
  * move, and a row that moved in the page would lose the focus. The focus is put on the row where
@@ -22,6 +24,7 @@
 
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type KeyboardEvent,
@@ -72,7 +75,8 @@ export default function PlaylistPanel({ anchor }: PlaylistPanelProps) {
   const { t } = useTranslation();
   const items = usePlayerStore((state) => selectPlaylist(state.props));
   const setPanel = useUiStore((state) => state.setPanel);
-  const header = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const hintId = useId();
   const rows = useRef<(HTMLLIElement | null)[]>([]);
   /** The entry Tab reaches: the one the focus was last on. Until then, the one that plays. */
   const [active, setActive] = useState<number | null>(null);
@@ -106,7 +110,7 @@ export default function PlaylistPanel({ anchor }: PlaylistPanelProps) {
     const target = position < count - 1 ? position : position - 1;
     if (target < 0) {
       // Nothing left to focus: the panel itself keeps the focus.
-      header.current?.closest<HTMLElement>('[role="dialog"]')?.focus();
+      dialog.current?.focus();
       return;
     }
     setActive(target);
@@ -213,8 +217,9 @@ export default function PlaylistPanel({ anchor }: PlaylistPanelProps) {
         setPanel(null);
       }}
       className={styles.playlist}
+      panelRef={dialog}
     >
-      <div ref={header} className={styles.header}>
+      <div className={styles.header}>
         <h2 className={styles.title}>{t('panels.playlist')}</h2>
         {playing >= 0 && (
           <span className={`${styles.position} tabular`}>
@@ -228,7 +233,11 @@ export default function PlaylistPanel({ anchor }: PlaylistPanelProps) {
       {count === 0 ? (
         <p className={styles.empty}>{t('panels.playlistEmpty')}</p>
       ) : (
-        <ul className={styles.list} onKeyDown={onKeyDown}>
+        <ul
+          className={styles.list}
+          aria-describedby={count > 1 ? hintId : undefined}
+          onKeyDown={onKeyDown}
+        >
           {items.map((item, position) => {
             const name = entryName(item);
             const here = position === entry;
@@ -293,6 +302,11 @@ export default function PlaylistPanel({ anchor }: PlaylistPanelProps) {
             );
           })}
         </ul>
+      )}
+      {count > 1 && (
+        <p id={hintId} className={styles.hint}>
+          {t('panels.playlistHint')}
+        </p>
       )}
     </Popover>
   );

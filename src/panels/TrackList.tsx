@@ -8,7 +8,7 @@
  * every step. The chosen option is the one Tab reaches, and the one the panel opens on.
  */
 
-import { useRef, type KeyboardEvent } from 'react';
+import { useMemo, useRef, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Track } from '../ipc/types';
@@ -39,12 +39,16 @@ export default function TrackList({ label, tracks, selected, offLabel, onSelect 
   const { t, i18n } = useTranslation();
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const options: Option[] = tracks.map((track) => ({
-    key: `track-${String(track.id)}`,
-    id: track.id,
-    ...trackLabel(track, t, i18n.language),
-  }));
-  if (offLabel !== undefined) options.push({ key: 'off', id: null, name: offLabel, detail: '' });
+  // The labels change with the track list and the language, not with every render of the panel.
+  const options = useMemo(() => {
+    const list: Option[] = tracks.map((track) => ({
+      key: `track-${String(track.id)}`,
+      id: track.id,
+      ...trackLabel(track, t, i18n.language),
+    }));
+    if (offLabel !== undefined) list.push({ key: 'off', id: null, name: offLabel, detail: '' });
+    return list;
+  }, [tracks, offLabel, t, i18n.language]);
 
   const chosen = options.findIndex((option) => option.id === selected);
   // What Tab reaches and the panel opens on: the chosen option, or the first.

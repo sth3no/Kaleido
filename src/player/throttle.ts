@@ -10,6 +10,8 @@ export interface Throttled<A extends unknown[]> {
   (...args: A): void;
   /** Drops the call that is held back and starts over: the next call goes at once. */
   cancel(): void;
+  /** Sends the call that is held back, if there is one, now; the next call goes at once. */
+  flush(): void;
 }
 
 export function throttle<A extends unknown[]>(
@@ -43,6 +45,12 @@ export function throttle<A extends unknown[]>(
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     held = null;
+  };
+
+  throttled.flush = (): void => {
+    const args = held;
+    throttled.cancel();
+    if (args !== null) run(...args);
   };
 
   return throttled;

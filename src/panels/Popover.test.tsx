@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState } from 'react';
-import { afterEach, beforeEach, expect, test, vi, type MockInstance } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi, type MockInstance } from 'vitest';
 
 import type { GlassRect } from '../ipc/types';
-import { attachVideoInput } from '../input/forward';
+import { attachVideoInput, blurAfterPointer } from '../input/forward';
 import { useUiStore } from '../state/uiStore';
 import Popover, { tabbablesOf } from './Popover';
+import { realClick } from './pointerSequence';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
 
@@ -25,6 +26,8 @@ function runFrame(): void {
 const PANEL_BOX = { left: 0, top: 0, width: 330, height: 200 };
 const BUTTON_BOX = { left: 500, top: 650, width: 34, height: 34 };
 const NO_BOX = { left: 0, top: 0, width: 0, height: 0 };
+/** The video layer covers the window. */
+const VIDEO_BOX = { left: 0, top: 0, width: 1024, height: 768 };
 
 const asRect = (box: { left: number; top: number; width: number; height: number }) =>
   ({
@@ -34,6 +37,11 @@ const asRect = (box: { left: number; top: number; width: number; height: number 
     right: box.left + box.width,
     bottom: box.top + box.height,
   }) as DOMRect;
+
+beforeAll(() => {
+  // jsdom has no pointer capture; the video layer takes it when it gets a press.
+  Object.defineProperty(Element.prototype, 'setPointerCapture', { configurable: true, value: vi.fn() });
+});
 
 beforeEach(() => {
   frames = [];
@@ -48,6 +56,7 @@ beforeEach(() => {
     this: HTMLElement,
   ) {
     if (this.getAttribute('role') === 'dialog') return asRect(PANEL_BOX);
+    if (this.hasAttribute('data-video-layer')) return asRect(VIDEO_BOX);
     return asRect(this.hasAttribute('data-anchor') ? BUTTON_BOX : NO_BOX);
   });
 });
@@ -61,7 +70,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** A button that opens a panel with three buttons and a slider, a video layer and a button beside it. */
+/**
+ * A button that opens a panel with three buttons, a slider and a button that closes it, a video layer
+ * and a button beside it. The buttons give the focus back after a pointer as the island's do.
+ */
 function Harness({ onClose, marked = true }: { onClose?: () => void; marked?: boolean }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -74,6 +86,7 @@ function Harness({ onClose, marked = true }: { onClose?: () => void; marked?: bo
         onClick={() => {
           setOpen((was) => !was);
         }}
+        {...blurAfterPointer}
       >
         Open
       </button>
@@ -92,29 +105,47 @@ function Harness({ onClose, marked = true }: { onClose?: () => void; marked?: bo
           </button>
           <button type="button">Three</button>
           <input type="range" aria-label="Slider" />
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Done
+          </button>
         </Popover>
       )}
       <div data-video-layer data-testid="video" />
-      <button type="button">Elsewhere</button>
+      <button type="button" {...blurAfterPointer}>
+        Elsewhere
+      </button>
     </>
   );
 }
 
 const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
 
-/** Renders the harness and opens the panel with a click on its button. */
+/** Renders the harness and opens the panel with a click of the mouse on its button. */
 function open(props: Parameters<typeof Harness>[0] = {}) {
   const view = render(<Harness {...props} />);
-  fireEvent.click(button('Open'));
+  realClick(button('Open'));
   return { ...view, dialog: screen.getByRole('dialog', { name: 'Test panel' }) };
 }
 
 /** What was passed on to mpv. */
 const forwarded = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'player_input');
 
+/** The events of one kind (`keyDown`, `buttonDown`, ...) that were passed on to mpv. */
+const sentToMpv = (type: string): { type: string; key?: string; button?: string }[] =>
+  forwarded()
+    .map(([, args]) => (args as { event: { type: string; key?: string; button?: string } }).event)
+    .filter((event) => event.type === type);
+
 test('the panel is a dialog with the focus in it, on the element that asks for it', () => {
   const { dialog } = open();
   expect(dialog.hasAttribute('data-island')).toBe(true);
+  // A dialog that keeps the focus in it says so.
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
   expect(document.activeElement).toBe(button('Two'));
 });
 
@@ -135,6 +166,7 @@ test('tabbablesOf lists what Tab reaches, in order', () => {
     'Two',
     'Three',
     'Slider',
+    'Done',
   ]);
 });
 
@@ -215,12 +247,85 @@ test('a key the panel has already handled is left alone by it', () => {
   expect(screen.queryByRole('dialog')).not.toBeNull();
 });
 
-test('closing it with the button gives the focus back to the button too', () => {
+test('a click on the button closes the panel and leaves nothing focused, so Space goes to mpv', () => {
   open();
-  expect(document.activeElement).toBe(button('Two'));
-  fireEvent.click(button('Open'));
+  const detach = attachVideoInput(screen.getByTestId('video'));
+  try {
+    // pointerdown, mousedown and the focus it moves, pointerup, click: as the browser delivers it.
+    realClick(button('Open'));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Not the button: a button that held the focus would keep Space from mpv and press itself.
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: ' ', code: 'Space' });
+    expect(sentToMpv('keyDown').map((event) => event.key)).toEqual(['SPACE']);
+  } finally {
+    detach();
+  }
+});
+
+test('a press outside on a control closes the panel and leaves nothing focused, so Space goes to mpv', () => {
+  open();
+  const detach = attachVideoInput(screen.getByTestId('video'));
+  try {
+    realClick(button('Elsewhere'));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(sentToMpv('keyDown').map((event) => event.key)).toEqual(['SPACE']);
+  } finally {
+    detach();
+  }
+});
+
+test('a press on the bare video closes the panel, mpv gets no mouse button from it, and Space goes to mpv', () => {
+  const onClose = vi.fn();
+  open({ onClose });
+  const video = screen.getByTestId('video');
+  const detach = attachVideoInput(video);
+  try {
+    realClick(video);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // The press (and its release) did not reach the video layer's input: no button pair for mpv.
+    expect(sentToMpv('buttonDown')).toEqual([]);
+    expect(sentToMpv('buttonUp')).toEqual([]);
+    expect(sentToMpv('mouseMove')).toEqual([]);
+
+    // Nothing is focused, so Space pauses.
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(sentToMpv('keyDown').map((event) => event.key)).toEqual(['SPACE']);
+
+    // Not vacuous: with the panel gone, the same click does reach mpv, as a pair.
+    realClick(video);
+    expect(sentToMpv('buttonDown').map((event) => event.button)).toEqual(['MBTN_LEFT']);
+    expect(sentToMpv('buttonUp').map((event) => event.button)).toEqual(['MBTN_LEFT']);
+  } finally {
+    detach();
+  }
+});
+
+test('an item that closes the panel returns the focus to the button after the keyboard, and not after the mouse', () => {
+  open();
+  const done = button('Done');
+  act(() => {
+    done.focus();
+  });
+  // Enter: a key, then the click it makes (a click with no click count).
+  fireEvent.keyDown(done, { key: 'Enter', code: 'Enter' });
+  fireEvent.click(done, { detail: 0 });
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(button('Open'));
+
+  // The same item with the mouse: nothing is focused.
+  realClick(button('Open'));
+  expect(screen.queryByRole('dialog')).not.toBeNull();
+  realClick(button('Done'));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(document.activeElement).toBe(document.body);
 });
 
 test('tab goes round inside the panel, and shift+tab the other way', () => {
@@ -270,21 +375,6 @@ test('a press outside closes the panel, on its button or inside it it does not',
   // Another control: the panel closes and the press goes on to the control.
   const reaches = fireEvent.pointerDown(button('Elsewhere'), { button: 0, pointerId: 1 });
   expect(reaches).toBe(true);
-  expect(onClose).toHaveBeenCalledTimes(1);
-  expect(screen.queryByRole('dialog')).toBeNull();
-});
-
-test('a press on the bare video closes the panel and does not reach the video', () => {
-  const onClose = vi.fn();
-  open({ onClose });
-  const video = screen.getByTestId('video');
-  const reached = vi.fn();
-  video.addEventListener('pointerdown', reached);
-
-  const passedOn = fireEvent.pointerDown(video, { button: 0, pointerId: 1 });
-
-  expect(passedOn).toBe(false);
-  expect(reached).not.toHaveBeenCalled();
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole('dialog')).toBeNull();
 });

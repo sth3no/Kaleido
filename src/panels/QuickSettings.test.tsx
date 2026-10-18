@@ -116,6 +116,19 @@ describe('subtitles', () => {
     expect(option('Czech').getAttribute('aria-selected')).toBe('true');
   });
 
+  test('a subtitle file loaded from outside is named by its file where it says nothing itself', () => {
+    open({
+      'track-list': [
+        ...SUBTITLES,
+        { id: 3, type: 'sub', external: true, 'external-filename': 'C:\\Titulky\\film.cs.srt' },
+      ],
+      sid: 3,
+    });
+    const external = option(/^film\.cs\.srt/);
+    expect(external.getAttribute('aria-selected')).toBe('true');
+    expect(external.textContent).toContain('External file');
+  });
+
   test('a file without subtitles says so, and still loads one', () => {
     open({ 'track-list': [] });
     expect(screen.getByText('This file has no subtitles')).toBeTruthy();
@@ -184,6 +197,31 @@ describe('subtitles', () => {
     open({ 'sub-scale': 1 });
     fireEvent.change(screen.getByRole('slider', { name: 'Size' }), { target: { value: typed } });
     expect(commands()).toEqual([{ type: 'setSubScale', scale: sent }]);
+  });
+
+  test('the size the slider was last moved to is sent when the panel closes', () => {
+    const { unmount } = open({ 'sub-scale': 1 });
+    const slider = screen.getByRole('slider', { name: 'Size' });
+
+    // The first move goes at once; the second comes within the throttle's interval and is held back.
+    fireEvent.change(slider, { target: { value: '1.5' } });
+    fireEvent.change(slider, { target: { value: '1.75' } });
+    expect(commands()).toEqual([{ type: 'setSubScale', scale: 1.5 }]);
+
+    // The panel closes before the interval is over: what was held back goes now, it is not lost.
+    unmount();
+    expect(commands()).toEqual([
+      { type: 'setSubScale', scale: 1.5 },
+      { type: 'setSubScale', scale: 1.75 },
+    ]);
+  });
+
+  test('the size readout is not a live region, the slider says its value itself', () => {
+    open({ 'sub-scale': 1.25 });
+    const readout = screen.getByText('125%');
+    expect(readout.tagName).toBe('OUTPUT');
+    expect(readout.getAttribute('aria-live')).toBe('off');
+    expect(screen.getByRole('slider', { name: 'Size' }).getAttribute('aria-valuetext')).toBe('125%');
   });
 
   test('a size mpv reports outside the range is shown held to it', () => {

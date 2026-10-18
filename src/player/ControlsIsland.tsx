@@ -20,9 +20,8 @@ import { useEffect, useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useGlassRegion } from '../glass/useGlassRegion';
-import { playerCommand } from '../ipc/commands';
-import type { PlayerCommand } from '../ipc/types';
 import PlaylistPanel from '../panels/PlaylistPanel';
+import { sendCommand } from '../panels/props';
 import QuickSettings from '../panels/QuickSettings';
 import {
   selectPaused,
@@ -52,12 +51,6 @@ export interface ControlsIslandProps {
   hidden?: boolean;
 }
 
-const send = (cmd: PlayerCommand) => {
-  playerCommand(cmd).catch((error: unknown) => {
-    console.warn('player_command', cmd.type, error);
-  });
-};
-
 /** The context menu of the WebView is not for the controls. */
 const noContextMenu = (e: MouseEvent) => {
   e.preventDefault();
@@ -79,8 +72,10 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
   useGlassRegion(island);
   useSubMargin(island, hidden);
 
-  // A panel belongs to the island: with the island gone (the video ended, another page) it is
-  // closed, or the autohide would hold the next island open for a panel nobody sees.
+  // A panel belongs to the island: with the island gone it is closed. That is a decision, and it
+  // covers `loaded` turning false (PlayerPage drops the island when the file ends or fails) as well
+  // as another page: a panel is about the file that was playing, and an open panel with no island
+  // would hold the next island open for good (the autohide stays off while `panel` is set).
   useEffect(
     () => () => {
       const { panel: open, setPanel: close } = useUiStore.getState();
@@ -106,16 +101,16 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
   };
   // The commands are here and not in the markup, which has no text of its own to write.
   const previous = () => {
-    send({ type: 'playlistPrev' });
+    sendCommand({ type: 'playlistPrev' });
   };
   const togglePause = () => {
-    send({ type: 'togglePause' });
+    sendCommand({ type: 'togglePause' });
   };
   const next = () => {
-    send({ type: 'playlistNext' });
+    sendCommand({ type: 'playlistNext' });
   };
   const toggleFullscreen = () => {
-    send({ type: 'setFullscreen', on: !fullscreen });
+    sendCommand({ type: 'setFullscreen', on: !fullscreen });
   };
 
   return (

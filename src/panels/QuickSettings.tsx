@@ -77,9 +77,11 @@ function SubtitleSize() {
       }, SCALE_THROTTLE_MS),
     [],
   );
+  // The panel closes (Esc, a press outside) a moment after the last move of the slider: what was
+  // held back goes now, or the size the user saw would not be the one mpv has.
   useEffect(
     () => () => {
-      send.cancel();
+      send.flush();
     },
     [send],
   );
@@ -112,7 +114,8 @@ function SubtitleSize() {
         aria-valuetext={percent}
         onChange={onChange}
       />
-      <output htmlFor={id} className={`${styles.value} tabular`}>
+      {/* Not a live region (an output is one): the slider's aria-valuetext says the value. */}
+      <output htmlFor={id} className={`${styles.value} tabular`} aria-live="off">
         {percent}
       </output>
     </div>

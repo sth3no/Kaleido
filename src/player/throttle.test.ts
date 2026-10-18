@@ -64,3 +64,32 @@ test('cancel drops the call that is held back, and the next call goes at once', 
   throttled(3);
   expect(run.mock.calls).toEqual([[1], [3]]);
 });
+
+test('flush sends the call that is held back at once, and the next call goes at once too', () => {
+  const run = vi.fn<(value: number) => void>();
+  const throttled = throttle(run, 30);
+
+  throttled(1);
+  throttled(2);
+  throttled(3);
+  expect(run.mock.calls).toEqual([[1]]);
+
+  throttled.flush();
+  expect(run.mock.calls).toEqual([[1], [3]]);
+
+  // The interval it was in is over: the timer is gone, nothing goes twice.
+  vi.advanceTimersByTime(100);
+  expect(run).toHaveBeenCalledTimes(2);
+  throttled(4);
+  expect(run.mock.calls.at(-1)).toEqual([4]);
+});
+
+test('flush with nothing held sends nothing', () => {
+  const run = vi.fn<(value: number) => void>();
+  const throttled = throttle(run, 30);
+  throttled.flush();
+  expect(run).not.toHaveBeenCalled();
+  throttled(1);
+  throttled.flush();
+  expect(run.mock.calls).toEqual([[1]]);
+});

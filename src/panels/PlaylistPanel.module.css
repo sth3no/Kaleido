@@ -1,7 +1,9 @@
 /*
  * The playlist panel (PlaylistPanel.tsx; key-screens-v2.html, screen 2): a list of entries, each with
- * a grip, its name and ✕. The entry that plays is marked. It comes after Popover.module.css in the
- * bundle, so its width wins; a long list scrolls inside the panel and the header stays.
+ * a grip, its name and ✕, and a line under it that says how to move one by the keyboard. The entry
+ * that plays is marked. The width and `--popover-max-h` are what Popover.module.css leaves to the
+ * panel, so the order of the two stylesheets does not matter. A long list scrolls inside the panel
+ * and the header stays.
  */
 .playlist {
   width: 380px;
@@ -30,6 +32,14 @@
 .empty {
   margin: 0;
   padding: var(--k-space-s) var(--k-space-m);
+  opacity: 0.72;
+}
+
+/* The keyboard's way to move an entry, in view under the list. */
+.hint {
+  margin: 0;
+  padding: 0 var(--k-space-m) var(--k-space-xs);
+  font-size: var(--k-font-size-xs);
   opacity: 0.72;
 }
 

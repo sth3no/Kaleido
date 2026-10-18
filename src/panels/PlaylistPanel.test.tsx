@@ -177,6 +177,19 @@ describe('the entries', () => {
     expect(commands()).toEqual([{ type: 'playlistRemove', index: 1 }]);
   });
 
+  test('a line under the list says how to move an entry with the keyboard, and the list is described by it', () => {
+    open();
+    const hint = screen.getByText('Move an entry: drag the grip, or press Alt+↑ / Alt+↓');
+    expect(hint.id).not.toBe('');
+    expect(screen.getByRole('list').getAttribute('aria-describedby')).toBe(hint.id);
+  });
+
+  test('one entry has nothing to be moved past, so no hint', () => {
+    open([file(0)]);
+    expect(screen.queryByText(/Alt\+/)).toBeNull();
+    expect(screen.getByRole('list').hasAttribute('aria-describedby')).toBe(false);
+  });
+
   test('an empty playlist says so, and the panel keeps the focus', () => {
     open([]);
     expect(screen.getByText('The playlist is empty')).toBeTruthy();

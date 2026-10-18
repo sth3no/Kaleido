@@ -91,6 +91,7 @@
     },
     "playlistEmpty": "Seznam k přehrání je prázdný",
     "playlistPosition": "{{position}} z {{total}}",
+    "playlistHint": "Přesun položky: tažením za úchyt nebo klávesami Alt+↑ / Alt+↓",
     "remove": "Odebrat {{name}} ze seznamu",
     "reorderHint": "Přetažením změníš pořadí, nebo stiskni Alt+↑ či Alt+↓"
   },

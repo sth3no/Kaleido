@@ -1,7 +1,7 @@
 /**
  * The shell of the panels above the controls (spec 8.5, point 2; 8.9): a glass dialog that stands
- * over the button that opened it (`placeAbove`), opens with a short spring and gives the focus
- * back to the button when it goes.
+ * over the button that opened it (`placeAbove`), opens with a short spring and, when the keyboard
+ * closes it, gives the focus back to the button.
  *
  * - It is a child of the body and `position: fixed`, so that nothing of the island it was opened
  *   from (its glass, its slide) carries it along or becomes its containing block. The UI scale is
@@ -10,7 +10,12 @@
  *   Measured again when the window or the scale changes, and when the panel's size does.
  * - The focus goes in when it opens (to the `data-autofocus` element, else the first one Tab
  *   reaches) and stays in: Tab and Shift+Tab go round, and focus that lands outside is brought
- *   back. When the panel goes with the focus in it, the focus returns to the button.
+ *   back. It is a dialog that traps the focus, so it says `aria-modal`.
+ * - Where the focus goes when it closes depends on how the user closed it (Ruling R44): after the
+ *   keyboard (Esc, an item chosen with Enter or Space) it returns to the button; after the pointer
+ *   (a press outside, a click on the button or the video) nothing keeps it and the button is not
+ *   given it, so that Space goes to mpv as it does after a click on any control of the island
+ *   (`blurAfterPointer`, input/forward.ts). The way is the last input seen: a key or a press.
  * - Esc closes it. A press anywhere else closes it too; a press on the bare video (the layer
  *   `data-video-layer`) does nothing else, so that closing a panel does not also pause the video.
  * - The keys it handles call `preventDefault`, so that `input/forward.ts` does not also send them
@@ -54,6 +59,8 @@ export interface PopoverProps {
   onClose: () => void;
   /** Sets the width and the tallest it may be (`--popover-max-h`). */
   className?: string;
+  /** The dialog's element, for a panel that has to focus it (an empty list). */
+  panelRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }
 
@@ -101,12 +108,25 @@ function place(panel: HTMLElement, anchor: HTMLElement): void {
   glassRegions.schedule();
 }
 
-export default function Popover({ anchor, label, onClose, className, children }: PopoverProps) {
-  const panel = useRef<HTMLDivElement>(null);
+export default function Popover({
+  anchor,
+  label,
+  onClose,
+  className,
+  panelRef,
+  children,
+}: PopoverProps) {
+  const own = useRef<HTMLDivElement>(null);
+  const panel = panelRef ?? own;
   /** Where the focus was last inside, for bringing it back. */
   const lastFocus = useRef<HTMLElement | null>(null);
   /** The focus is being handed to the button on purpose: the guard below lets it go. */
   const leaving = useRef(false);
+  /**
+   * How the user last acted on the page, which decides where the focus goes when the panel closes
+   * (Ruling R44). Until the user does anything it is the pointer: the safe one (see the cleanup).
+   */
+  const modality = useRef<'keyboard' | 'pointer'>('pointer');
   const closeRef = useRef(onClose);
   useGlassRegion(panel);
 
@@ -127,7 +147,7 @@ export default function Popover({ anchor, label, onClose, className, children }:
     const element = panel.current;
     const button = anchor.current;
     if (element && button?.isConnected) place(element, button);
-  }, [anchor]);
+  }, [anchor, panel]);
 
   // Over its button at every render (the content, and so the size, may have changed) and whenever
   // the window, the UI scale or the panel itself changes size.
@@ -148,7 +168,7 @@ export default function Popover({ anchor, label, onClose, className, children }:
       root.disconnect();
       resizes?.disconnect();
     };
-  }, [placeNow]);
+  }, [placeNow, panel]);
 
   // The focus goes in.
   useEffect(() => {
@@ -156,19 +176,27 @@ export default function Popover({ anchor, label, onClose, className, children }:
     if (!element) return;
     const first = element.querySelector<HTMLElement>('[data-autofocus]') ?? tabbablesOf(element)[0];
     (first ?? element).focus({ preventScroll: true });
-  }, []);
+  }, [panel]);
 
-  // And back to the button when the panel goes with the focus in it (or nowhere: an entry that
-  // had it went away). Not when the user has moved on to something else.
+  // Where the focus goes when the panel closes (Ruling R44). After the keyboard (Esc, an item
+  // chosen with Enter or Space) it goes back to the button, if it was in the panel or nowhere. After
+  // the pointer (a press outside, a click on the button or on the video) nothing keeps it, and the
+  // button gets none: a button that held the focus would keep Space from mpv (input/forward.ts) and
+  // press the button again instead of pausing, as a click on any control does not (`blurAfterPointer`).
   useLayoutEffect(() => {
     const element = panel.current;
+    const button = anchor.current;
     return () => {
       const active = document.activeElement;
-      if (element && (active === null || active === document.body || element.contains(active))) {
-        returnFocus();
+      if (!element) return;
+      const inside = active !== null && element.contains(active);
+      if (modality.current === 'keyboard') {
+        if (inside || active === null || active === document.body) returnFocus();
+      } else if (active instanceof HTMLElement && (inside || active === button)) {
+        active.blur();
       }
     };
-  }, [returnFocus]);
+  }, [anchor, panel, returnFocus]);
 
   // Esc, the keeping of the focus and the press outside.
   useEffect(() => {
@@ -231,10 +259,21 @@ export default function Popover({ anchor, label, onClose, className, children }:
       { signal },
     );
 
+    // The last thing the user did, for where the focus goes when the panel closes. On the capture
+    // of the window: before the handlers that close the panel see the same event.
+    window.addEventListener(
+      'keydown',
+      () => {
+        modality.current = 'keyboard';
+      },
+      { signal, capture: true },
+    );
+
     // Before anything below sees the press: on the capture of the window.
     window.addEventListener(
       'pointerdown',
       (e) => {
+        modality.current = 'pointer';
         const target = e.target;
         if (!(target instanceof Node)) return;
         // Inside, or on the button, whose click opens, switches or closes the panel.
@@ -251,7 +290,7 @@ export default function Popover({ anchor, label, onClose, className, children }:
     return () => {
       abort.abort();
     };
-  }, [anchor, returnFocus]);
+  }, [anchor, panel, returnFocus]);
 
   const onFocus = (e: FocusEvent<HTMLDivElement>) => {
     if (e.target instanceof HTMLElement && e.target !== e.currentTarget) lastFocus.current = e.target;
@@ -278,9 +317,9 @@ export default function Popover({ anchor, label, onClose, className, children }:
       className={look}
       role="dialog"
       aria-label={label}
+      aria-modal="true"
       tabIndex={-1}
       data-island
-      data-popover
       onFocus={onFocus}
       onKeyDown={onKeyDown}
       onTransitionEnd={onTransitionEnd}

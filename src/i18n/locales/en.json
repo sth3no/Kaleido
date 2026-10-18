@@ -91,6 +91,7 @@
     },
     "playlistEmpty": "The playlist is empty",
     "playlistPosition": "{{position}} of {{total}}",
+    "playlistHint": "Move an entry: drag the grip, or press Alt+↑ / Alt+↓",
     "remove": "Remove {{name}} from the playlist",
     "reorderHint": "Drag to reorder, or press Alt+↑ or Alt+↓"
   },

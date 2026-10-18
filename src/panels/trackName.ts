@@ -49,6 +49,18 @@ function capitalized(text: string, locale: string): string {
   return text.charAt(0).toLocaleUpperCase(locale) + text.slice(1);
 }
 
+/** One `Intl.DisplayNames` per language of the UI: building one is far dearer than asking it. */
+const displayNames = new Map<string, Intl.DisplayNames>();
+
+export function displayNamesIn(locale: string): Intl.DisplayNames {
+  let names = displayNames.get(locale);
+  if (!names) {
+    names = new Intl.DisplayNames([locale], { type: 'language', fallback: 'none' });
+    displayNames.set(locale, names);
+  }
+  return names;
+}
+
 /**
  * The name of a language in `locale` from the tag of a track (`cs`, `cze`, `eng`); `null` where the
  * file names none (or says `und`). A code the system does not know is shown as it is, in capitals.
@@ -57,8 +69,7 @@ export function languageName(tag: string | undefined, locale: string): string | 
   const code = tag?.trim().toLowerCase();
   if (!code || code === 'und') return null;
   try {
-    const names = new Intl.DisplayNames([locale], { type: 'language', fallback: 'none' });
-    const name = names.of(BIBLIOGRAPHIC[code] ?? code);
+    const name = displayNamesIn(locale).of(BIBLIOGRAPHIC[code] ?? code);
     return name ? capitalized(name, locale) : code.toUpperCase();
   } catch {
     // Not a language tag at all (a word the muxer wrote): as it is.
@@ -82,11 +93,14 @@ export function trackLabel(track: Track, t: Translate, locale: string): TrackLab
   if (language) names.push(language);
   // A title that only repeats the language adds nothing.
   if (title && title.toLowerCase() !== language?.toLowerCase()) names.push(title);
+  // The file of an external track says more than "Track 3" where the track says nothing itself.
+  const file = track.external === true ? nameOfFile(track['external-filename'] ?? null) : '';
 
   const detail: string[] = [];
   if (track.forced === true) detail.push(t('panels.track.forced'));
   if (track.external === true) {
-    detail.push(nameOfFile(track['external-filename'] ?? null) || t('panels.track.external'));
+    // The file is the name where there is no other, and under the name where there is one.
+    detail.push(file !== '' && names.length > 0 ? file : t('panels.track.external'));
   }
   if (track.type === 'audio') {
     if (track.codec) detail.push(track.codec.toUpperCase());
@@ -94,8 +108,7 @@ export function trackLabel(track: Track, t: Translate, locale: string): TrackLab
     if (layout) detail.push(layout);
   }
 
-  return {
-    name: names.length > 0 ? names.join(' · ') : t('panels.track.fallback', { id: track.id }),
-    detail: detail.join(' · '),
-  };
+  let name = names.join(' · ');
+  if (name === '') name = file !== '' ? file : t('panels.track.fallback', { id: track.id });
+  return { name, detail: detail.join(' · ') };
 }

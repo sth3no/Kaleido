@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { Track } from '../ipc/types';
-import { channelLayout, languageName, trackLabel, type Translate } from './trackName';
+import { channelLayout, displayNamesIn, languageName, trackLabel, type Translate } from './trackName';
 
 /** A `t` that shows which key was asked for, and with what. */
 const t: Translate = (key, options) => (options ? `${key}:${JSON.stringify(options)}` : key);
@@ -18,6 +18,14 @@ describe('languageName', () => {
     expect(languageName('cze', 'en')).toBe(languageName('ces', 'en'));
     expect(languageName('ger', 'en')).toBe(languageName('deu', 'en'));
     expect(languageName('CS', 'en')).toBe('Czech');
+  });
+
+  test('keeps one Intl.DisplayNames per language, not one per label', () => {
+    expect(displayNamesIn('en')).toBe(displayNamesIn('en'));
+    expect(displayNamesIn('cs')).toBe(displayNamesIn('cs'));
+    expect(displayNamesIn('cs')).not.toBe(displayNamesIn('en'));
+    // Asked through languageName, the same one answers: the name does not change.
+    expect(languageName('cs', 'en')).toBe(languageName('cs', 'en'));
   });
 
   test('is null where the file names no language', () => {
@@ -85,6 +93,27 @@ describe('trackLabel', () => {
       ).detail,
     ).toBe('panels.track.forced · film.cs.srt');
     expect(trackLabel(sub({ lang: 'en', external: true }), t, 'en').detail).toBe('panels.track.external');
+  });
+
+  test('an external track that says nothing itself is named by its file', () => {
+    const file = 'C:\\Titulky\\film.cs.srt';
+    expect(trackLabel(sub({ id: 5, external: true, 'external-filename': file }), t, 'en')).toEqual({
+      name: 'film.cs.srt',
+      detail: 'panels.track.external',
+    });
+    // Forced as well: both under the name.
+    expect(
+      trackLabel(sub({ external: true, forced: true, 'external-filename': file }), t, 'en'),
+    ).toEqual({ name: 'film.cs.srt', detail: 'panels.track.forced · panels.track.external' });
+    // Without the file's name there is only the number.
+    expect(trackLabel(sub({ id: 6, external: true }), t, 'en')).toEqual({
+      name: 'panels.track.fallback:{"id":6}',
+      detail: 'panels.track.external',
+    });
+    // A track with a language keeps it, and the file goes under it.
+    expect(
+      trackLabel(sub({ lang: 'cs', external: true, 'external-filename': file }), t, 'en'),
+    ).toEqual({ name: 'Czech', detail: 'film.cs.srt' });
   });
 
   test('a sound has its codec and its channels under the name; a subtitle track does not', () => {

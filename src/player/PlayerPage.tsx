@@ -16,7 +16,12 @@
  * open leaves the player for the start screen, and its card has to outlive this page.
  *
  * The panels above the controls (quick settings, the playlist; `panels/`) belong to the island:
- * it draws them over its buttons, and with the island gone they are closed.
+ * it draws them over its buttons, and with the island gone they are closed. That includes the
+ * island going because `loaded` turned false (the file ended or failed, the next one is still
+ * loading): a panel that is open then closes too. That is by design, not an accident of the
+ * unmount: a panel is about the file that plays (its tracks, its delays, its place in the list),
+ * and that file is gone. The next file starts with no panel, and the loading title is not left
+ * with a panel over it.
  */
 
 import { createPortal } from 'react-dom';

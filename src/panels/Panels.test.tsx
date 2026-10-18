@@ -7,6 +7,7 @@ import { attachVideoInput } from '../input/forward';
 import ControlsIsland from '../player/ControlsIsland';
 import { usePlayerStore, type PlayerProps } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
+import { realClick } from './pointerSequence';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => undefined)) }));
@@ -56,6 +57,13 @@ const button = (name: string) => screen.getByRole('button', { name }) as HTMLBut
 /** What was passed on to mpv. */
 const forwarded = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'player_input');
 
+/** The keys that were passed on to mpv as pressed. */
+const keysSent = (): (string | undefined)[] =>
+  forwarded()
+    .map(([, args]) => (args as { event: { type: string; key?: string } }).event)
+    .filter((event) => event.type === 'keyDown')
+    .map((event) => event.key);
+
 test.each([
   ['Subtitles', 'Quick settings', 'quick-settings'],
   ['Playlist', 'Playlist', 'playlist'],
@@ -97,16 +105,57 @@ test.each([
   },
 );
 
-test('the button closes its panel, and the focus comes back to it', () => {
-  open();
-  render(<ControlsIsland />);
-  const playlist = button('Playlist');
-  fireEvent.click(playlist);
-  expect(screen.getByRole('dialog', { name: 'Playlist' }).contains(document.activeElement)).toBe(true);
+test('a click on its button closes the panel and leaves nothing focused, so Space goes to mpv', () => {
+  const detach = attachVideoInput(document.createElement('div'));
+  try {
+    open();
+    render(<ControlsIsland />);
+    const playlist = button('Playlist');
+    // The mouse, as the browser delivers it: pointerdown, mousedown and its focus, pointerup, click.
+    realClick(playlist);
+    expect(screen.getByRole('dialog', { name: 'Playlist' }).contains(document.activeElement)).toBe(true);
 
-  fireEvent.click(playlist);
-  expect(screen.queryByRole('dialog')).toBeNull();
-  expect(document.activeElement).toBe(playlist);
+    realClick(playlist);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useUiStore.getState().panel).toBeNull();
+    // Not the button: a button that held the focus would keep Space from mpv (R44).
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(keysSent()).toEqual(['SPACE']);
+  } finally {
+    detach();
+  }
+});
+
+test('a click on the video closes the panel and leaves nothing focused, so Space goes to mpv', () => {
+  open();
+  render(
+    <>
+      <div data-video-layer data-testid="video" />
+      <ControlsIsland />
+    </>,
+  );
+  const video = screen.getByTestId('video');
+  const detach = attachVideoInput(video);
+  try {
+    realClick(button('Subtitles'));
+    expect(screen.queryByRole('dialog', { name: 'Quick settings' })).not.toBeNull();
+
+    realClick(video);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(useUiStore.getState().panel).toBeNull();
+    // The click closed the panel and went no further: mpv got no button.
+    expect(
+      forwarded().filter(([, args]) => (args as { event: { type: string } }).event.type.startsWith('button')),
+    ).toEqual([]);
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    expect(keysSent()).toEqual(['SPACE']);
+  } finally {
+    detach();
+  }
 });
 
 test('one panel at a time: the other button takes the panel and the focus', () => {

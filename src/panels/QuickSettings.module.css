@@ -1,7 +1,8 @@
 /*
  * Quick settings (QuickSettings.tsx; key-screens-v2.html, screen 2): a panel 330 px wide with two
  * tabs as a segmented control, and under it the tab's content. The options, rows and sliders are
- * Panel.module.css's. It comes after Popover.module.css in the bundle, so its width wins.
+ * Panel.module.css's. The width and `--popover-max-h` are what Popover.module.css leaves to the
+ * panel, so the order of the two stylesheets does not matter.
  */
 .quick {
   width: 330px;
