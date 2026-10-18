@@ -3,11 +3,11 @@
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use mpv_ffi::Mpv;
 
-use super::{Engine, EngineConfig, Request};
+use super::EngineConfig;
 use crate::paths::AppPaths;
 use crate::settings;
 
@@ -81,63 +81,6 @@ pub fn reassert(mpv: &Mpv, cfg: &EngineConfig) -> mpv_ffi::Result<()> {
     Ok(())
 }
 
-/// The helper process thumbfast renders previews in: `kaleido-mpv.exe`, next to `Kaleido.exe`.
-fn thumbfast_helper(paths: &AppPaths) -> PathBuf {
-    paths.exe_dir.join("kaleido-mpv.exe")
-}
-
-/// The bundled thumbfast script (plan decision 4).
-fn thumbfast_script(paths: &AppPaths) -> PathBuf {
-    paths
-        .resource_dir
-        .join("essentials")
-        .join("thumbfast")
-        .join("thumbfast.lua")
-}
-
-/// The mpv commands that load thumbfast, to run after `initialize`: its script options, then the
-/// script. The options are appended one by one, so that the user's own `script-opts` stay and
-/// our values for thumbfast's keys come last; a value with a comma in it, a path, is one item.
-pub fn thumbfast_commands(paths: &AppPaths) -> Vec<Vec<String>> {
-    let append = |option: String| {
-        vec![
-            "change-list".to_owned(),
-            "script-opts".to_owned(),
-            "append".to_owned(),
-            option,
-        ]
-    };
-    vec![
-        append(format!(
-            "thumbfast-mpv_path={}",
-            mpv_path(&thumbfast_helper(paths))
-        )),
-        append("thumbfast-network=no".to_owned()),
-        append("thumbfast-tone_mapping=mobius".to_owned()),
-        vec!["load-script".to_owned(), mpv_path(&thumbfast_script(paths))],
-    ]
-}
-
-/// Queues the loading of thumbfast on the engine, in order, before any preview is asked for.
-/// Nothing waits for mpv, so this is safe on the main thread.
-pub fn load_thumbfast(engine: &Engine, paths: &AppPaths) {
-    // Without either, previews do not appear; say why now rather than at the first hover.
-    for (what, file) in [
-        ("thumbfast", thumbfast_script(paths)),
-        ("the preview helper", thumbfast_helper(paths)),
-    ] {
-        if !file.is_file() {
-            tracing::error!(
-                "previews will not work: {what} is missing ({})",
-                file.display()
-            );
-        }
-    }
-    for command in thumbfast_commands(paths) {
-        engine.request(Request::Command(command));
-    }
-}
-
 /// Puts Kaleido's default mpv.conf and input.conf into `config_dir`: from the installation's
 /// `defaults` folder when it has them, else the copies built into Kaleido. A file that exists
 /// belongs to the user and is never replaced.
@@ -171,12 +114,10 @@ fn mpv_path(path: &Path) -> String {
 mod tests {
     use std::collections::HashMap;
     use std::fs;
-    use std::path::Path;
 
     use mpv_ffi::{Mpv, load_api, locate_libmpv};
 
-    use super::{DEFAULT_INPUT_CONF, DEFAULT_MPV_CONF, ensure_defaults, thumbfast_commands};
-    use crate::paths::AppPaths;
+    use super::{DEFAULT_INPUT_CONF, DEFAULT_MPV_CONF, ensure_defaults};
     use crate::player::Engine;
     use crate::player::testing::{NoEvents, clip, eventually, headless, temp_paths};
 
@@ -386,49 +327,6 @@ mod tests {
         eventually(&engine, "osc is off after the file load", |mpv| {
             !mpv.get_flag("osc").unwrap()
         });
-    }
-
-    /// Plan decision 4: the script options first, then the bundled script itself.
-    #[test]
-    fn thumbfast_is_configured_before_it_is_loaded_from_the_bundle() {
-        let paths = AppPaths::from_roots(
-            Path::new("Roaming"),
-            Path::new("Local"),
-            Path::new("Install"),
-            Path::new("Desktop"),
-            Path::new("Exe"),
-        );
-        let command = |args: &[&str]| args.iter().map(|&arg| arg.to_owned()).collect::<Vec<_>>();
-        let helper = paths.exe_dir.join("kaleido-mpv.exe");
-        let script = paths
-            .resource_dir
-            .join("essentials")
-            .join("thumbfast")
-            .join("thumbfast.lua");
-        assert_eq!(
-            thumbfast_commands(&paths),
-            [
-                command(&[
-                    "change-list",
-                    "script-opts",
-                    "append",
-                    &format!("thumbfast-mpv_path={}", helper.display()),
-                ]),
-                command(&[
-                    "change-list",
-                    "script-opts",
-                    "append",
-                    "thumbfast-network=no"
-                ]),
-                command(&[
-                    "change-list",
-                    "script-opts",
-                    "append",
-                    "thumbfast-tone_mapping=mobius",
-                ]),
-                command(&["load-script", &script.display().to_string()]),
-            ]
-        );
     }
 
     #[test]

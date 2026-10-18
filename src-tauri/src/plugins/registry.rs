@@ -15,6 +15,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::settings::store::aside;
 use crate::settings::write_atomic;
@@ -93,6 +95,18 @@ pub enum PluginSource {
     Url,
     /// Put into `scripts\` by hand; a record is only made for it if something needs one.
     Manual,
+}
+
+/// The time now as [`PluginRecord::installed_at`] has it: RFC 3339 in UTC, to the second
+/// (`2026-10-11T12:00:00Z`).
+pub fn installed_now() -> String {
+    timestamp(OffsetDateTime::now_utc())
+}
+
+fn timestamp(at: OffsetDateTime) -> String {
+    let at = at.replace_nanosecond(0).unwrap_or(at);
+    // A date between the years 0 and 9999 always has an RFC 3339 form.
+    at.format(&Rfc3339).unwrap_or_default()
 }
 
 /// One file a plugin brought: its path under the config folder, with `/`, and its SHA-256 as
@@ -448,6 +462,22 @@ mod tests {
         let again = Registry::load(&path);
         assert_eq!(again.refused(), None);
         assert_eq!(again.plugins.len(), 4);
+    }
+
+    /// The form spec 6.2 shows: `2026-10-11T12:00:00Z`, without a fraction of a second.
+    #[test]
+    fn records_are_stamped_in_rfc_3339_utc_to_the_second() {
+        let at = OffsetDateTime::from_unix_timestamp_nanos(1_791_720_000_123_456_789).unwrap();
+        assert_eq!(timestamp(at), "2026-10-11T12:00:00Z");
+
+        let now = installed_now();
+        assert!(now.ends_with('Z') && !now.contains('.'), "{now}");
+        let parsed = OffsetDateTime::parse(&now, &Rfc3339).unwrap();
+        let age = OffsetDateTime::now_utc() - parsed;
+        assert!(
+            age.whole_seconds() >= 0 && age.whole_seconds() < 60,
+            "{now}"
+        );
     }
 
     /// Not a registry, and nowhere to put it: it stays where it is, and nothing replaces it.

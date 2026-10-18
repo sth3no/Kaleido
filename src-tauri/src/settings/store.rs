@@ -65,6 +65,45 @@ pub enum Language {
     En,
 }
 
+impl Language {
+    /// The language the UI shows for this setting where the system's language is
+    /// `system_locale`, a BCP 47 tag as `sys-locale` gives it (`cs-CZ`), `None` where the system
+    /// names none. What the user chose wins; `System` is Czech for Czech and English otherwise,
+    /// the rule of the UI's `resolveLanguage` (spec 8.8, Ruling R37 of M1).
+    pub fn resolve(self, system_locale: Option<&str>) -> UiLanguage {
+        match self {
+            Language::Cs => UiLanguage::Cs,
+            Language::En => UiLanguage::En,
+            Language::System => UiLanguage::of_locale(system_locale.unwrap_or_default()),
+        }
+    }
+
+    /// [`resolve`](Language::resolve) with the language of this system now, as the command
+    /// `system_locale` reads it.
+    pub fn resolve_here(self) -> UiLanguage {
+        self.resolve(sys_locale::get_locale().as_deref())
+    }
+}
+
+/// A language Kaleido has its texts in: [`Language`] once `System` has been looked up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiLanguage {
+    Cs,
+    En,
+}
+
+impl UiLanguage {
+    /// Czech where the language subtag of `locale` (`cs-CZ`, `cs_CZ` too, in any case, with
+    /// spaces around) is `cs`, English for any other and for none.
+    pub fn of_locale(locale: &str) -> UiLanguage {
+        let locale = locale.trim().to_lowercase();
+        match locale.split(['-', '_']).next() {
+            Some("cs") => UiLanguage::Cs,
+            _ => UiLanguage::En,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
@@ -506,6 +545,40 @@ mod tests {
             bad[0]
         );
         fs::read_to_string(dir.join(&bad[0])).unwrap()
+    }
+
+    /// The cases of the UI's `resolveLanguage` test (src/i18n/index.test.ts): Rust and the UI
+    /// agree on the language of the start.
+    #[test]
+    fn the_ui_language_follows_the_setting_and_the_systems_language() {
+        assert_eq!(Language::System.resolve(Some("cs-CZ")), UiLanguage::Cs);
+        assert_eq!(Language::System.resolve(Some("sk-SK")), UiLanguage::En);
+        assert_eq!(Language::En.resolve(Some("cs-CZ")), UiLanguage::En);
+        // A language that is set wins over the system, whichever it is.
+        for locale in [Some("en-US"), Some("sk-SK"), Some(""), None] {
+            assert_eq!(Language::Cs.resolve(locale), UiLanguage::Cs, "{locale:?}");
+        }
+        assert_eq!(Language::En.resolve(Some("cs")), UiLanguage::En);
+
+        for locale in ["cs", "cs-CZ", "cs_CZ", "CS-cz", " cs-CZ "] {
+            assert_eq!(
+                Language::System.resolve(Some(locale)),
+                UiLanguage::Cs,
+                "{locale:?}"
+            );
+        }
+        for locale in [
+            "", "en", "en-US", "en-GB", "sk", "sk-SK", "de-DE", "pl-PL", "csb-PL", "sl-SI",
+            "garbage", "c",
+        ] {
+            assert_eq!(
+                Language::System.resolve(Some(locale)),
+                UiLanguage::En,
+                "{locale:?}"
+            );
+        }
+        // A system that names no language is English, as `system_locale`'s `en-US` is.
+        assert_eq!(Language::System.resolve(None), UiLanguage::En);
     }
 
     #[test]

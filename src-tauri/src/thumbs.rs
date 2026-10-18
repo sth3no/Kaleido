@@ -256,8 +256,10 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
-    use crate::player::options;
     use crate::player::testing::{Recorded, headless, temp_paths};
+    use crate::plugins::install::sha256_hex;
+    use crate::plugins::{Startup, essentials};
+    use crate::settings::UiLanguage;
 
     fn payload(width: u32, height: u32, thumbnail: &Path) -> String {
         format!(
@@ -520,26 +522,36 @@ mod tests {
         }
     }
 
-    /// Takes the place of thumbfast.lua and sends back what it received and what `script-opts`
-    /// say, as the render message.
+    /// Takes the place of thumbfast.lua: reads its options as thumbfast does (`read_options` under
+    /// `thumbfast`, from `script-opts\thumbfast.conf`) and sends back what it received and the
+    /// options it got, as the render message.
     const STAND_IN: &str = r#"local utils = require "mp.utils"
+local options = {
+    max_height = 200,
+    network = false,
+    tone_mapping = "auto",
+    mpv_path = "mpv",
+}
+require("mp.options").read_options(options, "thumbfast")
 mp.register_script_message("thumb", function(time, x, y, client)
     mp.commandv("script-message-to", client, "thumbfast-render", utils.format_json({
         script = mp.get_script_name(),
         time = time, x = x, y = y, client = client,
-        mpv_path = mp.get_opt("thumbfast-mpv_path"),
-        network = mp.get_opt("thumbfast-network"),
-        tone_mapping = mp.get_opt("thumbfast-tone_mapping"),
-        other = mp.get_opt("other-key"),
+        mpv_path = options.mpv_path,
+        network = options.network,
+        tone_mapping = options.tone_mapping,
+        max_height = options.max_height,
     }))
 end)
 "#;
 
-    /// Real libmpv: the script is loaded from the bundled path (`essentials\thumbfast\thumbfast.lua`
-    /// in the resources folder) under the name `thumbfast`, gets Kaleido's script options on top
-    /// of the user's, and a request makes it answer the client that asked, with the time and
-    /// without a position. The installation folder has a comma in its name: `script-opts` is a
-    /// list split at commas, so the helper's path must arrive whole.
+    /// Real libmpv: thumbfast is an essential like the others (plan decision 2). The start
+    /// (`plugins::Startup::prepare`, with the shipped manifest's thumbfast and the stand-in as
+    /// its file) copies it to `scripts\thumbfast\main.lua` and writes Kaleido's options into
+    /// `script-opts\thumbfast.conf` over the user's, leaving the user's other options; mpv loads it
+    /// under the name `thumbfast`, and a request makes it answer the client that asked, with the
+    /// time and without a position. The installation folder has a comma in its name, which the
+    /// helper's path keeps.
     #[test]
     fn thumbfast_loads_with_kaleidos_options_and_answers_the_requesting_client() {
         let tmp = tempfile::Builder::new()
@@ -547,19 +559,41 @@ end)
             .tempdir()
             .unwrap();
         let paths = temp_paths(tmp.path());
-        let thumbfast = paths.resource_dir.join("essentials").join("thumbfast");
-        fs::create_dir_all(&thumbfast).unwrap();
-        fs::write(thumbfast.join("thumbfast.lua"), STAND_IN).unwrap();
-        // The user's own script options stay; what they say about thumbfast's own does not.
+        // The installation: the shipped manifest's thumbfast, with the stand-in as its file.
+        let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../resources/essentials")
+            .join(essentials::MANIFEST);
+        let shipped: Value = serde_json::from_str(&fs::read_to_string(shipped).unwrap()).unwrap();
+        let mut thumbfast = shipped
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|essential| essential["name"] == "thumbfast")
+            .unwrap()
+            .clone();
+        thumbfast["files"][0]["sha256"] = json!(sha256_hex(STAND_IN.as_bytes()));
+        let src = thumbfast["files"][0]["src"].as_str().unwrap().to_owned();
+        let bundle = essentials::bundle_dir(&paths);
+        fs::create_dir_all(bundle.join("thumbfast")).unwrap();
+        fs::write(bundle.join("thumbfast").join(src), STAND_IN).unwrap();
         fs::write(
-            paths.config_dir.join("mpv.conf"),
-            "script-opts=other-key=kept,thumbfast-network=yes\n",
+            essentials::manifest_path(&paths),
+            json!([thumbfast]).to_string(),
+        )
+        .unwrap();
+        // The user's own options stay; what they say about Kaleido's does not.
+        fs::create_dir_all(&paths.script_opts_dir).unwrap();
+        fs::write(
+            paths.script_opts_dir.join("thumbfast.conf"),
+            "max_height=150\nnetwork=yes\n",
         )
         .unwrap();
 
+        let startup = Startup::prepare(&paths, UiLanguage::En);
+        assert!(startup.registry.plugins.contains_key("thumbfast"));
+
         let events = Recorded::default();
         let engine = Engine::start(headless(paths.clone()), events.clone()).unwrap();
-        options::load_thumbfast(&engine, &paths);
         let client = engine.call(|mpv| mpv.client_name());
 
         // The script may still be starting: ask until it answers.
@@ -584,9 +618,10 @@ end)
         assert_eq!(reply["y"], "");
         assert_eq!(reply["client"], client.as_str());
         let helper = paths.exe_dir.join("kaleido-mpv.exe");
+        assert!(helper.to_string_lossy().contains("kaleido, thumbfast"));
         assert_eq!(reply["mpv_path"], helper.to_string_lossy().into_owned());
-        assert_eq!(reply["network"], "no");
+        assert_eq!(reply["network"], false);
         assert_eq!(reply["tone_mapping"], "mobius");
-        assert_eq!(reply["other"], "kept");
+        assert_eq!(reply["max_height"].as_f64(), Some(150.0));
     }
 }

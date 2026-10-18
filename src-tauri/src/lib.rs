@@ -183,10 +183,10 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     player::options::ensure_defaults(&paths)
         .with_context(|| format!("cannot write mpv.conf in {}", paths.config_dir.display()))?;
     // Before the engine: the open-while-playing setting decides how the first launch's files
-    // play.
-    app.manage(settings::SharedSettings::new(
-        settings::SettingsStore::load(paths.config_dir.join(settings::SETTINGS_FILE)),
-    ));
+    // play, and the language the preferences sub-select is first given.
+    let store = settings::SettingsStore::load(paths.config_dir.join(settings::SETTINGS_FILE));
+    let language = store.get().language.resolve_here();
+    app.manage(settings::SharedSettings::new(store));
     let window = app
         .get_webview_window("main")
         .context("the main window is missing")?;
@@ -202,6 +202,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     if let Err(error) = system::logs::rotate_mpv_log(&paths.logs_dir, SystemTime::now()) {
         tracing::warn!("cannot archive the last mpv log: {error}");
     }
+    // Before the engine: mpv loads the scripts in scripts\ as it starts, so the essentials are
+    // copied by then and have Kaleido's options in their script-opts (plan decision 2).
+    app.manage(plugins::Startup::prepare(&paths, language));
     let engine = Engine::start(
         EngineConfig {
             paths: paths.clone(),
@@ -223,8 +226,6 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             tracing::error!("cannot observe the player state: {error}");
         }
     })));
-    // Queued behind the observations, before anything the UI asks of thumbfast.
-    player::options::load_thumbfast(&engine, &paths);
     let shader = glass::shader_path(&paths.cache_dir);
     app.manage(paths);
     app.manage(engine);

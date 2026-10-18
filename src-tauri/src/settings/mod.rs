@@ -34,6 +34,7 @@ pub use mpv_conf::MpvConf;
 pub use mpv_keys::{MPV_SETTINGS, MpvSetting, ValidationCtx, ValueKind, validate_mpv};
 pub use store::{
     Appearance, Language, Playback, ReduceTransparency, Settings, SettingsStore, ThemeMode,
+    UiLanguage,
 };
 
 /// The event that tells the UI the settings changed; its payload is all of [`Settings`].

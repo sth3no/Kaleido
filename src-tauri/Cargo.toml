@@ -28,14 +28,15 @@ anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# SHA-256 of the files Kaleido pins by checksum. Today only the tests of plugins/essentials.rs
-# use it (the bundled scripts against the manifest); the plugin installs and the tool downloads
-# of M2 are to check theirs with it. Already in the build through tauri.
+# SHA-256 of the files Kaleido pins by checksum: every file a plugin install puts in place
+# (plugins/install.rs); the tool downloads of M2 are to check theirs with it. Already in the
+# build through tauri.
 sha2 = "0.10"
 # The system's language for the "system" language setting (system_locale in commands.rs).
 sys-locale = "0.3.2"
-# The dates of the archived mpv logs; tracing-appender uses it too.
-time = "0.3"
+# The dates of the archived mpv logs, and the `installedAt` of plugins.json (RFC 3339);
+# tracing-appender uses it too.
+time = { version = "0.3", features = ["formatting", "parsing"] }
 tracing = "0.1"
 # kaleido.<date>.log: one file a day, the last seven.
 tracing-appender = "0.2.3"
@@ -63,6 +64,8 @@ windows = { version = "0.62", features = [
   "Win32_UI_Accessibility",
   # TrackMouseEvent for the window over the maximise button (surface/win32.rs); tao has it too.
   "Win32_UI_Input_KeyboardAndMouse",
+  # SHFileOperationW: an uninstalled plugin goes to the Recycle Bin (plugins/recycle.rs).
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
