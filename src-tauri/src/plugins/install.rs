@@ -12,6 +12,13 @@
 //! - A shader or a font of the same name with the same contents is the plugin's file already; one
 //!   with other contents belongs to someone else, and the install is refused.
 //!
+//! An install's staging folder, `.kaleido-staging\<name>-<nanos>\`, holds the new plugin folder in
+//! `folder\`, its other new files in `files\`, and the previous version of the plugin's folder in
+//! `old\scripts\<name>` or `old\scripts-disabled\<name>`, named by where it came from. When the
+//! app ends in the middle of an install, or a rollback cannot put the previous version back, the
+//! next install sweeps what is left (`sweep`): a previous version goes back to its place when
+//! nothing has taken it since, and is kept otherwise; only the staged new files are deleted.
+//!
 //! Installs run one at a time: the registry they write is borrowed for the whole install.
 
 use std::collections::BTreeSet;
@@ -29,6 +36,20 @@ use crate::paths::AppPaths;
 
 /// The folder in `config_dir` the installs stage their files in, one folder for each install.
 pub const STAGING_DIR: &str = ".kaleido-staging";
+
+/// The parts of a staging folder that hold only new files: never the one copy of anything.
+const STAGED_NEW: [&str; 2] = ["folder", "files"];
+/// The part of a staging folder that holds the previous version of the plugin's folder.
+const STAGED_OLD: &str = "old";
+
+/// The folders a plugin's own folder lives in, with the name the staging folder's `old\` gives
+/// them.
+fn homes(paths: &AppPaths) -> [(&'static str, &Path); 2] {
+    [
+        ("scripts", &paths.scripts_dir),
+        ("scripts-disabled", &paths.scripts_disabled_dir),
+    ]
+}
 
 /// Where the bytes of a file come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,7 +171,7 @@ pub fn install(
     }
 
     let staging_root = paths.config_dir.join(STAGING_DIR);
-    sweep(&staging_root);
+    sweep(paths, &staging_root);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_nanos());
@@ -178,11 +199,12 @@ pub fn install(
                 staging.display()
             );
         }
-        // Only when it is empty: another folder in it is what the next install sweeps.
+        // Only when it is empty: a leftover the sweep kept stays in it.
         let _ = fs::remove_dir(&staging_root);
     } else {
         tracing::error!(
-            "the files {name} had before could not all be put back; what is left of them is in {}",
+            "the files {name} had before could not all be put back; what is left of them is in \
+             {}, and the next install puts it back when its place is free",
             staging.display()
         );
     }
@@ -265,9 +287,15 @@ impl Undo {
         Ok(())
     }
 
-    /// Moves `from` out of the way to `aside` and remembers it.
+    /// Moves `from` out of the way to `aside` (in the staging folder, whose folders it makes) and
+    /// remembers it.
     fn move_aside(&mut self, from: &Path, aside: &Path) -> Result<(), InstallError> {
-        fs::rename(from, aside).map_err(|error| {
+        let moved = match aside.parent() {
+            Some(parent) => fs::create_dir_all(parent),
+            None => Ok(()),
+        }
+        .and_then(|()| fs::rename(from, aside));
+        moved.map_err(|error| {
             io_error(format_args!("cannot move {} aside", from.display()), error)
         })?;
         self.moved_aside
@@ -297,10 +325,11 @@ fn stage_and_place(
 ) -> Result<(), InstallError> {
     // The plugin's folder is staged as one folder, so that it goes in with one rename; every
     // other file on its own.
-    let new_folder = staging.join("folder");
-    let new_files = staging.join("files");
-    let old = staging.join("old");
-    for dir in [staging, new_files.as_path(), old.as_path()] {
+    let [folder, files] = STAGED_NEW;
+    let new_folder = staging.join(folder);
+    let new_files = staging.join(files);
+    let old = staging.join(STAGED_OLD);
+    for dir in [staging, new_files.as_path()] {
         fs::create_dir_all(dir).map_err(|error| {
             io_error(
                 format_args!("cannot make the folder {}", dir.display()),
@@ -368,25 +397,27 @@ fn stage_and_place(
         }
     }
 
-    // The plugin's folder: the old one out (wherever it is, on or off), the new one in.
+    // The plugin's folder: the old one out (wherever it is, on or off, into the part of `old\`
+    // named after where it was), the new one in.
     if staged
         .iter()
         .any(|file| matches!(file.target, Target::ScriptFile { .. }))
     {
-        let homes = [
-            paths.scripts_dir.join(name),
-            paths.scripts_disabled_dir.join(name),
-        ];
-        for (index, home) in homes.iter().enumerate() {
-            if is_there(home)? {
-                undo.move_aside(home, &old.join(index.to_string()))?;
+        for (kind, dir) in homes(paths) {
+            let home = dir.join(name);
+            if is_there(&home)? {
+                undo.move_aside(&home, &old.join(kind).join(name))?;
             }
         }
-        let home = if record.enabled { &homes[0] } else { &homes[1] };
+        let home = if record.enabled {
+            paths.scripts_dir.join(name)
+        } else {
+            paths.scripts_disabled_dir.join(name)
+        };
         if let Some(parent) = home.parent() {
             undo.make_dir(parent)?;
         }
-        undo.place(&new_folder, home)?;
+        undo.place(&new_folder, &home)?;
     }
     for (from, to) in &moves {
         if let Some(parent) = to.parent() {
@@ -439,26 +470,90 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<(), InstallError> {
     written.map_err(|error| io_error(format_args!("cannot write {}", path.display()), error))
 }
 
-/// Removes what an install that did not finish (the app ended in the middle) left in the
-/// staging folder.
-fn sweep(staging_root: &Path) {
+/// Clears what installs that did not finish left in the staging folder (the app ended in the
+/// middle of one, or its rollback could not put the previous version back). For each leftover:
+/// the staged new files go; a previous version in `old\<folder>\<name>` goes back to
+/// `<folder>\<name>` when nothing is there, and stays where it is otherwise; the leftover goes once
+/// it is empty. Returns the leftovers that are kept, each of which is logged.
+fn sweep(paths: &AppPaths, staging_root: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(staging_root) else {
-        return;
+        return Vec::new();
     };
+    let mut kept = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
+        let leftover = entry.path();
         tracing::warn!(
-            "{} is left from an install that did not finish; it is removed",
-            path.display()
+            "{} is left from an install that did not finish",
+            leftover.display()
         );
-        let removed = if path.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
-        if let Err(error) = removed {
-            tracing::warn!("cannot remove {}: {error}", path.display());
+        if !sweep_one(paths, &leftover) {
+            tracing::warn!(
+                "{} is kept: a previous version of a plugin in it cannot go back to its place, \
+                 or a part of it cannot be removed",
+                leftover.display()
+            );
+            kept.push(leftover);
         }
+    }
+    kept
+}
+
+/// [`sweep`] for one leftover. Returns whether it is gone.
+fn sweep_one(paths: &AppPaths, leftover: &Path) -> bool {
+    // An install makes only folders here.
+    if !leftover.is_dir() {
+        return fs::remove_file(leftover).is_ok();
+    }
+    for own in STAGED_NEW {
+        if let Err(error) = remove_dir_all_if_there(&leftover.join(own)) {
+            tracing::warn!("cannot remove {}: {error}", leftover.join(own).display());
+        }
+    }
+    let old = leftover.join(STAGED_OLD);
+    for (kind, dir) in homes(paths) {
+        let asides = old.join(kind);
+        let Ok(entries) = fs::read_dir(&asides) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            put_back(&entry.path(), dir, &entry.file_name().to_string_lossy());
+        }
+        // Only when everything in it went back.
+        let _ = fs::remove_dir(&asides);
+    }
+    let _ = fs::remove_dir(&old);
+    fs::remove_dir(leftover).is_ok()
+}
+
+/// Moves the previous version `aside` of the plugin `name` back into `dir`, if nothing is in its
+/// place and the name is one an install could have made.
+fn put_back(aside: &Path, dir: &Path, name: &str) {
+    if targets::check_name(name).is_err() {
+        tracing::warn!(
+            "{} is not a plugin folder an install moved aside; it stays",
+            aside.display()
+        );
+        return;
+    }
+    let home = dir.join(name);
+    if !matches!(is_there(&home), Ok(false)) {
+        tracing::warn!(
+            "{} cannot go back to {}: something else is there",
+            aside.display(),
+            home.display()
+        );
+        return;
+    }
+    match fs::create_dir_all(dir).and_then(|()| fs::rename(aside, &home)) {
+        Ok(()) => tracing::warn!(
+            "{} is back from an install that did not finish",
+            home.display()
+        ),
+        Err(error) => tracing::warn!(
+            "cannot put {} back to {}: {error}",
+            aside.display(),
+            home.display()
+        ),
     }
 }
 
@@ -880,14 +975,129 @@ mod tests {
         assert!(registry.plugins.is_empty());
     }
 
+    /// An install of another plugin, `y`, which sweeps the staging folder first.
+    fn install_another(paths: &AppPaths) {
+        let mut other = plan("1", vec![file("scripts/y/main.lua", "-- y\n")]);
+        other.name = "y".to_owned();
+        install(paths, &mut Registry::default(), other).unwrap();
+        assert_eq!(
+            read(&paths.scripts_dir.join("y").join("main.lua")),
+            "-- y\n"
+        );
+    }
+
+    /// The app ended between moving the previous versions aside and moving the new ones in: the
+    /// next install, of anything, puts them back, `x` (on) and `z` (off) each where it was.
     #[test]
-    fn a_staging_folder_left_by_a_crash_is_swept_at_the_next_install() {
+    fn a_leftover_previous_version_goes_back_when_its_place_is_free() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = temp_paths(tmp.path());
-        let left = paths.config_dir.join(STAGING_DIR).join("x-123");
+        let root = paths.config_dir.join(STAGING_DIR);
+        let x = root.join("x-1");
+        put(
+            &x.join("old").join("scripts").join("x").join("main.lua"),
+            "-- x 1\n",
+        );
+        put(
+            &x.join("old")
+                .join("scripts")
+                .join("x")
+                .join("lib")
+                .join("util.lua"),
+            "-- util 1\n",
+        );
+        put(&x.join("folder").join("main.lua"), "-- x 2\n");
+        put(&x.join("files").join("0"), "a=2\n");
+        let z = root.join("sub-select-2");
+        put(
+            &z.join("old")
+                .join("scripts-disabled")
+                .join("sub-select")
+                .join("main.lua"),
+            "-- sub-select 1, off\n",
+        );
+
+        install_another(&paths);
+
+        let back = paths.scripts_dir.join("x");
+        assert_eq!(read(&back.join("main.lua")), "-- x 1\n");
+        assert_eq!(read(&back.join("lib").join("util.lua")), "-- util 1\n");
+        assert_eq!(
+            read(
+                &paths
+                    .scripts_disabled_dir
+                    .join("sub-select")
+                    .join("main.lua")
+            ),
+            "-- sub-select 1, off\n"
+        );
+        assert!(
+            !paths.script_opts_dir.exists(),
+            "the staged files are not placed"
+        );
+        assert!(!root.exists(), "nothing left to keep");
+    }
+
+    /// The new version got in before the app ended (or a rollback failed and something took
+    /// the place since): the previous version is the only copy of it, so it stays, through every
+    /// later install, and only the staged new files go.
+    #[test]
+    fn a_leftover_previous_version_whose_place_is_taken_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let root = paths.config_dir.join(STAGING_DIR);
+        let left = root.join("x-1");
+        let aside = left.join("old").join("scripts").join("x").join("main.lua");
+        put(&aside, "-- x 1\n");
+        put(&left.join("folder").join("main.lua"), "-- x 2\n");
+        put(&paths.scripts_dir.join("x").join("main.lua"), "-- x 2\n");
+
+        assert_eq!(sweep(&paths, &root), std::slice::from_ref(&left));
+
+        assert_eq!(read(&aside), "-- x 1\n");
+        assert!(!left.join("folder").exists(), "the staged new files go");
+        assert_eq!(
+            read(&paths.scripts_dir.join("x").join("main.lua")),
+            "-- x 2\n"
+        );
+
+        // A later install keeps it as well, and the staging folder with it.
+        install_another(&paths);
+        assert_eq!(read(&aside), "-- x 1\n");
+        assert_eq!(
+            read(&paths.scripts_dir.join("x").join("main.lua")),
+            "-- x 2\n"
+        );
+        assert_eq!(
+            tree(&root).keys().collect::<Vec<_>>(),
+            [
+                "x-1",
+                "x-1/old",
+                "x-1/old/scripts",
+                "x-1/old/scripts/x",
+                "x-1/old/scripts/x/main.lua",
+            ]
+        );
+    }
+
+    /// A leftover that holds only new files (the app ended while they were staged) goes whole.
+    #[test]
+    fn a_leftover_with_only_new_files_is_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let root = paths.config_dir.join(STAGING_DIR);
+        let left = root.join("x-123");
+        put(&left.join("folder").join("main.lua"), "-- half\n");
+        put(&left.join("files").join("0"), "a=1\n");
+        fs::create_dir_all(left.join("old")).unwrap();
+
+        assert!(sweep(&paths, &root).is_empty());
+        assert!(!left.exists());
+        assert!(!paths.scripts_dir.exists(), "nothing was put anywhere");
+
+        // At the next install, as the installs sweep.
         put(&left.join("folder").join("main.lua"), "-- half\n");
         let mut registry = Registry::default();
-
         install(
             &paths,
             &mut registry,
@@ -895,7 +1105,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!paths.config_dir.join(STAGING_DIR).exists());
+        assert!(!root.exists());
         assert_eq!(
             tree(&paths.scripts_dir),
             BTreeMap::from([

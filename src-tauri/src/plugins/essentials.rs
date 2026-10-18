@@ -224,7 +224,8 @@ fn json_list(codes: &[&str]) -> String {
     format!("[{}]", quoted.join(", "))
 }
 
-/// Writes `script-opts\sub-select.json` for `language`, unless it is there.
+/// Writes `script-opts\sub-select.json` for `language`, unless it is there: the one place
+/// [`seed`] and [`write_managed`] write it.
 fn write_sub_select_prefs(paths: &AppPaths, language: UiLanguage) {
     let path = paths.script_opts_dir.join(SUB_SELECT_PREFS);
     match path.try_exists() {
@@ -251,7 +252,19 @@ fn write_sub_select_prefs(paths: &AppPaths, language: UiLanguage) {
 /// user's other lines stay as they are) and atomically, and only when something changes. `{helper}`
 /// in a value is `kaleido-mpv.exe` next to the app. The scripts read the file when they load, so
 /// a value the user changed is Kaleido's again at the next start. What fails is logged.
-pub fn write_managed(paths: &AppPaths, manifest: &[Essential], registry: &Registry) {
+///
+/// And when `registry` has sub-select (on or off) and `script-opts\sub-select.json` is missing
+/// (a write that failed, a file the user deleted), it is written for `language`, as [`seed`]
+/// does: sub-select does not start without it. One that is there is never replaced.
+pub fn write_managed(
+    paths: &AppPaths,
+    manifest: &[Essential],
+    registry: &Registry,
+    language: UiLanguage,
+) {
+    if registry.plugins.contains_key(SUB_SELECT) {
+        write_sub_select_prefs(paths, language);
+    }
     let helper = paths.exe_dir.join(HELPER_EXE);
     for essential in manifest {
         if essential.managed.is_empty() || !registry.plugins.contains_key(&essential.name) {
@@ -831,7 +844,7 @@ mod tests {
         let helper = helper.to_string_lossy();
 
         // The first start: Kaleido's options and nothing else.
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(
             read(&conf),
             format!("mpv_path={helper}\nnetwork=no\ntone_mapping=mobius\n")
@@ -844,7 +857,7 @@ mod tests {
              max_height=300\r\n",
         )
         .unwrap();
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(
             read(&conf),
             format!(
@@ -853,13 +866,13 @@ mod tests {
             )
         );
         // And once more: nothing to change.
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert!(read(&conf).contains("max_height=300\r\n"));
 
         // Taken out by the user: back at the end. Off is still installed, and written to.
         fs::write(&conf, "network=yes\nmax_height=150\n").unwrap();
         registry.plugins.get_mut("thumbfast").unwrap().enabled = false;
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(
             read(&conf),
             format!("network=no\nmax_height=150\nmpv_path={helper}\ntone_mapping=mobius\n")
@@ -868,14 +881,14 @@ mod tests {
         // An essential that is not installed gets no file, one without managed options neither.
         manifest[2].managed.insert("x".to_owned(), "1".to_owned());
         registry.plugins.remove("reload");
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert!(!paths.script_opts_dir.join("reload.conf").exists());
         assert!(!paths.script_opts_dir.join("sub_select.conf").exists());
 
         // A file that is not UTF-8 is not Kaleido's to rewrite.
         let latin1 = b"# m\xe9n\nmpv_path=mpv\n".to_vec();
         fs::write(&conf, &latin1).unwrap();
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(fs::read(&conf).unwrap(), latin1);
     }
 
@@ -904,7 +917,7 @@ mod tests {
         fs::write(&prefs, edited).unwrap();
         let mut registry = Registry::load(registry_file(&paths));
         seed(&paths, &mut registry, &manifest, UiLanguage::En);
-        write_managed(&paths, &manifest, &registry);
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(read(&prefs), edited);
 
         // Removed and brought back by "Obnovit essentials" (Task 7: `removed` is emptied, then
@@ -923,6 +936,45 @@ mod tests {
                 .is_file()
         );
         assert_eq!(read(&prefs), edited);
+    }
+
+    /// sub-select fails at every start without its preferences, so a start that finds them
+    /// missing (their first write failed, the user deleted them) writes them, on or off, in the
+    /// language of that start; one that finds them there leaves them.
+    #[test]
+    fn sub_select_gets_its_preferences_back_when_they_are_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let manifest = bundled(&paths);
+        let prefs = paths.script_opts_dir.join(SUB_SELECT_PREFS);
+        let mut registry = Registry::default();
+        seed(&paths, &mut registry, &manifest, UiLanguage::Cs);
+
+        fs::remove_file(&prefs).unwrap();
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
+        assert_eq!(read(&prefs), sub_select_prefs(UiLanguage::En));
+
+        // There: never replaced.
+        let edited = "[ { \"alang\": \"*\", \"slang\": \"de\" } ]\n";
+        fs::write(&prefs, edited).unwrap();
+        write_managed(&paths, &manifest, &registry, UiLanguage::Cs);
+        assert_eq!(read(&prefs), edited);
+
+        // Off is still installed: it needs them as soon as it is on again.
+        registry.plugins.get_mut(SUB_SELECT).unwrap().enabled = false;
+        fs::remove_file(&prefs).unwrap();
+        write_managed(&paths, &manifest, &registry, UiLanguage::Cs);
+        assert_eq!(read(&prefs), sub_select_prefs(UiLanguage::Cs));
+
+        // Not installed (removed by the user): nothing is written for it.
+        registry.plugins.remove(SUB_SELECT);
+        fs::remove_file(&prefs).unwrap();
+        write_managed(&paths, &manifest, &registry, UiLanguage::Cs);
+        assert!(!prefs.exists());
+        // And without a manifest, an installed sub-select still gets them.
+        registry = Registry::load(registry_file(&paths));
+        write_managed(&paths, &[], &registry, UiLanguage::Cs);
+        assert_eq!(read(&prefs), sub_select_prefs(UiLanguage::Cs));
     }
 
     #[test]
@@ -1027,6 +1079,10 @@ mod tests {
         fs::write(&czech, "1\n00:00:00,000 --> 00:00:09,000\nAhoj\n\n").unwrap();
         let path = |path: &Path| path.to_string_lossy().into_owned();
         engine.command(&["set", "pause", "yes"]);
+        // Neither mpv nor sub-select (which turns itself off with it at a file's load) picks a
+        // track of its own: only the `select-subtitles` below does, whenever the script handles
+        // the file's load.
+        engine.command(&["set", "track-auto-selection", "no"]);
         engine.command(&["loadfile", &path(&video)]);
         eventually(&engine, "the clip is open", |mpv| {
             mpv.get_i64("track-list/count")

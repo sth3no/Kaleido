@@ -25,6 +25,8 @@ pub struct Startup {
     pub registry: Registry,
     /// Empty when the manifest could not be read: the plugins then run without essentials.
     pub manifest: Vec<Essential>,
+    /// The UI's language at the start, for the preferences sub-select gets when it has none.
+    pub language: UiLanguage,
 }
 
 impl Startup {
@@ -43,8 +45,12 @@ impl Startup {
         if !seeded.is_empty() {
             tracing::info!("essentials installed: {}", seeded.join(", "));
         }
-        essentials::write_managed(paths, &manifest, &registry);
-        Startup { registry, manifest }
+        essentials::write_managed(paths, &manifest, &registry, language);
+        Startup {
+            registry,
+            manifest,
+            language,
+        }
     }
 }
 
