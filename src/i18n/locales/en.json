@@ -126,6 +126,7 @@
     },
     "loading": "Loading…",
     "loadFailed": "The settings could not be read.",
+    "playerNotReady": "The player is not ready yet, so its settings cannot be shown.",
     "retry": "Try again",
     "units": {
       "percent": "{{value}}%"
@@ -143,6 +144,7 @@
       "generic": "The setting could not be saved."
     },
     "fields": {
+      "listFailed": "The list could not be read.",
       "device": {
         "none": "No audio devices found"
       },

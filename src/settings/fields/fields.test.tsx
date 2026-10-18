@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../../i18n';
@@ -452,13 +452,25 @@ describe('Slider', () => {
 describe('ColorField', () => {
   function renderColor(value = '#FFFFFFFF') {
     const onChange = vi.fn();
+    const onInvalid = vi.fn();
     const view = render(
       <>
         <span id="label">Colour</span>
-        <ColorField id="color" labelId="label" value={value} onChange={onChange} />
+        <ColorField
+          id="color"
+          labelId="label"
+          value={value}
+          onChange={onChange}
+          onInvalid={onInvalid}
+        />
       </>,
     );
-    return { onChange, ...view, field: screen.getByRole('textbox', { name: 'Colour' }) as HTMLInputElement };
+    return {
+      onChange,
+      onInvalid,
+      ...view,
+      field: screen.getByRole('textbox', { name: 'Colour' }) as HTMLInputElement,
+    };
   }
 
   test('shows the colour as text with a swatch of it (mpv\'s alpha first, CSS\'s last)', () => {
@@ -485,11 +497,54 @@ describe('ColorField', () => {
     expect(onChange.mock.calls).toEqual([['#80000000']]);
   });
 
-  test('what is not a colour goes as typed, for Rust to refuse', () => {
-    const { onChange, field } = renderColor();
+  test('what is no colour is not sent: the row is told why, and the text stays to be corrected', () => {
+    const { onChange, onInvalid, field } = renderColor();
+    for (const typed of ['red', '#12', '#12345', 'ff88']) {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.blur(field);
+      expect(field.value, typed).toBe(typed);
+      expect(onInvalid).toHaveBeenLastCalledWith('settings.errors.invalidColor');
+    }
+    expect(onChange).not.toHaveBeenCalled();
+
+    // Enter says the same, and is handled.
+    fireEvent.change(field, { target: { value: 'blue' } });
+    onInvalid.mockClear();
+    expect(fireEvent.keyDown(field, { key: 'Enter' })).toBe(false);
+    expect(onInvalid).toHaveBeenCalledWith('settings.errors.invalidColor');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('typing again takes the message away, and a good colour is sent', () => {
+    const { onChange, onInvalid, field } = renderColor();
     fireEvent.change(field, { target: { value: 'red' } });
     fireEvent.blur(field);
-    expect(onChange.mock.calls).toEqual([['red']]);
+    expect(onInvalid.mock.calls).toEqual([['settings.errors.invalidColor']]);
+
+    fireEvent.change(field, { target: { value: 'ff0000' } });
+    expect(onInvalid.mock.calls).toEqual([['settings.errors.invalidColor'], [null]]);
+    fireEvent.blur(field);
+    expect(onChange.mock.calls).toEqual([['#FF0000']]);
+    // Nothing more to take away.
+    expect(onInvalid).toHaveBeenCalledTimes(2);
+  });
+
+  test('Esc drops a text that was refused, and the message with it', () => {
+    const { onChange, onInvalid, field } = renderColor('#FFFFFFFF');
+    fireEvent.change(field, { target: { value: 'red' } });
+    fireEvent.blur(field);
+    expect(fireEvent.keyDown(field, { key: 'Escape' })).toBe(false);
+    expect(field.value).toBe('#FFFFFFFF');
+    expect(onInvalid).toHaveBeenLastCalledWith(null);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('an empty field is sent: it takes the colour out of mpv.conf', () => {
+    const { onChange, onInvalid, field } = renderColor('#FFFFFFFF');
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    expect(onChange.mock.calls).toEqual([['']]);
+    expect(onInvalid).not.toHaveBeenCalled();
   });
 
   test('leaving the field with the colour it had saves nothing', () => {
@@ -520,14 +575,39 @@ describe('ColorField', () => {
 describe('LangListField', () => {
   function renderLanguages(value = 'cs,en') {
     const onChange = vi.fn();
+    const onInvalid = vi.fn();
     render(
       <>
         <span id="label">Languages</span>
-        <LangListField id="langs" labelId="label" value={value} onChange={onChange} />
+        <LangListField
+          id="langs"
+          labelId="label"
+          value={value}
+          onChange={onChange}
+          onInvalid={onInvalid}
+        />
       </>,
     );
-    return { onChange, field: screen.getByRole('textbox', { name: 'Languages' }) as HTMLInputElement };
+    return {
+      onChange,
+      onInvalid,
+      field: screen.getByRole('textbox', { name: 'Languages' }) as HTMLInputElement,
+    };
   }
+
+  test('a list with something in it that is no code is not sent, and the text stays to be corrected', () => {
+    const { onChange, onInvalid, field } = renderLanguages();
+    fireEvent.change(field, { target: { value: 'cs, czech' } });
+    fireEvent.blur(field);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInvalid.mock.calls).toEqual([['settings.errors.invalidLangList']]);
+    expect(field.value).toBe('cs, czech');
+
+    fireEvent.change(field, { target: { value: 'cs, cz' } });
+    expect(onInvalid.mock.calls).toEqual([['settings.errors.invalidLangList'], [null]]);
+    fireEvent.blur(field);
+    expect(onChange.mock.calls).toEqual([['cs,cz']]);
+  });
 
   test('writes the list with a space after each comma', () => {
     const { field } = renderLanguages('cs,en,de');
@@ -606,6 +686,33 @@ describe('FontField', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Default' }));
     expect(onChange).toHaveBeenCalledWith('');
   });
+
+  test('fonts that cannot be read are said, with a way to read them again', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(invoke).mockImplementation((() => Promise.reject('no fonts')) as unknown as typeof invoke);
+    const onChange = vi.fn();
+    render(
+      <>
+        <span id="label">Font</span>
+        <FontField id="font" labelId="label" value="Arial" onChange={onChange} />
+      </>,
+    );
+    const button = () => screen.getByRole('button', { name: /^Font/ }) as HTMLButtonElement;
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The list could not be read.');
+    expect(button().textContent).toBe('Arial');
+    expect(button().disabled).toBe(true);
+
+    rust({ system_fonts: FONTS });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(button().disabled).toBe(false);
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(button());
+    expect(screen.getAllByRole('option')).toHaveLength(4);
+  });
 });
 
 describe('DeviceField', () => {
@@ -651,21 +758,48 @@ describe('DeviceField', () => {
     expect(screen.getByText('No audio devices found')).toBeTruthy();
   });
 
-  test('a list that cannot be read is logged and leaves the value as it is', async () => {
+  test('a list that cannot be read is said, with a way to read it again, not shown as an empty one', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.mocked(invoke).mockImplementation((() => Promise.reject('no player')) as unknown as typeof invoke);
+    const onChange = vi.fn();
     render(
       <>
         <span id="label">Device</span>
-        <DeviceField id="device" labelId="label" value="wasapi/gone" onChange={() => undefined} />
+        <DeviceField id="device" labelId="label" value="wasapi/gone" onChange={onChange} />
       </>,
     );
     const button = () => screen.getByRole('button', { name: /^Device/ }) as HTMLButtonElement;
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The list could not be read.');
+    expect(warn).toHaveBeenCalled();
+    // The value stays as it is, and there is no list to choose from (nor an empty one).
+    expect(button().textContent).toBe('wasapi/gone');
+    expect(button().disabled).toBe(true);
+    expect(screen.queryByText('No audio devices found')).toBeNull();
+
+    // Read again: the list comes.
+    rust({ settings_audio_devices: DEVICES });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
     await waitFor(() => {
       expect(button().disabled).toBe(false);
     });
-    expect(warn).toHaveBeenCalled();
-    expect(button().textContent).toBe('wasapi/gone');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(button());
+    fireEvent.click(screen.getByRole('option', { name: 'Speakers (Realtek)' }));
+    expect(onChange).toHaveBeenCalledWith('wasapi/{0.0.0.00000000}.{abc}');
+  });
+
+  test('an answer that is no list is a failure too', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    rust({ settings_audio_devices: { not: 'a list' } });
+    render(
+      <>
+        <span id="label">Device</span>
+        <DeviceField id="device" labelId="label" value="auto" onChange={() => undefined} />
+      </>,
+    );
+    expect((await screen.findByRole('alert')).textContent).toContain('The list could not be read.');
   });
 });
 
@@ -718,5 +852,24 @@ describe('ShaderListField', () => {
     renderShaders([]);
     expect(await screen.findByText('The shaders folder has no files yet.')).toBeTruthy();
     expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  test('files that cannot be listed are said, not shown as an empty folder, and can be listed again', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(invoke).mockImplementation((() => Promise.reject('no folder')) as unknown as typeof invoke);
+    renderShaders(['ravu.hook']);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The list could not be read.');
+    expect(screen.queryByText('The shaders folder has no files yet.')).toBeNull();
+    // What is on is still shown, and cannot be changed meanwhile.
+    const ravu = screen.getByRole('checkbox', { name: 'ravu.hook' }) as HTMLInputElement;
+    expect(ravu.checked).toBe(true);
+    expect(ravu.disabled).toBe(true);
+
+    rust({ settings_list_shaders: ['Anime4K.glsl', 'ravu.hook'] });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('checkbox', { name: 'Anime4K.glsl' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

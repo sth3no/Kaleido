@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import mpvKeysSource from '../../src-tauri/src/settings/mpv_keys.rs?raw';
 import cs from '../i18n/locales/cs.json';
 import en from '../i18n/locales/en.json';
 import {
@@ -118,119 +119,184 @@ describe('the descriptors', () => {
 });
 
 /**
- * What Rust accepts (MPV_SETTINGS in src-tauri/src/settings/mpv_keys.rs), written out again here:
- * the fields must not offer a value that Rust would refuse, or miss an option it allows.
+ * What Rust accepts: the allow-list `MPV_SETTINGS` of src-tauri/src/settings/mpv_keys.rs, read from the
+ * source itself (a Vite `?raw` import) and compared with the descriptors, so that a key, a word or a
+ * bound that changes on one side and not on the other fails here. The fields must not offer a value
+ * that Rust would refuse, or miss an option it allows.
+ *
+ * The parse leans on the shape of that block (`live("key", ValueKind::Kind(...))` and `at_start(...)`,
+ * one entry after the other, `&["word", ...]` for the words, `min: 0.0, max: 100.0` for the bounds). If
+ * the block changes shape, the first test below fails on the parse, before anything else does.
  */
+interface RustSetting {
+  key: string;
+  /** The `ValueKind` variant: `Choice`, `ChoiceOrNone`, `Flag`, `Number`, `Color`, ... */
+  kind: string;
+  /** `live(...)` as opposed to `at_start(...)`. */
+  live: boolean;
+  words: string[];
+  min?: number;
+  max?: number;
+}
+
+function parseAllowList(source: string): RustSetting[] {
+  const start = source.indexOf('pub const MPV_SETTINGS');
+  const end = source.indexOf('\n];', start);
+  if (start < 0 || end < 0) throw new Error('MPV_SETTINGS is not where this test looks for it');
+  // Comments out, so that a word in one is not taken for an entry.
+  const block = source.slice(start, end).replace(/\/\/.*$/gm, '');
+  const heads = [...block.matchAll(/\b(live|at_start)\(\s*"([^"]+)"\s*,\s*ValueKind::(\w+)/g)];
+  return heads.map((head, index) => {
+    const body = block.slice(head.index + head[0].length, heads[index + 1]?.index ?? block.length);
+    const list = /&\[([^\]]*)\]/.exec(body)?.[1] ?? '';
+    const min = /min:\s*(-?[\d.]+)/.exec(body)?.[1];
+    const max = /max:\s*(-?[\d.]+)/.exec(body)?.[1];
+    return {
+      key: head[2] ?? '',
+      kind: head[3] ?? '',
+      live: head[1] === 'live',
+      words: [...list.matchAll(/"([^"]*)"/g)].map((word) => word[1] ?? ''),
+      min: min === undefined ? undefined : Number(min),
+      max: max === undefined ? undefined : Number(max),
+    };
+  });
+}
+
 describe('the descriptors against the allow-list of mpv_keys.rs', () => {
+  const rust = parseAllowList(mpvKeysSource);
   const byKey = (key: string): SettingDescriptor => {
     const found = DESCRIPTORS.find((descriptor) => mpvTarget(descriptor) === key);
     if (!found) throw new Error(`no descriptor for ${key}`);
     return found;
   };
 
+  test('the allow-list is read from the Rust source', () => {
+    // Not vacuous: the parse found the entries, with their kinds, words and bounds.
+    expect(rust.length).toBeGreaterThanOrEqual(19);
+    const hwdec = rust.find((setting) => setting.key === 'hwdec');
+    expect(hwdec).toEqual({
+      key: 'hwdec',
+      kind: 'Choice',
+      live: true,
+      words: ['auto-safe', 'auto-copy-safe', 'no'],
+      min: undefined,
+      max: undefined,
+    });
+    const volume = rust.find((setting) => setting.key === 'volume');
+    expect(volume).toMatchObject({ kind: 'Number', live: false, min: 0, max: 100 });
+    expect(rust.find((setting) => setting.key === 'glsl-shaders')?.kind).toBe('Shaders');
+    for (const setting of rust) {
+      expect(setting.key, 'an entry without a key').not.toBe('');
+      if (setting.kind === 'Choice' || setting.kind === 'ChoiceOrNone') {
+        expect(setting.words.length, setting.key).toBeGreaterThan(0);
+      }
+      if (setting.kind === 'Number') {
+        expect(setting.min, setting.key).toBeDefined();
+        expect(setting.max, setting.key).toBeDefined();
+      }
+    }
+  });
+
   test('every allowed option has a descriptor, and no other option has', () => {
-    const allowed = [
-      'hwdec',
-      'autocreate-playlist',
-      'save-position-on-quit',
-      'sub-font',
-      'sub-font-size',
-      'sub-color',
-      'sub-border-color',
-      'sub-back-color',
-      'sub-border-size',
-      'slang',
-      'audio-device',
-      'volume',
-      'volume-max',
-      'alang',
-      'deinterlace',
-      'tone-mapping',
-      'hdr-compute-peak',
-      'profile',
-      'glsl-shaders',
-    ];
     const used = DESCRIPTORS.map(mpvTarget).filter((key) => key !== '');
-    expect([...used].sort()).toEqual([...allowed].sort());
+    expect([...used].sort()).toEqual(rust.map((setting) => setting.key).sort());
   });
 
   test('the sliders have the bounds Rust checks', () => {
-    const bounds: Record<string, [number, number]> = {
-      'sub-font-size': [10, 120],
-      'sub-border-size': [0, 10],
-      volume: [0, 100],
-      'volume-max': [100, 1000],
-    };
-    for (const [key, [min, max]] of Object.entries(bounds)) {
-      const { field } = byKey(key);
-      expect(field.kind, key).toBe('slider');
+    const numbers = rust.filter((setting) => setting.kind === 'Number');
+    expect(numbers.map((setting) => setting.key).sort()).toEqual([
+      'sub-border-size',
+      'sub-font-size',
+      'volume',
+      'volume-max',
+    ]);
+    for (const setting of numbers) {
+      const { field } = byKey(setting.key);
+      expect(field.kind, setting.key).toBe('slider');
       if (field.kind === 'slider') {
-        expect([field.min, field.max], key).toEqual([min, max]);
-        expect(field.step, key).toBeGreaterThan(0);
+        expect([field.min, field.max], setting.key).toEqual([setting.min, setting.max]);
+        expect(field.step, setting.key).toBeGreaterThan(0);
         // The steps end on the maximum, so that it can be reached.
-        expect((field.max - field.min) / field.step, key).toBe(Math.round((field.max - field.min) / field.step));
+        const steps = (field.max - field.min) / field.step;
+        expect(steps, setting.key).toBe(Math.round(steps));
       }
     }
   });
 
   test('the selects offer the words Rust accepts, and only those', () => {
-    const words: Record<string, string[]> = {
-      hwdec: ['auto-safe', 'auto-copy-safe', 'no'],
-      deinterlace: ['auto', 'no', 'yes'],
-      'tone-mapping': [
-        'auto',
-        'clip',
-        'mobius',
-        'reinhard',
-        'hable',
-        'bt.2390',
-        'bt.2446a',
-        'spline',
-        'st2094-40',
-        'st2094-10',
-      ],
-      'hdr-compute-peak': ['auto', 'yes', 'no'],
-      // The empty word is "none": `null`, which takes the option out of mpv.conf.
-      profile: ['', 'fast', 'high-quality'],
-    };
-    for (const [key, expected] of Object.entries(words)) {
-      const { field } = byKey(key);
-      expect(field.kind, key).toBe('select');
+    for (const setting of rust.filter((entry) => entry.kind === 'Choice')) {
+      const { field } = byKey(setting.key);
+      // A choice of two of the words is a toggle (the playlist from the folder); see below.
+      if (field.kind !== 'select') continue;
+      expect(field.options.map((option) => option.value).sort(), setting.key).toEqual(
+        [...setting.words].sort(),
+      );
+    }
+    // "None" is the empty word: `null`, which takes the option out of mpv.conf.
+    for (const setting of rust.filter((entry) => entry.kind === 'ChoiceOrNone')) {
+      const { field } = byKey(setting.key);
+      expect(field.kind, setting.key).toBe('select');
       if (field.kind === 'select') {
-        expect(field.options.map((option) => option.value).sort(), key).toEqual([...expected].sort());
+        expect(field.options.map((option) => option.value).sort(), setting.key).toEqual(
+          ['', ...setting.words].sort(),
+        );
       }
     }
+    // The selects there are, by name.
+    expect(
+      DESCRIPTORS.filter((descriptor) => descriptor.field.kind === 'select' && isMpvTarget(descriptor.target))
+        .map(mpvTarget)
+        .sort(),
+    ).toEqual(['deinterlace', 'hdr-compute-peak', 'hwdec', 'profile', 'tone-mapping']);
   });
 
   test('the toggles use the words of their options', () => {
-    // yes and no, left out.
-    expect(byKey('save-position-on-quit').field).toEqual({ kind: 'toggle' });
-    // "Playlist from folder": filter and no, two of autocreate-playlist's three words.
-    expect(byKey('autocreate-playlist').field).toEqual({ kind: 'toggle', on: 'filter', off: 'no' });
+    // yes and no, left out: `Flag` is Rust's yes/no.
+    for (const setting of rust.filter((entry) => entry.kind === 'Flag')) {
+      expect(byKey(setting.key).field, setting.key).toEqual({ kind: 'toggle' });
+    }
+    // "Playlist from folder": filter and no, two of the three words of autocreate-playlist.
+    const playlist = rust.find((setting) => setting.key === 'autocreate-playlist');
+    const field = byKey('autocreate-playlist').field;
+    expect(field).toEqual({ kind: 'toggle', on: 'filter', off: 'no' });
+    expect(playlist?.words).toEqual(expect.arrayContaining(['filter', 'no']));
   });
 
   test('the other fields are of the kind of their values', () => {
     const kinds: Record<string, string> = {
-      'sub-font': 'font',
-      'sub-color': 'color',
-      'sub-border-color': 'color',
-      'sub-back-color': 'color',
-      slang: 'langList',
-      alang: 'langList',
-      'audio-device': 'device',
-      'glsl-shaders': 'shaderList',
+      Color: 'color',
+      Languages: 'langList',
+      Font: 'font',
+      AudioDevice: 'device',
+      Shaders: 'shaderList',
     };
-    for (const [key, kind] of Object.entries(kinds)) {
-      expect(byKey(key).field.kind, key).toBe(kind);
+    const covered = rust.filter((setting) => setting.kind in kinds);
+    expect(covered.map((setting) => setting.key).sort()).toEqual([
+      'alang',
+      'audio-device',
+      'glsl-shaders',
+      'slang',
+      'sub-back-color',
+      'sub-border-color',
+      'sub-color',
+      'sub-font',
+    ]);
+    for (const setting of covered) {
+      expect(byKey(setting.key).field.kind, setting.key).toBe(kinds[setting.kind]);
     }
+    // Every kind of value Rust has is accounted for by one of the checks.
+    const known = ['Choice', 'ChoiceOrNone', 'Flag', 'Number', ...Object.keys(kinds)];
+    expect(rust.filter((setting) => !known.includes(setting.kind))).toEqual([]);
   });
 
-  test('volume and profile, which do not apply at once, say so; nothing else does', () => {
-    const atStart = DESCRIPTORS.filter(
+  test('the settings that do not apply at once say so; nothing else does', () => {
+    // Rust's `at_start`: the default volume (R25) and the quality preset (R22).
+    const atStartInRust = rust.filter((setting) => !setting.live).map((setting) => setting.key);
+    expect(atStartInRust.sort()).toEqual(['profile', 'volume']);
+    const hinted = DESCRIPTORS.filter(
       (descriptor) => descriptor.hintKey === 'settings.hints.atStart',
-    ).map((descriptor) => descriptor.id);
-    // Rust's `live: false` keys (Rulings R22, R25).
-    expect(atStart).toEqual(['volume', 'profile']);
+    ).map(mpvTarget);
+    expect(hinted.sort()).toEqual(atStartInRust.sort());
   });
 
   test('Kaleido\'s own setting is a path into the settings', () => {

@@ -9,11 +9,14 @@
  * - The section that is open, as rows (`SettingRow`) on a glass card. Every setting is saved as soon
  *   as it is changed, and what Rust refuses is said at the setting (`useSetting`).
  * - The search (`searchSettings`) replaces the section with the settings that match, grouped under
- *   their sections; Esc in the field clears it. Typing in the field does not reach mpv
- *   (input/forward.ts leaves the keys of a text field alone).
+ *   their sections (and no section is the current one meanwhile); Esc in the field clears it, the
+ *   down arrow or Enter in it goes into the results (to the control of the first), and Esc in a result
+ *   (that has no list or typed text to close) comes back to the field. Typing in the field does not
+ *   reach mpv (input/forward.ts leaves the keys of a text field alone).
  *
  * The values come from Rust when the page opens (`store.ts`), and Kaleido's own settings follow
- * `settings:changed`, so that a change made elsewhere shows here.
+ * `settings:changed`, so that a change made elsewhere shows here. While the player is not up Rust has
+ * no values for the mpv options: the page says so and offers to read again, and those fields wait.
  *
  * Appearance, Shortcuts and About are in the list but have no body yet (Task 23): `BODIES` is
  * where they are added, and their descriptors go in `descriptors.ts`.
@@ -51,6 +54,9 @@ import Subtitles from './sections/Subtitles';
 import Video from './sections/Video';
 import styles from './SettingsPage.module.css';
 import { useSettingsStore } from './store';
+
+/** What the first control of a result is found by (the ones that can take the focus now). */
+const CONTROLS = 'button:not(:disabled), input:not(:disabled)';
 
 /** The body of each section; a section with none shows its heading alone (Task 23 fills them in). */
 const BODIES: Partial<Record<SectionId, ComponentType<SectionProps>>> = {
@@ -93,6 +99,9 @@ export default function SettingsPage() {
   const [headingFocus, setHeadingFocus] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const items = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
+  const searchField = useRef<HTMLInputElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  const mpvLoaded = useSettingsStore((state) => state.mpvLoaded);
 
   // Subscribed before the values are read: a change in between is not lost.
   useEffect(
@@ -152,6 +161,43 @@ export default function SettingsPage() {
     items.current[SECTIONS[next]]?.focus();
   };
 
+  /** Down arrow or Enter in the search field: into the results, to the control of the first one. */
+  const enterResults = () => {
+    const first = card.current?.querySelector('[data-setting]');
+    first?.querySelector<HTMLElement>(CONTROLS)?.focus();
+  };
+
+  const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && query !== '') {
+      // Handled: the search is cleared, and Esc does not go on to mpv (fullscreen).
+      e.preventDefault();
+      setQuery('');
+    } else if (
+      (e.key === 'ArrowDown' || e.key === 'Enter') &&
+      matches !== null &&
+      matches.length > 0 &&
+      !e.nativeEvent.isComposing
+    ) {
+      // Handled: mpv does not get the arrow.
+      e.preventDefault();
+      enterResults();
+    }
+  };
+
+  /** Esc in a result that has nothing to close (an open list or a typed text take it first): back to the field. */
+  const onCardKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape' || !searching || e.defaultPrevented) return;
+    e.preventDefault();
+    searchField.current?.focus();
+  };
+
+  const notRead =
+    status === 'failed'
+      ? 'settings.loadFailed'
+      : status === 'ready' && !mpvLoaded
+        ? 'settings.playerNotReady'
+        : null;
+
   const statusText =
     matches === null
       ? ''
@@ -168,6 +214,7 @@ export default function SettingsPage() {
         <h1 className={styles.title}>{t('settings.title')}</h1>
         <div role="search">
           <input
+            ref={searchField}
             type="search"
             className={styles.search}
             value={query}
@@ -178,12 +225,7 @@ export default function SettingsPage() {
             onChange={(e) => {
               setQuery(e.target.value);
             }}
-            onKeyDown={(e) => {
-              if (e.key !== 'Escape' || query === '') return;
-              // Handled: the search is cleared, and Esc does not go on to mpv (fullscreen).
-              e.preventDefault();
-              setQuery('');
-            }}
+            onKeyDown={onSearchKeyDown}
           />
         </div>
       </header>
@@ -198,7 +240,8 @@ export default function SettingsPage() {
                   }}
                   type="button"
                   className={styles.item}
-                  aria-current={id === section ? 'true' : undefined}
+                  // While the search shows its results no section is the one that is shown.
+                  aria-current={!searching && id === section ? 'true' : undefined}
                   tabIndex={id === rover ? 0 : -1}
                   onFocus={() => {
                     setRover(id);
@@ -214,13 +257,18 @@ export default function SettingsPage() {
             ))}
           </ul>
         </nav>
-        <div className={`${glass.glass} ${styles.content}`} aria-busy={status === 'loading'}>
+        <div
+          ref={card}
+          className={`${glass.glass} ${styles.content}`}
+          aria-busy={status === 'loading'}
+          onKeyDown={onCardKeyDown}
+        >
           <p role="status" className={styles.status}>
             {statusText}
           </p>
-          {status === 'failed' && (
+          {notRead !== null && (
             <div role="alert" className={styles.failure}>
-              <p className={styles.failureText}>{t('settings.loadFailed')}</p>
+              <p className={styles.failureText}>{t(notRead)}</p>
               <button
                 type="button"
                 className={styles.retry}

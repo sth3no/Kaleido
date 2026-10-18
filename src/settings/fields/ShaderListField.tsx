@@ -3,7 +3,8 @@
  * shows. They are applied in the order they were turned on, so a file turned on goes to the end of
  * the list. A shader the option names that is not in the folder (a line of the user's own
  * mpv.conf) is listed too, so that it can be turned off. The value saved is
- * `~~/shaders/<name>` for each, joined by `;` (`formatShaders`).
+ * `~~/shaders/<name>` for each, joined by `;` (`formatShaders`). A list of files that cannot be
+ * read is said under the field, with a button to read it again.
  */
 
 import { useMemo } from 'react';
@@ -12,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { settingsListShaders } from '../../ipc/commands';
 import styles from './Fields.module.css';
 import type { FieldProps } from './FieldProps';
+import ListError from './ListError';
 import { useRustList } from './useRustList';
 
 export default function ShaderListField({
@@ -23,7 +25,7 @@ export default function ShaderListField({
   disabled,
 }: FieldProps<readonly string[]>) {
   const { t } = useTranslation();
-  const files = useRustList(settingsListShaders, 'settings_list_shaders');
+  const { items: files, failed, retry } = useRustList(settingsListShaders, 'settings_list_shaders');
   const names = useMemo(
     () => [...(files ?? []), ...value.filter((name) => !(files ?? []).includes(name))],
     [files, value],
@@ -38,26 +40,29 @@ export default function ShaderListField({
   }
 
   return (
-    <div
-      id={id}
-      role="group"
-      className={styles.checks}
-      aria-labelledby={labelId}
-      aria-describedby={describedBy}
-    >
-      {names.map((name) => (
-        <label key={name} className={styles.check}>
-          <input
-            type="checkbox"
-            checked={value.includes(name)}
-            disabled={disabled === true || files === null}
-            onChange={(e) => {
-              onChange(e.target.checked ? [...value, name] : value.filter((on) => on !== name));
-            }}
-          />
-          <span className={styles.checkName}>{name}</span>
-        </label>
-      ))}
-    </div>
+    <>
+      <div
+        id={id}
+        role="group"
+        className={styles.checks}
+        aria-labelledby={labelId}
+        aria-describedby={describedBy}
+      >
+        {names.map((name) => (
+          <label key={name} className={styles.check}>
+            <input
+              type="checkbox"
+              checked={value.includes(name)}
+              disabled={disabled === true || files === null}
+              onChange={(e) => {
+                onChange(e.target.checked ? [...value, name] : value.filter((on) => on !== name));
+              }}
+            />
+            <span className={styles.checkName}>{name}</span>
+          </label>
+        ))}
+      </div>
+      {failed && <ListError onRetry={retry} />}
+    </>
   );
 }

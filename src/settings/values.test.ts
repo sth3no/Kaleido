@@ -10,6 +10,8 @@ import {
   decodeMpv,
   encodeMpv,
   formatShaders,
+  isColor,
+  isLanguages,
   normalizeColor,
   normalizeLanguages,
   parseShaders,
@@ -129,6 +131,32 @@ describe('colours', () => {
     expect(cssColor('red')).toBeUndefined();
     expect(cssColor('#12345')).toBeUndefined();
     expect(cssColor('')).toBeUndefined();
+  });
+});
+
+describe('what can be sent', () => {
+  test('a colour is #RRGGBB or #AARRGGBB, and nothing else', () => {
+    for (const good of ['#FFFFFF', '#ffcc00', '#80000000', '#00FFFFFF']) {
+      expect(isColor(good), good).toBe(true);
+    }
+    for (const bad of ['red', '#12', '#12345', '#1234567', '#123456789', 'FFFFFF', '#GG0000', '', '#']) {
+      expect(isColor(bad), bad).toBe(false);
+    }
+    // What the field makes of typed text is a colour where the text was one.
+    expect(isColor(normalizeColor('ff8800'))).toBe(true);
+    expect(isColor(normalizeColor('red'))).toBe(false);
+  });
+
+  test('languages are two or three letters each', () => {
+    for (const good of ['cs', 'cs,en', 'eng', 'cs,en,deu']) {
+      expect(isLanguages(good), good).toBe(true);
+    }
+    for (const bad of ['czech', 'c', 'cs,', ',cs', 'cs,e', 'cs1', 'čs', 'cs en', '']) {
+      expect(isLanguages(bad), bad).toBe(false);
+    }
+    // What the field makes of typed text is a list where the text was one.
+    expect(isLanguages(normalizeLanguages('cs; EN  de'))).toBe(true);
+    expect(isLanguages(normalizeLanguages('cs czech'))).toBe(false);
   });
 });
 

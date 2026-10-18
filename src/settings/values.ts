@@ -115,6 +115,11 @@ export function normalizeColor(text: string): string {
   return /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(bare) ? `#${bare.toUpperCase()}` : typed;
 }
 
+/** Whether `text` is a colour as mpv takes it: `#RRGGBB` or `#AARRGGBB` (what Rust checks too). */
+export function isColor(text: string): boolean {
+  return /^#(?:[0-9a-f]{2})?[0-9a-f]{6}$/i.test(text);
+}
+
 /** A colour of mpv's (`#AARRGGBB`, alpha first) as CSS (`#RRGGBBAA`); `undefined` for what is no colour. */
 export function cssColor(text: string): string | undefined {
   const match = /^#(?:([0-9a-f]{2}))?([0-9a-f]{6})$/i.exec(text);
@@ -129,4 +134,12 @@ export function normalizeLanguages(text: string): string {
     .filter((code) => code !== '')
     .map((code) => code.toLowerCase())
     .join(',');
+}
+
+/**
+ * Whether `text`, as `normalizeLanguages` leaves it, is a list of language codes as Rust takes it:
+ * two or three lower case letters each, separated by commas. Not for the empty list (which is "none").
+ */
+export function isLanguages(text: string): boolean {
+  return text.split(',').every((code) => /^[a-z]{2,3}$/.test(code));
 }

@@ -3,6 +3,10 @@
  * Kaleido's own (`settings_get`, then `settings:changed`). A field shows what is in here, with the
  * value the user is saving standing in until Rust has answered (`useSetting`); the write itself is
  * `useSetting`'s, which puts the confirmed value back in here.
+ *
+ * A read can be overtaken: the page reads every time it opens, and the fields can be changed while it
+ * is on its way. What Rust confirmed after the read began is newer than the read, so the read does not
+ * replace it (`kaleidoVersion` for Kaleido's settings, `mpvStamp` for each mpv option).
  */
 
 import { create } from 'zustand';
@@ -16,12 +20,21 @@ export type MpvValues = Readonly<Record<string, string | null>>;
 
 export interface SettingsData {
   status: SettingsStatus;
-  /** Every mpv option the settings manage; a key Rust had no value for is not here. */
+  /** Every mpv option the settings manage. */
   mpv: MpvValues;
+  /**
+   * Whether Rust had values for the mpv options. It answers with an empty map while the player is not
+   * up yet; the mpv fields are not for showing or changing then, and the page offers to read again.
+   */
+  mpvLoaded: boolean;
   /** Kaleido's settings, `null` until they are read. */
   kaleido: Settings | null;
   /** Counts the settings Rust has pushed, so that a read that began earlier does not undo one. */
   kaleidoVersion: number;
+  /** Counts the mpv values Rust took. */
+  mpvClock: number;
+  /** For each mpv option, the `mpvClock` when Rust last took a value for it. */
+  mpvStamp: Readonly<Record<string, number>>;
   load: () => Promise<void>;
   /** The settings changed (`settings:changed`, or the answer of `settings_set`). */
   setKaleido: (settings: Settings) => void;
@@ -35,21 +48,34 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const useSettingsStore = create<SettingsData>()((set, get) => ({
   status: 'idle',
   mpv: {},
+  mpvLoaded: false,
   kaleido: null,
   kaleidoVersion: 0,
+  mpvClock: 0,
+  mpvStamp: {},
   load: async () => {
     // A page opened again shows what it has while it reads.
     if (get().status !== 'ready') set({ status: 'loading' });
     const version = get().kaleidoVersion;
+    const clock = get().mpvClock;
     try {
       const [mpv, kaleido] = await Promise.all([settingsGetMpv(), settingsGet()]);
       if (!isRecord(kaleido)) throw new Error('settings_get did not answer with the settings');
-      set((state) => ({
-        status: 'ready',
-        // Rust answers an empty map while the player is not up yet; the fields show their fallbacks.
-        mpv: isRecord(mpv) ? (mpv as MpvValues) : {},
-        kaleido: state.kaleidoVersion === version ? kaleido : state.kaleido,
-      }));
+      const read: Record<string, string | null> = isRecord(mpv) ? { ...(mpv as MpvValues) } : {};
+      set((state) => {
+        const fresh = { ...read };
+        // What Rust took while the read was on its way is newer than what the read saw.
+        for (const [key, stamp] of Object.entries(state.mpvStamp)) {
+          if (stamp > clock && key in state.mpv) fresh[key] = state.mpv[key] ?? null;
+        }
+        return {
+          status: 'ready',
+          mpv: fresh,
+          // Rust answers an empty map while the player is not up yet.
+          mpvLoaded: Object.keys(read).length > 0,
+          kaleido: state.kaleidoVersion === version ? kaleido : state.kaleido,
+        };
+      });
     } catch (error) {
       console.warn('cannot read the settings', error);
       if (get().status !== 'ready') set({ status: 'failed' });
@@ -59,6 +85,13 @@ export const useSettingsStore = create<SettingsData>()((set, get) => ({
     set((state) => ({ kaleido, kaleidoVersion: state.kaleidoVersion + 1 }));
   },
   setMpv: (key, value) => {
-    set((state) => ({ mpv: { ...state.mpv, [key]: value } }));
+    set((state) => {
+      const clock = state.mpvClock + 1;
+      return {
+        mpv: { ...state.mpv, [key]: value },
+        mpvClock: clock,
+        mpvStamp: { ...state.mpvStamp, [key]: clock },
+      };
+    });
   },
 }));

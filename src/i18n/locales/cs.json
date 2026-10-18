@@ -126,9 +126,10 @@
     },
     "loading": "Načítání…",
     "loadFailed": "Nastavení se nepodařilo přečíst.",
+    "playerNotReady": "Přehrávač ještě není připravený, jeho nastavení proto nejde zobrazit.",
     "retry": "Zkusit znovu",
     "units": {
-      "percent": "{{value}} %"
+      "percent": "{{value}}\u00a0%"
     },
     "hints": {
       "atStart": "Platí od příštího spuštění."
@@ -143,6 +144,7 @@
       "generic": "Nastavení se nepodařilo uložit."
     },
     "fields": {
+      "listFailed": "Seznam se nepodařilo načíst.",
       "device": {
         "none": "Nenalezeno žádné zvukové zařízení"
       },

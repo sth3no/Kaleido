@@ -117,6 +117,32 @@
   opacity: 0.72;
 }
 
+/* A list the field needs could not be read: the message, and a button to read it again. */
+.listError {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+.retry {
+  padding: var(--k-space-xs) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.retry:hover {
+  background: var(--k-color-selected);
+}
+
 /* Text fields. */
 .input {
   box-sizing: border-box;
@@ -215,6 +241,7 @@
   .switch,
   .trigger,
   .input,
+  .retry,
   .panel {
     border-color: ButtonText;
     background: ButtonFace;
@@ -237,6 +264,10 @@
   .trigger[data-invalid],
   .input[aria-invalid='true'] {
     border-width: 2px;
+  }
+
+  .listError {
+    border-inline-start-color: CanvasText;
   }
 
   .swatch {

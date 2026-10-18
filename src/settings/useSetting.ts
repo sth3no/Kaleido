@@ -53,16 +53,25 @@ export function errorText(field: FieldKind, reason: unknown): string {
   }
 }
 
-/** Saves `value` for the setting and puts what Rust confirmed into the store. Rejects with Rust's error. */
-async function write(descriptor: SettingDescriptor, value: FieldValue): Promise<void> {
+/**
+ * Saves `value` for the setting and puts what Rust confirmed into the store, if `accept` says it is
+ * still the newest answer to put there (an older change that is answered late must not leave the
+ * store older than what Rust has). Rejects with Rust's error.
+ */
+async function write(
+  descriptor: SettingDescriptor,
+  value: FieldValue,
+  accept: () => boolean,
+): Promise<void> {
   const { target, field } = descriptor;
   if (isMpvTarget(target)) {
     const encoded = encodeMpv(field, value);
     await settingsSetMpv(target.mpv, encoded);
-    useSettingsStore.getState().setMpv(target.mpv, encoded);
+    if (accept()) useSettingsStore.getState().setMpv(target.mpv, encoded);
   } else {
     // The patch holds this one setting; the answer is the settings as they are now.
-    useSettingsStore.getState().setKaleido(await settingsSet(patchFor(target.kaleido, value)));
+    const settings = await settingsSet(patchFor(target.kaleido, value));
+    if (accept()) useSettingsStore.getState().setKaleido(settings);
   }
 }
 
@@ -74,6 +83,11 @@ export interface SettingControl {
   /** The key of the text that says why the last change was refused; `null` if it was not. */
   error: string | null;
   save: (value: FieldValue) => void;
+  /**
+   * The field has a value it will not send (a colour that is no colour): says why, with the key of
+   * the text, or takes the message away (`null`). The next `save` takes it away as well.
+   */
+  reject: (text: string | null) => void;
 }
 
 export function useSetting(descriptor: SettingDescriptor): SettingControl {
@@ -83,12 +97,21 @@ export function useSetting(descriptor: SettingDescriptor): SettingControl {
       ? state.mpv[target.mpv]
       : getPath(state.kaleido, target.kaleido),
   );
-  const ready = useSettingsStore((state) => state.status === 'ready');
+  // An mpv option is not for showing before Rust had its values (the player may not be up yet).
+  const ready = useSettingsStore(
+    (state) => state.status === 'ready' && (!isMpvTarget(target) || state.mpvLoaded),
+  );
   /** The value being saved: shown in place of the stored one until Rust has answered. */
   const [pending, setPending] = useState<{ value: FieldValue } | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The newest change; the answer to an older one no longer decides what is shown. */
   const latest = useRef(0);
+  /** The newest change whose answer went into the store. */
+  const applied = useRef(0);
+
+  const reject = useCallback((text: string | null) => {
+    setError(text);
+  }, []);
 
   const save = useCallback(
     (value: FieldValue) => {
@@ -96,7 +119,12 @@ export function useSetting(descriptor: SettingDescriptor): SettingControl {
       const turn = latest.current;
       setPending({ value });
       setError(null);
-      write(descriptor, value).then(
+      const accept = () => {
+        if (turn < applied.current) return false;
+        applied.current = turn;
+        return true;
+      };
+      write(descriptor, value, accept).then(
         () => {
           if (turn === latest.current) setPending(null);
         },
@@ -118,5 +146,5 @@ export function useSetting(descriptor: SettingDescriptor): SettingControl {
       : isMpvTarget(target)
         ? decodeMpv(field, stored as string | null | undefined)
         : decodeKaleido(field, stored);
-  return { value, ready, error, save };
+  return { value, ready, error, save, reject };
 }

@@ -56,14 +56,24 @@ describe('the settings store', () => {
     const state = useSettingsStore.getState();
     expect(state.status).toBe('ready');
     expect(state.mpv).toEqual({ hwdec: 'auto-safe', profile: null });
+    expect(state.mpvLoaded).toBe(true);
     expect(state.kaleido).toEqual(SETTINGS);
   });
 
-  test('an empty answer for the mpv options (the player is not up yet) is still a loaded page', async () => {
+  test('an empty answer for the mpv options (the player is not up yet) is a read, but of no values', async () => {
     rust({ mpv: {}, settings: SETTINGS });
     await useSettingsStore.getState().load();
     expect(useSettingsStore.getState().status).toBe('ready');
     expect(useSettingsStore.getState().mpv).toEqual({});
+    // Kaleido's own settings are there; the mpv options are not, and the page says so.
+    expect(useSettingsStore.getState().mpvLoaded).toBe(false);
+    expect(useSettingsStore.getState().kaleido).toEqual(SETTINGS);
+
+    // Read again once the player is up.
+    rust({ mpv: { hwdec: 'no' }, settings: SETTINGS });
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().mpvLoaded).toBe(true);
+    expect(useSettingsStore.getState().mpv).toEqual({ hwdec: 'no' });
   });
 
   test('settings that are not settings fail, and loading again can succeed', async () => {
@@ -110,6 +120,32 @@ describe('the settings store', () => {
 
     expect(useSettingsStore.getState().kaleido).toEqual(APPENDING);
     expect(useSettingsStore.getState().status).toBe('ready');
+  });
+
+  test('mpv values Rust took while the read was on its way are not undone by the read', async () => {
+    const reply = deferred<unknown>();
+    vi.mocked(invoke).mockImplementation(((command: string) =>
+      command === 'settings_get_mpv' ? reply.promise : Promise.resolve(SETTINGS)) as unknown as typeof invoke);
+    // An earlier visit left these.
+    useSettingsStore.setState({ mpv: { hwdec: 'auto-safe', volume: '100' }, mpvLoaded: true });
+
+    const loading = useSettingsStore.getState().load();
+    // The page is open and its fields can be changed: Rust takes a value before the read answers,
+    // and the read saw the old one.
+    useSettingsStore.getState().setMpv('hwdec', 'no');
+    reply.resolve({ hwdec: 'auto-safe', volume: '100', profile: null });
+    await loading;
+
+    // The newer value stays; the options that were not touched are the read's.
+    expect(useSettingsStore.getState().mpv).toEqual({ hwdec: 'no', volume: '100', profile: null });
+    expect(useSettingsStore.getState().mpvLoaded).toBe(true);
+  });
+
+  test('a value Rust took before the read began is the read\'s to replace', async () => {
+    useSettingsStore.getState().setMpv('hwdec', 'no');
+    rust({ mpv: { hwdec: 'auto-copy-safe', volume: '100' }, settings: SETTINGS });
+    await useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().mpv).toEqual({ hwdec: 'auto-copy-safe', volume: '100' });
   });
 
   test('a value Rust took replaces the old one and leaves the rest', () => {

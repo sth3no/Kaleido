@@ -120,6 +120,13 @@ function emit(name: string, payload: unknown) {
   });
 }
 
+/** Lets the answers that are on their way arrive, and what they set in motion run. */
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 /** What was passed on to mpv. */
 const forwarded = () =>
   vi.mocked(invoke).mock.calls.filter(([command]) => command === 'player_input');
@@ -248,8 +255,9 @@ describe('the page', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('The settings could not be read.');
-    // Not for changing.
-    expect((screen.getByRole('switch', { name: 'Remember position' }) as HTMLButtonElement).disabled).toBe(true);
+    // Nothing is shown as a value that Rust has not given.
+    expect(screen.queryByRole('switch', { name: 'Remember position' })).toBeNull();
+    expect(shownIds()).toEqual([]);
 
     rust();
     fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
@@ -257,6 +265,31 @@ describe('the page', () => {
       expect((screen.getByRole('switch', { name: 'Remember position' }) as HTMLButtonElement).disabled).toBe(false);
     });
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  test('while the player is not up the mpv options are not shown as values, and can be read again', async () => {
+    // Rust answers an empty map until the player is up.
+    rust({ settings_get_mpv: () => ({}) });
+    render(<SettingsPage />);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The player is not ready yet, so its settings cannot be shown.');
+    // No slider at its minimum, no list with nothing chosen: the rows of the mpv options are not there.
+    expect(screen.queryByRole('switch', { name: 'Remember position' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Hardware decoding/ })).toBeNull();
+    // Kaleido's own setting does not need the player.
+    expect(picker('When a file is opened during playback').disabled).toBe(false);
+    fireEvent.click(sectionButton('Audio'));
+    expect(shownIds()).toEqual([]);
+    fireEvent.click(sectionButton('Playback'));
+
+    rust();
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect((screen.getByRole('switch', { name: 'Remember position' }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(picker('Hardware decoding').textContent).toBe('Automatic (safe)');
   });
 });
 
@@ -475,15 +508,60 @@ describe('a refusal', () => {
     fireEvent.click(sectionButton('Subtitles'));
 
     const field = screen.getByRole('textbox', { name: 'Preferred subtitle languages' }) as HTMLInputElement;
-    fireEvent.change(field, { target: { value: 'czech' } });
+    // Looks right to the field, so it is sent; Rust says no, and the text goes back.
+    fireEvent.change(field, { target: { value: 'de' } });
     fireEvent.blur(field);
-    expect(mpvWrites()).toEqual([{ key: 'slang', value: 'czech' }]);
+    expect(mpvWrites()).toEqual([{ key: 'slang', value: 'de' }]);
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Use language codes of two or three letters, such as cs,en.');
     expect(field.value).toBe('cs, en');
     expect(field.getAttribute('aria-invalid')).toBe('true');
     expect(field.getAttribute('aria-describedby')).toContain(alert.id);
+  });
+
+  test('a list of languages with something in it that is no code is not sent, and the text stays', async () => {
+    await open();
+    fireEvent.click(sectionButton('Subtitles'));
+    const field = screen.getByRole('textbox', { name: 'Preferred subtitle languages' }) as HTMLInputElement;
+
+    fireEvent.change(field, { target: { value: 'czech' } });
+    fireEvent.blur(field);
+
+    // Not sent; the message is at the field, the text is still there to be corrected.
+    expect(mpvWrites()).toEqual([]);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('Use language codes of two or three letters, such as cs,en.');
+    expect(field.value).toBe('czech');
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    expect(field.getAttribute('aria-describedby')).toContain(alert.id);
+
+    // Typing takes the message away; the corrected list is sent.
+    fireEvent.change(field, { target: { value: 'cs' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(field.getAttribute('aria-invalid')).toBeNull();
+    fireEvent.blur(field);
+    expect(mpvWrites()).toEqual([{ key: 'slang', value: 'cs' }]);
+  });
+
+  test('a colour that is no colour is not sent, is said at the field, and can be corrected', async () => {
+    await open();
+    fireEvent.click(sectionButton('Subtitles'));
+    const field = screen.getByRole('textbox', { name: 'Subtitle color' }) as HTMLInputElement;
+
+    for (const typed of ['red', '#12']) {
+      fireEvent.change(field, { target: { value: typed } });
+      fireEvent.blur(field);
+      expect(screen.getByRole('alert').textContent).toBe('Use #RRGGBB or #AARRGGBB.');
+      expect(field.value).toBe(typed);
+      expect(field.getAttribute('aria-invalid')).toBe('true');
+    }
+    expect(mpvWrites()).toEqual([]);
+
+    fireEvent.change(field, { target: { value: 'ffcc00' } });
+    fireEvent.blur(field);
+    expect(mpvWrites()).toEqual([{ key: 'sub-color', value: '#FFCC00' }]);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   test('a refusal that is a plain message (Tauri could not run the command) is said too', async () => {
@@ -505,6 +583,69 @@ describe('a refusal', () => {
       'The player is not running yet. Try again in a moment.',
     );
     expect(picker('When a file is opened during playback').textContent).toBe('Replace what is playing');
+  });
+
+  /** `settings_set_mpv` answers when the test says so: the calls wait here. */
+  function slowWrites() {
+    const calls: { args: unknown; resolve: () => void; reject: (reason: unknown) => void }[] = [];
+    rust({
+      settings_set_mpv: (args) =>
+        new Promise((resolve, reject) => {
+          calls.push({ args, resolve: () => { resolve(null); }, reject });
+        }),
+    });
+    return calls;
+  }
+
+  test('a refusal of an older change that comes after a newer one was accepted changes nothing', async () => {
+    const calls = slowWrites();
+    await open();
+    const remember = screen.getByRole('switch', { name: 'Remember position' });
+
+    // A turns it off, B turns it on again; the two are on their way together.
+    fireEvent.click(remember);
+    fireEvent.click(remember);
+    expect(mpvWrites()).toEqual([
+      { key: 'save-position-on-quit', value: 'no' },
+      { key: 'save-position-on-quit', value: 'yes' },
+    ]);
+
+    // Rust accepts B, and then says no to A, which it handled first.
+    calls[1]?.resolve();
+    await settle();
+    calls[0]?.reject({ type: 'io', message: 'locked' });
+    await settle();
+
+    // B stays: no message for A, the switch is as B left it, the store has B's value.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(remember.getAttribute('aria-checked')).toBe('true');
+    expect(useSettingsStore.getState().mpv['save-position-on-quit']).toBe('yes');
+  });
+
+  test('an older change that is answered late does not leave the store older than the newer one', async () => {
+    const calls = slowWrites();
+    await open();
+
+    // A chooses "Off", B "Automatic with copy-back" before Rust has answered A.
+    fireEvent.click(picker('Hardware decoding'));
+    fireEvent.click(screen.getByRole('option', { name: 'Off (software)' }));
+    fireEvent.click(picker('Hardware decoding'));
+    fireEvent.click(screen.getByRole('option', { name: 'Automatic with copy-back (safe)' }));
+    expect(mpvWrites()).toEqual([
+      { key: 'hwdec', value: 'no' },
+      { key: 'hwdec', value: 'auto-copy-safe' },
+    ]);
+
+    calls[1]?.resolve();
+    await settle();
+    expect(useSettingsStore.getState().mpv.hwdec).toBe('auto-copy-safe');
+
+    // A is accepted too, but after B: the store keeps what Rust has last (B's).
+    calls[0]?.resolve();
+    await settle();
+
+    expect(useSettingsStore.getState().mpv.hwdec).toBe('auto-copy-safe');
+    expect(picker('Hardware decoding').textContent).toBe('Automatic with copy-back (safe)');
   });
 
   test('the message goes when the next change is made, and the new value stays', async () => {
@@ -719,6 +860,109 @@ describe('the search', () => {
     expect(searchField().value).toBe('');
     expect(sectionHeadings()).toEqual(['Audio']);
     expect(document.activeElement).toBe(screen.getByRole('heading', { level: 2, name: 'Audio' }));
+  });
+
+  test('while the search shows its results no section is the current one', async () => {
+    await open();
+    expect(sectionButton('Playback').getAttribute('aria-current')).toBe('true');
+
+    fireEvent.change(searchField(), { target: { value: 'volume' } });
+    expect(nav().getAllByRole('button').some((item) => item.hasAttribute('aria-current'))).toBe(false);
+
+    fireEvent.change(searchField(), { target: { value: '' } });
+    expect(sectionButton('Playback').getAttribute('aria-current')).toBe('true');
+  });
+
+  test('the down arrow and Enter in the search field go into the results', async () => {
+    await open();
+    // Nothing to go into yet: the key is not the field's.
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true);
+
+    fireEvent.change(searchField(), { target: { value: 'remember' } });
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false);
+    const remember = screen.getByRole('switch', { name: 'Remember position' });
+    expect(document.activeElement).toBe(remember);
+
+    act(() => {
+      searchField().focus();
+    });
+    expect(fireEvent.keyDown(searchField(), { key: 'Enter', code: 'Enter' })).toBe(false);
+    expect(document.activeElement).toBe(remember);
+
+    // Nothing found: nothing to go into.
+    act(() => {
+      searchField().focus();
+    });
+    fireEvent.change(searchField(), { target: { value: 'zzz' } });
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true);
+    expect(document.activeElement).toBe(searchField());
+  });
+
+  test('a first result that is a list gets the focus on its button', async () => {
+    await open();
+    fireEvent.change(searchField(), { target: { value: 'hardware' } });
+    fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' });
+    expect(document.activeElement).toBe(picker('Hardware decoding'));
+  });
+
+  test('Esc in a result comes back to the search field, and does not go to mpv', async () => {
+    await open();
+    const remember = screen.getByRole('switch', { name: 'Remember position' });
+    // Without a search there is nothing to come back to: Esc is not the page's.
+    act(() => {
+      remember.focus();
+    });
+    expect(fireEvent.keyDown(remember, { key: 'Escape', code: 'Escape' })).toBe(true);
+
+    const detach = attachVideoInput(document.createElement('div'));
+    try {
+      fireEvent.change(searchField(), { target: { value: 'remember' } });
+      act(() => {
+        screen.getByRole('switch', { name: 'Remember position' }).focus();
+      });
+
+      expect(
+        fireEvent.keyDown(screen.getByRole('switch', { name: 'Remember position' }), {
+          key: 'Escape',
+          code: 'Escape',
+        }),
+      ).toBe(false);
+
+      expect(document.activeElement).toBe(searchField());
+      // The search is still there; only the focus came back.
+      expect(searchField().value).toBe('remember');
+      expect(forwarded()).toEqual([]);
+    } finally {
+      detach();
+    }
+  });
+
+  test('Esc closes an open list first, and only the next one goes back to the field', async () => {
+    await open();
+    fireEvent.change(searchField(), { target: { value: 'hardware' } });
+    fireEvent.click(picker('Hardware decoding'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    expect(fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', code: 'Escape' })).toBe(false);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(picker('Hardware decoding'));
+
+    fireEvent.keyDown(picker('Hardware decoding'), { key: 'Escape', code: 'Escape' });
+    expect(document.activeElement).toBe(searchField());
+  });
+
+  test('a click on a label works its control', async () => {
+    await open();
+    const label = screen.getByText('Remember position');
+    expect(label.tagName).toBe('LABEL');
+    expect(label.getAttribute('for')).toBe(screen.getByRole('switch', { name: 'Remember position' }).id);
+
+    fireEvent.click(label);
+    expect(mpvWrites()).toEqual([{ key: 'save-position-on-quit', value: 'no' }]);
+
+    // A list opens from its label too.
+    fireEvent.click(screen.getByText('Hardware decoding'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
   });
 
   test('typing in the search field is not forwarded to mpv', async () => {
