@@ -52,19 +52,24 @@ export default function SettingRow({ descriptor }: SettingRowProps) {
    * A click that is not a pointer's (`detail` 0: a screen reader) leaves the focus where it put it.
    */
   const onLabelClick = (e: ReactMouseEvent<HTMLLabelElement>) => {
-    const control = document.getElementById(fieldId);
-    const closedByPress = listWasOpen.current && control?.getAttribute('aria-expanded') !== 'true';
-    listWasOpen.current = false;
-    if (!(control instanceof HTMLElement)) return;
-    e.preventDefault();
+    const element = document.getElementById(fieldId);
     const byPointer = e.detail > 0;
-    if (control instanceof HTMLButtonElement) {
-      if (!closedByPress) control.click();
-      if (byPointer) control.blur();
-    } else if (control instanceof HTMLInputElement && control.type === 'text') {
-      control.focus();
+    // What the press recorded counts for the click of that press only. A press that never made a click
+    // (a right button, a drag away from the label) leaves it behind, and a click that is not a
+    // pointer's (no press before it) must not find it: only a pointer's click reads it, and every
+    // press sets it again first.
+    const closedByPress =
+      byPointer && listWasOpen.current && element?.getAttribute('aria-expanded') !== 'true';
+    listWasOpen.current = false;
+    if (!(element instanceof HTMLElement)) return;
+    e.preventDefault();
+    if (element instanceof HTMLButtonElement) {
+      if (!closedByPress) element.click();
+      if (byPointer) element.blur();
+    } else if (element instanceof HTMLInputElement && element.type === 'text') {
+      element.focus();
     } else if (!byPointer) {
-      control.focus();
+      element.focus();
     }
   };
 

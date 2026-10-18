@@ -191,6 +191,8 @@ export default function SettingsPage() {
       setQuery('');
     } else if (
       (e.key === 'ArrowDown' || e.key === 'Enter') &&
+      // Only while the search shows results: with no search the rows are the open section's, not results.
+      shown !== null &&
       !e.nativeEvent.isComposing &&
       enterResults()
     ) {

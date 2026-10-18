@@ -965,8 +965,19 @@ describe('the search', () => {
 
   test('the down arrow and Enter in the search field go into the results', async () => {
     await open();
-    // Nothing to go into yet: the key is not the field's.
+    // Nothing to go into yet: with no search the rows are the open section's, not results, and the
+    // keys are not the field's (and the focus stays in the field).
+    act(() => {
+      searchField().focus();
+    });
     expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true);
+    expect(fireEvent.keyDown(searchField(), { key: 'Enter', code: 'Enter' })).toBe(true);
+    expect(document.activeElement).toBe(searchField());
+    // Spaces are no search either.
+    fireEvent.change(searchField(), { target: { value: '   ' } });
+    expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(true);
+    expect(document.activeElement).toBe(searchField());
+    fireEvent.change(searchField(), { target: { value: '' } });
 
     fireEvent.change(searchField(), { target: { value: 'remember' } });
     expect(fireEvent.keyDown(searchField(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false);
@@ -1140,6 +1151,23 @@ describe('the search', () => {
     fireEvent.click(label, { detail: 1 });
 
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  test('a press on a label that made no click does not stop a later click that is not a pointer\'s', async () => {
+    await open();
+    const label = screen.getByText('Hardware decoding');
+    fireEvent.click(picker('Hardware decoding'));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    // A right button, or a drag away from the label: the press is recorded, and no click follows.
+    fireEvent.mouseDown(label, { button: 2 });
+    // The list is closed some other way (Esc); the stale record must not count for the next click.
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+
+    // A screen reader's click on the label (no press before it) opens the list.
+    fireEvent.click(label, { detail: 0 });
+    expect(screen.getByRole('listbox')).toBeTruthy();
   });
 
   test('typing in the search field is not forwarded to mpv', async () => {
