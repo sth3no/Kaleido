@@ -497,14 +497,25 @@ describe('reset', () => {
     seed({ ...SETTINGS, appearance: CHANGED });
     await mount(<Appearance />);
     const button = screen.getByRole('button', { name: 'Reset to default' }) as HTMLButtonElement;
+    // Pressed from the keyboard: the button has the focus.
+    act(() => {
+      button.focus();
+    });
 
     fireEvent.click(button);
-    expect(button.disabled).toBe(true);
+    // It waits, and says so; a second press does nothing meanwhile. It is not disabled: the browser
+    // takes the focus away from a disabled button (jsdom does not), and the keyboard user is lost.
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(sent('settings_set')).toHaveLength(1);
 
     expect((await screen.findByRole('alert')).textContent).toBe(
       'The setting could not be saved. Check that the settings folder can be written to.',
     );
-    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-disabled')).toBe('false');
+    // The focus never left it (a disabled button would have dropped it to the page).
+    expect(document.activeElement).toBe(button);
     expect(useSettingsStore.getState().kaleido?.appearance).toEqual(CHANGED);
     expect(slider('Glass blur').value).toBe('10');
 

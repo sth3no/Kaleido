@@ -21,11 +21,13 @@
   transition: background-color var(--k-motion-fast) ease;
 }
 
-.reset:hover:not(:disabled) {
+.reset:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--k-color-selected);
 }
 
-.reset:disabled {
+/* While the reset is on its way the button keeps the focus: aria-disabled, not disabled. */
+.reset:disabled,
+.reset[aria-disabled='true'] {
   opacity: 0.5;
 }
 

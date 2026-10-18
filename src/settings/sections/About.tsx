@@ -96,7 +96,10 @@ export default function About() {
     };
   }, []);
 
+  // While copying the button is aria-disabled, not disabled: a disabled button would drop the focus
+  // of a keyboard user to the page. It does nothing meanwhile.
   const copy = () => {
+    if (copying) return;
     setCopying(true);
     setNotice(null);
     systemCopyDiagnostics().then(
@@ -180,7 +183,7 @@ export default function About() {
         <button
           type="button"
           className={styles.button}
-          disabled={copying}
+          aria-disabled={copying}
           onClick={copy}
           {...blurAfterPointer}
         >

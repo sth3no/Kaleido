@@ -61,11 +61,13 @@
   transition: background-color var(--k-motion-fast) ease;
 }
 
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--k-color-selected);
 }
 
-.button:disabled {
+/* While the diagnostics are being copied the button keeps the focus: aria-disabled, not disabled. */
+.button:disabled,
+.button[aria-disabled='true'] {
   opacity: 0.5;
 }
 

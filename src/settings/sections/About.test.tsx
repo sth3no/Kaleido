@@ -170,15 +170,26 @@ describe('the buttons', () => {
   test('copying the diagnostics can fail, and the page shows why', async () => {
     rust({ system_copy_diagnostics: () => Promise.reject('Clipboard is in use by another program') });
     await open();
+    // Pressed from the keyboard: the button has the focus.
+    act(() => {
+      button('Copy diagnostics').focus();
+    });
 
     fireEvent.click(button('Copy diagnostics'));
-    expect(button('Copy diagnostics').disabled).toBe(true);
+    // It waits, and says so; a second press does nothing meanwhile. It is not disabled: the browser
+    // takes the focus away from a disabled button (jsdom does not), and the keyboard user is lost.
+    expect(button('Copy diagnostics').getAttribute('aria-disabled')).toBe('true');
+    expect(button('Copy diagnostics').disabled).toBe(false);
+    fireEvent.click(button('Copy diagnostics'));
+    expect(sent('system_copy_diagnostics')).toHaveLength(1);
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
       'The diagnostics could not be copied: Clipboard is in use by another program',
     );
-    expect(button('Copy diagnostics').disabled).toBe(false);
+    expect(button('Copy diagnostics').getAttribute('aria-disabled')).toBe('false');
+    // The focus never left it (a disabled button would have dropped it to the page).
+    expect(document.activeElement).toBe(button('Copy diagnostics'));
     // No success is claimed.
     expect(screen.queryByText('The diagnostics are on the clipboard.')).toBeNull();
     expect(console.warn).toHaveBeenCalled();

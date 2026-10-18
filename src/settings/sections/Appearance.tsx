@@ -85,7 +85,10 @@ export default function Appearance({ only }: SectionProps) {
     [system.windowsBuild],
   );
 
+  // While resetting the button is aria-disabled, not disabled: a disabled button would drop the focus
+  // of a keyboard user to the page. It does nothing meanwhile.
   const reset = () => {
+    if (resetting) return;
     setResetting(true);
     setResetError(null);
     // `null` takes the whole group out of the settings, and Rust gives it its defaults.
@@ -119,7 +122,7 @@ export default function Appearance({ only }: SectionProps) {
             <button
               type="button"
               className={styles.reset}
-              disabled={resetting}
+              aria-disabled={resetting}
               onClick={reset}
               {...blurAfterPointer}
             >
