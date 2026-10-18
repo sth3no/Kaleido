@@ -161,6 +161,36 @@ test('mpv’s window is hidden with no file, whole while one loads, and in the c
   });
 });
 
+test('a file of the first launch’s command line: hidden until the UI is ready, then the whole window as it loads (Ruling R56)', async () => {
+  // Rust's open queue holds the first launch's files until the UI is ready, plays them while it
+  // answers `system_ui_ready`, and the answer already says mpv is not idle (it loads).
+  let answer: (snapshot: Record<string, unknown>) => void = () => undefined;
+  vi.mocked(invoke).mockImplementation(((command: string) => {
+    if (command === 'system_ui_ready') {
+      return new Promise((resolve) => {
+        answer = resolve;
+      });
+    }
+    if (command === 'glass_state') return new Promise(() => undefined);
+    return Promise.resolve(null);
+  }) as unknown as typeof invoke);
+  shell();
+  await waitFor(() => {
+    expect(vi.mocked(invoke).mock.calls.some(([command]) => command === 'system_ui_ready')).toBe(true);
+  });
+  // Before the answer nothing is known to be open: mpv's window stays hidden.
+  expect(layoutKinds()).toEqual(['hidden']);
+
+  await act(async () => {
+    answer({ 'idle-active': false, pause: false });
+    await Promise.resolve();
+  });
+  await waitFor(() => {
+    expect(layoutKinds()).toEqual(['hidden', 'full']);
+  });
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('player');
+});
+
 test('the pointer reaches mpv only over the whole-window video of the player page (Ruling R52)', () => {
   const layer = () => document.querySelector<HTMLElement>('[data-video-layer]');
   const inputs = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'player_input');

@@ -213,6 +213,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         }),
     )
     .context("cannot start the player")?;
+    // mpv makes its idle window shown, soon: hidden the moment it is there (Ruling R56).
+    surface::watch_for_first_window(app.handle());
     // Queued, not called: this is the main thread. Requests run in order, so the observations
     // are in place before any file is loaded.
     engine.request(Request::Call(Box::new(|mpv| {

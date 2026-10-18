@@ -77,7 +77,9 @@ Oba hroty se zkoušejí v sekcích níže; výsledek zapsat sem.
   potřebovat zapnout jinak, přes `DwmExtendFrameIntoClientArea`).
 - [ ] **Bez videa není pod stránkou okno mpv (Ruling R52):** s Mica ve světlém i tmavém režimu má
   úvodní obrazovka hned po startu i Nastavení bez videa pozadí Mica, nikde černou plochu, a text je
-  čitelný. Video otevřené z úvodní obrazovky i z Nastavení (do mini přehrávače) ukáže hned první
+  čitelný. Desetkrát spustit Kaleido bez souboru a sledovat okno od prvního okamžiku: černá plocha
+  nesmí bliknout ani na zlomek vteřiny (Ruling R56; záznam 60 fps Win+Alt+R pomůže). Totéž se
+  souborem z Průzkumníku: před prvním snímkem videa žádné černé bliknutí přes úvodní obrazovku. Video otevřené z úvodní obrazovky i z Nastavení (do mini přehrávače) ukáže hned první
   snímek (nezůstane černo ani průhledno); po dohrání nebo Zastavit v mini přehrávači je pozadí
   zase Mica. Kolečko a dvojklik do mezery kolem
   lišty (vlevo od ní, nad ní, mezi ní a stránkou) na úvodní obrazovce a v Nastavení nemění

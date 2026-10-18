@@ -9,6 +9,8 @@ pub mod win32;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, WebviewWindow, Window};
@@ -87,8 +89,18 @@ impl Surface {
 
     pub fn set_layout(&self, layout: Layout) {
         *lock(&self.layout) = layout;
+        self.reapply();
+    }
+
+    /// Places everything again for the layout and the client area it has (main thread).
+    pub fn reapply(&self) {
         let (w, h, scale) = *lock(&self.client);
         self.apply(w, h, scale);
+    }
+
+    /// Whether the layout is `Hidden`: no file is open (Ruling R52).
+    pub fn is_hidden(&self) -> bool {
+        *lock(&self.layout) == Layout::Hidden
     }
 
     /// mpv may have made its window since the last placement (main thread): when its idle loop
@@ -101,8 +113,7 @@ impl Surface {
         if found.is_none_or(|window| window == *lock(&self.placed)) {
             return false;
         }
-        let (w, h, scale) = *lock(&self.client);
-        self.apply(w, h, scale);
+        self.reapply();
         true
     }
 
@@ -266,6 +277,71 @@ pub fn mpv_window_reported(app: &AppHandle) {
     }
 }
 
+/// How long after the engine has started [`watch_for_first_window`] looks for mpv's window.
+const FIRST_WINDOW_WATCH: Duration = Duration::from_secs(10);
+/// How often it looks: well inside a frame.
+const FIRST_WINDOW_POLL: Duration = Duration::from_millis(2);
+
+/// Hides the window mpv makes for its idle loop the moment it is there (Ruling R56). mpv makes
+/// it itself, shown and over the whole client area, a while after the engine has started (about
+/// 170 ms in the tests; `force-window`), without waiting for the main thread, and draws into it
+/// soon after. It reports the window's size (`osd-dimensions`) some 20 ms after making it, and the
+/// main thread places it only once it gets to that report: a black flash under the transparent
+/// page at every start, before the UI's first layout. So a thread of its own looks for the window
+/// every 2 ms from the start of the engine and hides it at once while the layout is hidden; the
+/// main thread then places it for whatever the layout is by then. It ends when it has found the
+/// window, or after 10 s (mpv made none). Later windows (a video output that starts again) are
+/// placed when mpv reports them ([`mpv_window_reported`]).
+pub fn watch_for_first_window(app: &AppHandle) {
+    let app = app.clone();
+    let spawned = thread::Builder::new()
+        .name("mpv-first-window".into())
+        .spawn(move || {
+            let Some(main) = app.try_state::<Surface>().map(|surface| surface.main) else {
+                return;
+            };
+            let hidden = || {
+                app.try_state::<Surface>()
+                    .is_some_and(|surface| surface.is_hidden())
+            };
+            if hide_first_window(main, hidden, FIRST_WINDOW_WATCH).is_none() {
+                return;
+            }
+            // Whatever came in between (a layout the UI sent), the main thread has the last word.
+            let handle = app.clone();
+            if let Err(error) = app.run_on_main_thread(move || {
+                if let Some(surface) = handle.try_state::<Surface>() {
+                    surface.reapply();
+                }
+            }) {
+                tracing::warn!("cannot place mpv's first window: {error}");
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!("mpv's first window is not watched for: {error}");
+    }
+}
+
+/// Looks for mpv's window in `main` every [`FIRST_WINDOW_POLL`] for up to `watch`, and hides it the
+/// moment it is found if `hidden()` (the layout is hidden). Returns the window it found. Not on the
+/// main thread: mpv's window belongs to mpv's own thread, which handles the hide, and no lock is
+/// held meanwhile.
+fn hide_first_window(main: isize, hidden: impl Fn() -> bool, watch: Duration) -> Option<isize> {
+    let deadline = Instant::now() + watch;
+    loop {
+        if let Some(window) = win32::find_child(main, MPV_WINDOW_CLASS) {
+            if hidden() {
+                win32::place(window, None);
+            }
+            return Some(window);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        thread::sleep(FIRST_WINDOW_POLL);
+    }
+}
+
 /// The main window was resized or got another display scale (main thread): mpv's window is
 /// placed again (the mini player stays in its corner), the glass is told where it went, and a
 /// fullscreen or always-on-top change the window made on its own (e.g. the UI through Tauri's
@@ -363,8 +439,8 @@ mod tests {
         window_rect,
     };
     use super::{
-        FullscreenSync, Layout, MPV_WINDOW_CLASS, PxRect, Surface, SyncAction, to_physical,
-        video_rect,
+        FullscreenSync, Layout, MPV_WINDOW_CLASS, PxRect, Surface, SyncAction, hide_first_window,
+        to_physical, video_rect,
     };
     use crate::glass::VideoRect;
     use crate::player::testing::{NoEvents, temp_paths};
@@ -658,10 +734,49 @@ mod tests {
     fn the_surface_starts_hidden() {
         let parent = test_parent();
         let surface = Surface::new(parent);
+        // Hidden before any layout is sent: the UI's first one comes later (Ruling R56).
+        assert!(surface.is_hidden());
         surface.apply(1280, 720, 1.0);
+        assert!(surface.is_hidden());
         assert_eq!(surface.video_rect(), None);
         surface.set_layout(Layout::Full);
+        assert!(!surface.is_hidden());
         assert!(surface.video_rect().is_some());
+        destroy(parent);
+    }
+
+    /// Ruling R56: the window mpv makes for its idle loop is hidden the moment the watch sees it,
+    /// on the watch's own thread (as in the app, where the main thread is elsewhere), before mpv
+    /// has reported anything (the engine has no event loop here), and it stays hidden.
+    #[test]
+    fn the_first_window_mpv_makes_is_hidden_the_moment_it_is_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let parent = test_parent();
+        let watch =
+            thread::spawn(move || hide_first_window(parent, || true, Duration::from_secs(15)));
+        let _mpv = MpvInside::start_in(tmp.path(), parent, NoEvents);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !watch.is_finished() {
+            assert!(Instant::now() < deadline, "the watch never ended");
+            pump(Duration::from_millis(10));
+        }
+        let window = watch
+            .join()
+            .unwrap()
+            .expect("the watch found no window of mpv's");
+        assert_eq!(class_name(window), MPV_WINDOW_CLASS);
+        pump(Duration::from_millis(500));
+        assert!(!has_visible_style(window), "mpv's idle window is shown");
+    }
+
+    /// The watch ends when mpv makes no window.
+    #[test]
+    fn the_watch_gives_up_when_mpv_makes_no_window() {
+        let parent = test_parent();
+        assert_eq!(
+            hide_first_window(parent, || true, Duration::from_millis(30)),
+            None
+        );
         destroy(parent);
     }
 }
