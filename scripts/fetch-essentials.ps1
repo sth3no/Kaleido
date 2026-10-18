@@ -12,8 +12,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $Manifest = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\resources\essentials\essentials.json'))
-$Destination = [System.IO.Path]::GetFullPath($Destination)
-$Essentials = ConvertFrom-Json -InputObject (Get-Content -Raw -Encoding UTF8 $Manifest)
+# Without a trailing separator, so that "vendor\essentials\" works with the containment check below.
+$Destination = [System.IO.Path]::GetFullPath($Destination).TrimEnd('\', '/')
+$Essentials = ConvertFrom-Json -InputObject (Get-Content -Raw -Encoding UTF8 -LiteralPath $Manifest)
 if (-not $Essentials) { throw "No essentials in $Manifest" }
 
 function Get-Sha256([string]$Path) {

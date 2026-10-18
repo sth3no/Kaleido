@@ -16,9 +16,10 @@ use super::schema::{Localized, SettingSpec};
 /// The manifest's file name, in `resources\essentials\` of the installation.
 pub const MANIFEST: &str = "essentials.json";
 
-/// One essential, as the manifest pins it.
+/// One essential, as the manifest pins it. A key this does not know is an error, so that a
+/// misspelled one cannot drop an option without a word.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Essential {
     /// The folder in `scripts\` and the key in `plugins.json`.
     pub name: String,
@@ -48,7 +49,7 @@ pub struct Essential {
 
 /// One file of an essential.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EssentialFile {
     /// The path in the repository at the pinned commit, and under `resources\essentials\<name>\`
     /// in the installation.
@@ -300,5 +301,31 @@ mod tests {
         fs::write(&missing, "[{ \"name\": \"thumbfast\" }]").unwrap();
         let error = load_manifest(&missing).unwrap_err();
         assert!(format!("{error:#}").contains(MANIFEST), "{error:#}");
+    }
+
+    /// A misspelled key would otherwise be dropped without a word, and the option it should
+    /// have carried would never be written or checked.
+    #[test]
+    fn a_manifest_with_a_misspelled_key_is_refused() {
+        let shipped =
+            fs::read_to_string(repo_root().join("resources/essentials").join(MANIFEST)).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(MANIFEST);
+
+        // The control: the shipped text itself loads from here.
+        fs::write(&path, &shipped).unwrap();
+        load_manifest(&path).unwrap();
+
+        // An essential's key and a file's key.
+        for (key, misspelled) in [("\"managed\"", "\"manged\""), ("\"sha256\"", "\"sha265\"")] {
+            let broken = shipped.replacen(key, misspelled, 1);
+            assert_ne!(broken, shipped, "{key} is in the manifest");
+            fs::write(&path, broken).unwrap();
+            let error = format!("{:#}", load_manifest(&path).unwrap_err());
+            assert!(
+                error.contains(&misspelled.replace('"', "")),
+                "{misspelled}: {error}"
+            );
+        }
     }
 }

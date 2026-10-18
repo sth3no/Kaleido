@@ -535,10 +535,11 @@ mp.register_script_message("thumb", function(time, x, y, client)
 end)
 "#;
 
-    /// Real libmpv: the script is loaded from the bundled path under the name `thumbfast`, gets
-    /// Kaleido's script options on top of the user's, and a request makes it answer the client
-    /// that asked, with the time and without a position. The installation folder has a comma in
-    /// its name: `script-opts` is a list split at commas, so the helper's path must arrive whole.
+    /// Real libmpv: the script is loaded from the bundled path (`essentials\thumbfast\thumbfast.lua`
+    /// in the resources folder) under the name `thumbfast`, gets Kaleido's script options on top
+    /// of the user's, and a request makes it answer the client that asked, with the time and
+    /// without a position. The installation folder has a comma in its name: `script-opts` is a
+    /// list split at commas, so the helper's path must arrive whole.
     #[test]
     fn thumbfast_loads_with_kaleidos_options_and_answers_the_requesting_client() {
         let tmp = tempfile::Builder::new()
@@ -546,9 +547,9 @@ end)
             .tempdir()
             .unwrap();
         let paths = temp_paths(tmp.path());
-        let essentials = paths.resource_dir.join("essentials");
-        fs::create_dir_all(&essentials).unwrap();
-        fs::write(essentials.join("thumbfast.lua"), STAND_IN).unwrap();
+        let thumbfast = paths.resource_dir.join("essentials").join("thumbfast");
+        fs::create_dir_all(&thumbfast).unwrap();
+        fs::write(thumbfast.join("thumbfast.lua"), STAND_IN).unwrap();
         // The user's own script options stay; what they say about thumbfast's own does not.
         fs::write(
             paths.config_dir.join("mpv.conf"),
