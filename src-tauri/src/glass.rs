@@ -5,7 +5,8 @@
 //! option; the user's shader parameters in it stay.
 //!
 //! [`GlassController`] owns everything around the shader: it attaches it to `glsl-shaders`
-//! next to the user's own, keeps the regions up to date (scale, output origin), takes the glass
+//! next to the user's own, keeps the regions up to date (scale, where mpv's window is, the
+//! output origin in it), takes the glass
 //! out of screenshots, and switches it off when the GPU cannot run it. It only queues requests
 //! on the engine, so it is safe to use on the main thread.
 
@@ -57,11 +58,32 @@ fn opaque() -> f64 {
     1.0
 }
 
-/// Window position (physical px) of the OUTPUT texture's top-left corner.
+/// Window position (physical px) of the OUTPUT texture's top-left corner. [`GlassController`]
+/// also keeps the letterbox margins inside mpv's own window in it (`osd-dimensions`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct OutputOrigin {
     pub x: f64,
     pub y: f64,
+}
+
+/// Where mpv's window is in the main window, in CSS px of the main window (the coordinates the
+/// UI measures its glass in). The surface says so for every layout it places (Ruling R45).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VideoRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl VideoRect {
+    /// Whether any of `rect` is over it. Written so that a NaN anywhere says no.
+    fn overlaps(&self, rect: &GlassRect) -> bool {
+        rect.x < self.x + self.w
+            && self.x < rect.x + rect.w
+            && rect.y < self.y + self.h
+            && self.y < rect.y + rect.h
+    }
 }
 
 /// A number mpv can parse: infinity and NaN (a huge rectangle times the scale) become 0.
@@ -94,6 +116,40 @@ pub fn shader_opts(rects: &[GlassRect], scale: f64, origin: OutputOrigin) -> Str
         ));
     }
     parts.join(",")
+}
+
+/// [`shader_opts`] for regions the UI measured in the main window while mpv's window is at
+/// `video` (Ruling R45; `None`: at the window's origin, as wide as the window).
+///
+/// The UI measures in CSS px of the main window; the shader works in physical px of mpv's OUTPUT
+/// texture, which starts where mpv's window is (the mini player moves it off the window's origin)
+/// plus the letterbox `margins` inside that window (physical px, `osd-dimensions`). So for x:
+///
+/// ```text
+/// shader x = UI x × scale − (video.x × scale + margins.x)
+///          = (UI x − video.x) × scale − margins.x
+/// ```
+///
+/// and the same for y; widths, heights and radii only scale. A region with nothing of it over
+/// mpv's window is left out: the shader would draw none of it, and with no region left at all its
+/// passes do not run. One that is partly over it stays whole: the texture's edge cuts it.
+pub fn region_opts(
+    rects: &[GlassRect],
+    scale: f64,
+    video: Option<VideoRect>,
+    margins: OutputOrigin,
+) -> String {
+    let shown: Vec<GlassRect> = rects
+        .iter()
+        .filter(|rect| video.is_none_or(|video| video.overlaps(rect)))
+        .copied()
+        .collect();
+    let (x, y) = video.map_or((0.0, 0.0), |video| (video.x, video.y));
+    let origin = OutputOrigin {
+        x: x * scale + margins.x,
+        y: y * scale + margins.y,
+    };
+    shader_opts(&shown, scale, origin)
 }
 
 /// The value with no region at all: what a screenshot is taken with.
@@ -322,7 +378,11 @@ struct Shared {
     rects: Vec<GlassRect>,
     /// Physical px per CSS px of the window.
     scale: f64,
-    origin: OutputOrigin,
+    /// Where the picture starts inside mpv's window (letterbox bars), physical px.
+    margins: OutputOrigin,
+    /// Where mpv's window is in the main window (CSS px); `None` until the surface says, which
+    /// is the window's origin.
+    video: Option<VideoRect>,
     /// The shader is in `glsl-shaders`.
     attached: bool,
     state: GlassState,
@@ -339,7 +399,7 @@ impl Shared {
         if self.each_frame {
             zeroed_opts()
         } else {
-            shader_opts(&self.rects, self.scale, self.origin)
+            region_opts(&self.rects, self.scale, self.video, self.margins)
         }
     }
 }
@@ -369,7 +429,8 @@ impl GlassController {
             shared: Mutex::new(Shared {
                 rects: Vec::new(),
                 scale: 1.0,
-                origin: OutputOrigin::default(),
+                margins: OutputOrigin::default(),
+                video: None,
                 attached: written.is_ok(),
                 state: if written.is_ok() {
                     GlassState::ON
@@ -435,8 +496,9 @@ impl GlassController {
         self.push(&mut shared);
     }
 
-    /// Where mpv's output starts in the window (letterbox bars, a mini player), from the
-    /// `osd-dimensions` property as the UI gets it.
+    /// Where mpv's output starts inside mpv's own window (letterbox bars), from the
+    /// `osd-dimensions` property as the UI gets it. Where that window is in the main window is
+    /// [`GlassController::set_video_rect`]'s; [`region_opts`] puts the two together.
     pub fn set_origin(&self, osd: &Value) {
         if !OUTPUT_EXCLUDES_MARGINS {
             return;
@@ -446,7 +508,24 @@ impl GlassController {
             return;
         };
         let mut shared = self.lock();
-        shared.origin = OutputOrigin { x, y };
+        shared.margins = OutputOrigin { x, y };
+        self.push(&mut shared);
+    }
+
+    /// Where mpv's window is in the main window now (CSS px): the surface calls it whenever it
+    /// places that window for a layout or the main window changes size (Ruling R45). The UI keeps
+    /// measuring its glass in the main window; the regions are moved into mpv's window here, and
+    /// the ones beside it are left out (see [`region_opts`]). Sent to mpv only if that changes
+    /// what the shader gets.
+    pub fn set_video_rect(&self, rect: VideoRect) {
+        let VideoRect { x, y, w, h } = rect;
+        if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0)
+        {
+            tracing::warn!("the glass ignores the video rectangle {rect:?}");
+            return;
+        }
+        let mut shared = self.lock();
+        shared.video = Some(rect);
         self.push(&mut shared);
     }
 
@@ -909,6 +988,126 @@ mod tests {
         glass.set_origin(&Value::Null);
         glass.set_origin(&json!({ "ml": 5 }));
         assert!(host.take().is_empty(), "no margins, no change");
+    }
+
+    /// Ruling R45: in the mini player mpv's window is not at the window's origin. The regions the
+    /// UI measured in the window are moved into mpv's window by its place, on top of the
+    /// letterbox margins inside it, and a region beside it is left out.
+    #[test]
+    fn regions_are_shifted_by_the_video_origin() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (host, glass, _) = started(tmp.path());
+        glass.set_scale(1.5);
+        // The mini player's bar over its video, and a panel of the page far from it.
+        let bar = rect(912.0, 650.0, 200.0, 40.0, 20.0);
+        let beside = rect(100.0, 100.0, 200.0, 40.0, 8.0);
+        glass.set_regions(vec![bar, beside]);
+        host.take();
+
+        // mpv's window at (904, 501), 360 × 203 CSS px: the UI's mini player in a 1280 × 720
+        // window.
+        let mini = VideoRect {
+            x: 904.0,
+            y: 501.0,
+            w: 360.0,
+            h: 203.0,
+        };
+        glass.set_video_rect(mini);
+        let sent = host.take();
+        assert_eq!(
+            sent,
+            [merge(&region_opts(
+                &[bar, beside],
+                1.5,
+                Some(mini),
+                OutputOrigin::default()
+            ))]
+        );
+        // (912 − 904) × 1.5 and (650 − 501) × 1.5; the sizes only scale.
+        let opts = &sent[0][3];
+        for part in [
+            "count=1",
+            "r0x=12.0",
+            "r0y=223.5",
+            "r0w=300.0",
+            "r0h=60.0",
+            "r0r=30.0",
+            "r1w=0.0",
+        ] {
+            assert!(
+                opts.contains(&format!("kaleido-glass/{part}")),
+                "{part} missing in {opts}"
+            );
+        }
+        glass.set_video_rect(mini);
+        assert!(host.take().is_empty(), "the same place again");
+
+        // Bars of 2 px above and below the picture inside mpv's window come on top of its place.
+        glass.set_origin(&json!({ "w": 540, "h": 305, "ml": 0, "mt": 2, "mr": 0, "mb": 2 }));
+        let sent = host.take();
+        let opts = &sent[0][3];
+        assert!(opts.contains("kaleido-glass/r0y=221.5"), "{opts}");
+        assert!(opts.contains("kaleido-glass/r0x=12.0"), "{opts}");
+
+        // The whole window again: both are over the video, at their own place.
+        glass.set_origin(&json!({ "w": 1920, "h": 1080, "ml": 0, "mt": 0, "mr": 0, "mb": 0 }));
+        glass.set_video_rect(VideoRect {
+            x: 0.0,
+            y: 0.0,
+            w: 1280.0,
+            h: 720.0,
+        });
+        let sent = host.take();
+        let opts = &sent.last().unwrap()[3];
+        for part in [
+            "count=2",
+            "r0x=1368.0",
+            "r0y=975.0",
+            "r1x=150.0",
+            "r1y=150.0",
+        ] {
+            assert!(
+                opts.contains(&format!("kaleido-glass/{part}")),
+                "{part} missing in {opts}"
+            );
+        }
+
+        // Not rectangles: ignored.
+        for (w, h) in [
+            (0.0, 10.0),
+            (-5.0, 10.0),
+            (f64::NAN, 10.0),
+            (10.0, f64::INFINITY),
+        ] {
+            glass.set_video_rect(VideoRect {
+                x: 0.0,
+                y: 0.0,
+                w,
+                h,
+            });
+        }
+        assert!(host.take().is_empty());
+    }
+
+    /// Without a place from the surface the regions are where the UI measured them, as before.
+    #[test]
+    fn regions_without_a_video_rect_stay_where_they_were_measured() {
+        let panel = rect(10.0, 20.0, 100.0, 40.0, 8.0);
+        let origin = OutputOrigin { x: 0.0, y: 30.0 };
+        assert_eq!(
+            region_opts(&[panel], 1.5, None, origin),
+            shader_opts(&[panel], 1.5, origin)
+        );
+        // A region that only touches the edge of mpv's window is not over it.
+        let video = VideoRect {
+            x: 110.0,
+            y: 0.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        assert!(
+            region_opts(&[panel], 1.0, Some(video), OutputOrigin::default()).contains("count=0")
+        );
     }
 
     #[test]

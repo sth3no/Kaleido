@@ -1,5 +1,6 @@
 /*
- * The layers of the window (AppShell.tsx), bottom to top: the video layer (0), the page (1), the
+ * The layers of the window (AppShell.tsx), bottom to top: the video layer and over it the mini
+ * player's hole (0, mini/MiniPlayer.module.css), the page (1), the mini player's frame and the
  * title-bar strip of a docked page (2), the islands (3), the sidebar (4), the notices (5). The
  * layers above the page let the pointer through where they have nothing (pointer-events: none);
  * what is in them takes it again (pointer-events: auto in its own module).
@@ -95,6 +96,7 @@
 /*
  * While a video is shown the page background is transparent: mpv's window is under the WebView
  * (spec 5.1). AppShell sets the attribute; --k-backdrop is what html, body and the root paint.
+ * With the mini player the page's background comes from its hole layer instead.
  */
 :global(:root[data-video]) {
   --k-backdrop: transparent;

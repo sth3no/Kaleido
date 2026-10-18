@@ -57,6 +57,11 @@
     "seek": {
       "label": "Seek",
       "value": "{{position}} of {{duration}}"
+    },
+    "mini": {
+      "label": "Mini player",
+      "back": "Back to player",
+      "stop": "Stop"
     }
   },
   "panels": {

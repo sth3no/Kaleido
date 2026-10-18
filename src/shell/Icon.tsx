@@ -50,6 +50,12 @@ export const INFO =
   'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z';
 export const CHEVRON_DOWN = 'M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z';
 
+// The mini player (Task 21).
+/** Two arrows out to the corners: back to the whole window. */
+export const EXPAND =
+  'M14 4h6v6h-2V7.41l-4.29 4.3-1.42-1.42L16.59 6H14zM10 20H4v-6h2v2.59l4.29-4.3 1.42 1.42L7.41 18H10z';
+export const STOP = 'M6 6h12v12H6z';
+
 // The panels above the controls (Task 20).
 export const PLUS = 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z';
 export const MINUS = 'M19 13H5v-2h14z';

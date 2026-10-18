@@ -5,24 +5,39 @@
  * pointer's position into mpv's window pixels against this element's rectangle, so the element
  * has to cover exactly what mpv's window covers, the whole client area.
  *
+ * While mpv's window is somewhere else (the mini player and the animation to it,
+ * surface/useSurfaceLayout.ts) the pointer is not passed on (`pointer`, Ruling R45): its place
+ * here would be the wrong place in mpv's window, and the mini player takes the pointer over the
+ * video itself. The keyboard goes to mpv either way.
+ *
  * It stays mounted on every page: the keys of input.conf (Ctrl+V, Ctrl+O, …) work without a video
  * too. Anything above it that is not a control lets the pointer through to it (AppShell.module.css).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 import { attachVideoInput } from '../input/forward';
 import styles from './VideoLayer.module.css';
 
-export default function VideoLayer() {
+export interface VideoLayerProps {
+  /** Whether the pointer over the layer goes to mpv: while mpv's window fills the window. */
+  pointer?: boolean;
+}
+
+export default function VideoLayer({ pointer = true }: VideoLayerProps) {
   const layer = useRef<HTMLDivElement>(null);
+  const forwarding = useRef(pointer);
+  // Before anything can happen on the layer in the new layout.
+  useLayoutEffect(() => {
+    forwarding.current = pointer;
+  }, [pointer]);
 
   useEffect(() => {
     const element = layer.current;
     if (!element) return undefined;
-    return attachVideoInput(element);
+    return attachVideoInput(element, { pointer: () => forwarding.current });
   }, []);
 
   // `data-video-layer`: a press on it is a press on the bare video (panels/Popover.tsx).
-  return <div ref={layer} className={styles.layer} data-video-layer />;
+  return <div ref={layer} className={styles.layer} data-video-layer data-pointer={pointer} />;
 }

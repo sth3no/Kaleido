@@ -10,12 +10,17 @@ import type { Page } from '../state/uiStore';
 export type View = 'home' | 'player' | 'settings';
 
 /**
- * The settings while the user is there; the player while a file is loaded or loading (mpv said it
- * is not idle); else the start screen. Before mpv has said whether it is idle (until the first
- * snapshot) that is the start screen as well, so the player never flashes up at start.
+ * Whether a file is open: loaded, or loading (mpv said it is not idle). Before mpv has said
+ * whether it is idle (until the first snapshot) nothing is, so the player never flashes up at
+ * start. The player shows it; on another page it is the mini player (surface/useSurfaceLayout.ts).
  */
-export function selectView(page: Page, { props, loaded }: Pick<PlayerState, 'props' | 'loaded'>): View {
-  if (page === 'settings') return 'settings';
+export function selectVideoOpen({ props, loaded }: Pick<PlayerState, 'props' | 'loaded'>): boolean {
   const known = typeof props['idle-active'] === 'boolean';
-  return loaded || (known && !selectIdle(props)) ? 'player' : 'home';
+  return loaded || (known && !selectIdle(props));
+}
+
+/** The settings while the user is there; the player while a file is open; else the start screen. */
+export function selectView(page: Page, state: Pick<PlayerState, 'props' | 'loaded'>): View {
+  if (page === 'settings') return 'settings';
+  return selectVideoOpen(state) ? 'player' : 'home';
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { NO_ZOOM, readZoomFrame, toWindowBox, toWindowLength, zoomFrame } from './zoom';
+import { NO_ZOOM, readZoomFrame, toOwnLength, toWindowBox, toWindowLength, zoomFrame } from './zoom';
 
 /** A 1280 px wide window, and the root's width as each kind of engine reports it at `zoom`. */
 const WINDOW = 1280;
@@ -52,6 +52,14 @@ describe('the UI scale in CSS px of the window', () => {
     expect(toWindowLength(20, legacy(zoom))).toBeCloseTo(20 * zoom);
     // The element's own zoom wins where the engine reports it.
     expect(toWindowLength(20, standardized(zoom), 2)).toBe(40);
+  });
+
+  test.each([0.9, 1.5])('at %s a window length is set on an element in its own, zoomed px', (zoom) => {
+    // Both engines: what an element's style says is zoomed on the screen.
+    expect(toOwnLength(360 * zoom, standardized(zoom))).toBeCloseTo(360);
+    expect(toOwnLength(360 * zoom, legacy(zoom))).toBeCloseTo(360);
+    expect(toWindowLength(toOwnLength(203, standardized(zoom)), standardized(zoom))).toBeCloseTo(203);
+    expect(toOwnLength(16, NO_ZOOM)).toBe(16);
   });
 
   test('a scrollbar or rounding does not change the reading', () => {

@@ -57,6 +57,11 @@
     "seek": {
       "label": "Časová osa",
       "value": "{{position}} z {{duration}}"
+    },
+    "mini": {
+      "label": "Mini přehrávač",
+      "back": "Zpět do přehrávače",
+      "stop": "Zastavit"
     }
   },
   "panels": {

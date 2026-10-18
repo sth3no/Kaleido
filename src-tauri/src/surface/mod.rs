@@ -16,6 +16,7 @@ use tauri::{AppHandle, Manager, WebviewWindow, Window};
 pub use caption::CaptionButton;
 pub use layout::{Layout, PxRect, to_physical};
 
+use crate::glass::{GlassController, VideoRect};
 use crate::player::{Engine, Request};
 
 /// Window class of the child window mpv creates inside `wid`.
@@ -84,6 +85,14 @@ impl Surface {
         self.apply(w, h, scale);
     }
 
+    /// Where mpv's window is for the layout and the client area now, in CSS px of the window;
+    /// `None` while it is hidden. See [`video_rect`].
+    pub fn video_rect(&self) -> Option<VideoRect> {
+        let layout = *lock(&self.layout);
+        let (w, h, scale) = *lock(&self.client);
+        video_rect(layout, w, h, scale)
+    }
+
     /// The window buttons the UI drew that Windows hit-tests itself (Snap Layouts, see
     /// `caption`); an empty list for none. Main thread only. With the spike off the UI sends
     /// none, and the UI's own buttons take every click.
@@ -97,6 +106,31 @@ impl Surface {
         let rects = caption::to_physical_rects(&lock(&self.caption), client_w, client_h, scale);
         // Placing sends messages to the windows (on this thread), whose procedure takes no lock.
         lock(&self.caption_windows).place(self.main, &rects);
+    }
+}
+
+/// Where `layout` puts mpv's window in a client area of `client_w`×`client_h` physical px at
+/// `scale`, in CSS px of the window: the physical rectangle [`to_physical`] places it at (so with
+/// its rounding), divided by the scale. `None` while it is hidden or there is no scale.
+pub fn video_rect(layout: Layout, client_w: u32, client_h: u32, scale: f64) -> Option<VideoRect> {
+    if !(scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    to_physical(layout, client_w, client_h, scale).map(|px| VideoRect {
+        x: f64::from(px.x) / scale,
+        y: f64::from(px.y) / scale,
+        w: f64::from(px.w) / scale,
+        h: f64::from(px.h) / scale,
+    })
+}
+
+/// Tells the glass where mpv's window is now (Ruling R45). The UI measures its glass in CSS px
+/// of the main window; the shader draws in mpv's window, which the mini player and its animation
+/// move off the window's origin. Call it whenever the surface places that window: a new layout,
+/// a resize, a DPI change. A hidden surface leaves the glass where it was: nothing shows then.
+pub fn sync_glass(surface: &Surface, glass: &GlassController) {
+    if let Some(rect) = surface.video_rect() {
+        glass.set_video_rect(rect);
     }
 }
 
@@ -198,8 +232,9 @@ impl WindowSync {
 }
 
 /// The main window was resized or got another display scale (main thread): mpv's window is
-/// placed again, and a fullscreen or always-on-top change the window made on its own (e.g. the
-/// UI through Tauri's window API) goes to mpv.
+/// placed again (the mini player stays in its corner), the glass is told where it went, and a
+/// fullscreen or always-on-top change the window made on its own (e.g. the UI through Tauri's
+/// window API) goes to mpv.
 pub fn window_resized(window: &Window) {
     if let (Some(surface), Ok(size), Ok(scale)) = (
         window.try_state::<Surface>(),
@@ -207,6 +242,9 @@ pub fn window_resized(window: &Window) {
         window.scale_factor(),
     ) {
         surface.apply(size.width, size.height, scale);
+        if let Some(glass) = window.try_state::<GlassController>() {
+            sync_glass(&surface, &glass);
+        }
     }
     follow_window(window.app_handle());
 }
@@ -287,9 +325,54 @@ mod tests {
     use super::win32::testing::{
         class_name, destroy, pump, set_rect, test_parent, wait_for_child, window_rect,
     };
-    use super::{FullscreenSync, Layout, Surface, SyncAction};
+    use super::{FullscreenSync, Layout, Surface, SyncAction, video_rect};
+    use crate::glass::VideoRect;
     use crate::player::testing::{NoEvents, temp_paths};
     use crate::player::{Engine, EngineConfig};
+
+    /// What the glass is told (Ruling R45): the rectangle mpv's window is placed at, in CSS px.
+    #[test]
+    fn the_video_rect_is_where_mpvs_window_goes_in_css_px() {
+        // A mini player in a 1280 × 720 CSS px window at 150 %: 540 × 303 physical px at
+        // (1920 − 24 − 540, 1080 − 24 − 303).
+        let mini = Layout::Mini {
+            w: 360.0,
+            h: 202.0,
+            right: 16.0,
+            bottom: 16.0,
+        };
+        assert_eq!(
+            video_rect(mini, 1920, 1080, 1.5),
+            Some(VideoRect {
+                x: 904.0,
+                y: 502.0,
+                w: 360.0,
+                h: 202.0
+            })
+        );
+        assert_eq!(
+            video_rect(Layout::Full, 1920, 1080, 1.5),
+            Some(VideoRect {
+                x: 0.0,
+                y: 0.0,
+                w: 1280.0,
+                h: 720.0
+            })
+        );
+        // A frame of the animation, as rounded as the window is placed.
+        assert_eq!(
+            video_rect(FRAME, 400, 300, 1.0),
+            Some(VideoRect {
+                x: 10.0,
+                y: 20.0,
+                w: 160.0,
+                h: 90.0
+            })
+        );
+        assert_eq!(video_rect(Layout::Hidden, 1920, 1080, 1.5), None);
+        assert_eq!(video_rect(mini, 0, 0, 1.5), None, "minimized");
+        assert_eq!(video_rect(Layout::Full, 1920, 1080, 0.0), None);
+    }
 
     #[test]
     fn fullscreen_sync_ignores_its_own_echo() {

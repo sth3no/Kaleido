@@ -150,6 +150,8 @@ pub fn run() {
             // the shader cannot be written (then it starts off), so the commands find it.
             let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
             glass.set_scale(window.scale_factor()?);
+            // Where mpv's window is: the regions are moved into it (Ruling R45).
+            surface::sync_glass(&app.state::<Surface>(), &glass);
             app.manage(glass);
             // After the glass: Windows' transparency and the settings decide whether it runs,
             // and the window gets Mica.

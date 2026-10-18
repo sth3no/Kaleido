@@ -163,3 +163,54 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   nejpozději za 0,5 s a obraz je v pořádku.
 - [ ] **Snížit průhlednost** a **vysoký kontrast** (Windows): ostrůvek je neprůhledný / v systémových
   barvách, lišta, posuvník a značky jsou vidět, tlačítka mají viditelný fokus.
+
+### Mini přehrávač (Task 21)
+
+Potřeba: video 16:9, video 4:3 a video na výšku (z telefonu), složka s několika videi. Stránka
+Nastavení je do Task 22 prázdná; mini přehrávač je na ní i tak.
+
+- [ ] **Otevřít Nastavení během přehrávání** (lišta → Nastavení): video se asi za čtvrt vteřiny
+  plynule zmenší do pravého dolního rohu (360 px široké, 16 px od okrajů) a okno mpv jde s
+  rámečkem snímek po snímku. Zapsat sem, jestli video za rámečkem viditelně zaostává (spec 8.6:
+  pak náhradní cesta skok + prolnutí, která už je hotová pro omezené animace). Kolem videa je
+  stránka neprůhledná (gradient; ve Windows 11 s Mica pozadí Mica), nikde neprosvítá plocha ani
+  černá, ani během animace.
+- [ ] **Rámeček:** zaoblené rohy (roh videa nepřečnívá přes zaoblení), tenký okraj a stín. Po
+  dojetí do rohu se dole prolne skleněný pruh s ▶/❚❚, „Zpět do přehrávače“ a „Zastavit“.
+  **Rozmazání pod pruhem sedí přesně na pruh** (ne posunuté k levému hornímu rohu okna: Ruling
+  R45, Rust posouvá oblasti skla o místo okna mpv), i při měřítku UI 90 % a 150 % a na monitoru
+  se 150 %. Žádné rozmazání nikde jinde.
+- [ ] ▶/❚❚ video pozastaví a pustí (ikona i popisek se změní); „Zastavit“ video zastaví, mini
+  přehrávač zmizí a Nastavení zůstane; „Zpět do přehrávače“ video plynule zvětší na celé okno a
+  ukáže přehrávač s ovládáním.
+- [ ] **Dvojklik do videa** vrátí přehrávač a video **nepřejde do fullscreenu**; jeden klik nedělá
+  nic (video se nepozastaví).
+- [ ] **Myš nad stránkou nejde do mpv:** kolečko nad Nastavením nemění hlasitost, klik do prázdna
+  video nepozastaví, pravé tlačítko neotevře nabídku WebView.
+- [ ] **Klávesnice:** Tab dojde po obsahu stránky na tři tlačítka mini přehrávače (viditelný fokus,
+  čtečka čte „Mini přehrávač“ a popisky tlačítek), Enter je stiskne. Po kliku myší na tlačítko
+  mezerník pozastaví video (fokus se vrátil). Klávesy z input.conf jdou do mpv dál (šipky
+  přetáčí, `m` ztlumí).
+- [ ] **Přetáhnout okno a změnit jeho velikost v mini režimu** (za okraj i za roh, maximalizovat a
+  obnovit, přetáhnout na monitor s jiným měřítkem): mini zůstane 16 px od pravého dolního rohu,
+  video sedí v díře během tažení i po něm a nikde nezůstane pruh stránky ani kus videa navíc. Ve
+  velmi malém okně se mini zmenší se stejným poměrem stran a nikdy se nezmáčkne.
+- [ ] **Minimalizovat a obnovit** v mini režimu: video je zase v rohu. **Fullscreen** klávesou `f`
+  v mini režimu: okno je na celé obrazovce a mini v jejím rohu; `f` znovu vrátí okno.
+- [ ] **Poměr stran:** video 4:3 má mini 360 × 270, video na výšku je 360 px vysoké (užší); další
+  video v playlistu s jiným poměrem mini přetvaruje a díra pořád sedí. Přechod na další video v
+  playlistu mini nezavře ani nebliká na celé okno.
+- [ ] **Mini přežije restart výstupu videa (vo):** v mini režimu vypnout a zapnout video stopu
+  (`_` dvakrát) a pustit video s jiným rozlišením. mpv přitom své okno může vytvořit znovu, a Rust
+  mu rozvržení po vytvoření znovu nepošle (Task 6): zapsat sem, jestli video zůstane v rohu, nebo
+  skočí na celé okno (pak je v díře vidět jen jeho výřez nebo nic) a vrátí se až po změně
+  velikosti okna.
+- [ ] **Měřítko UI** (Nastavení → Vzhled, Task 22) změněné při mini přehrávači: mini se zvětší nebo
+  zmenší s UI (při 150 % je 540 px široké) a díra pořád sedí na video.
+- [ ] **Omezené animace** (Windows: Nastavení → Usnadnění → Vizuální efekty → Efekty animace
+  vypnout): po otevření Nastavení je video hned v rohu, nic se nehýbe a rámeček s videem se
+  prolnou; „Zpět do přehrávače“ skočí na celé okno bez pohybu.
+- [ ] **Snížit průhlednost:** pruh mini přehrávače je neprůhledný (bez rozmazání). **Vysoký
+  kontrast:** rámeček a pruh v systémových barvách, tlačítka jsou vidět.
+- [ ] **Spotřeba v klidu:** v mini režimu v DevTools (Paint flashing) nic nebliká a WebView2 má
+  kolem 0 % CPU, video přitom hraje (spec 13).

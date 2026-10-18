@@ -60,6 +60,15 @@ export function toWindowBox(box: ClientBox, frame: ZoomFrame): ClientBox {
 }
 
 /**
+ * The other way: a length in CSS px of the window as a length of an element's own CSS (its
+ * `left`, `width`, a radius), for an element under the root's zoom and no other. Whatever the
+ * engine reports rectangles in, the element's own px are `zoom` window px.
+ */
+export function toOwnLength(windowLength: number, frame: ZoomFrame): number {
+  return windowLength / frame.zoom;
+}
+
+/**
  * A length of the element's own CSS (a border radius from `getComputedStyle`) in CSS px of the
  * window. `elementZoom` is the element's own effective zoom where the engine reports it
  * (`currentCSSZoom`); else the root's.

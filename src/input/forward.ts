@@ -85,17 +85,29 @@ export const blurAfterPointer = {
   },
 };
 
+export interface VideoInputOptions {
+  /**
+   * Whether the pointer over `el` goes to mpv now; asked at every pointer event. Only while mpv's
+   * window is where `el` is: the pointer's place is measured against `el` (the mini player moves
+   * mpv's window elsewhere, Ruling R45). While it does not, a button still held is let go at the
+   * next pointer event and nothing new is sent; the wheel still scrolls and zooms nothing and the
+   * WebView's menu still does not open. The keyboard is not concerned. Always, by default.
+   */
+  pointer?: () => boolean;
+}
+
 /**
  * Sends mpv what the UI does not handle: the mouse, its buttons and the wheel over `el` (the
  * layer that covers the video), and the keyboard of the whole window. Returns the function that
  * stops it; it also lets go of whatever is still held.
  */
-export function attachVideoInput(el: HTMLElement): () => void {
+export function attachVideoInput(el: HTMLElement, options: VideoInputOptions = {}): () => void {
   const abort = new AbortController();
   const { signal } = abort;
   const keys = createKeyTracker();
   const wheel = new WheelAccumulator();
   const buttons = new Set<string>();
+  const forwarding = options.pointer ?? (() => true);
   let pending: Point | null = null;
   let frame: number | null = null;
 
@@ -120,6 +132,14 @@ export function attachVideoInput(el: HTMLElement): () => void {
   const releaseAll = () => {
     for (const key of keys.releaseAll()) send({ type: 'keyUp', key });
     releaseButtons();
+  };
+
+  /** The pointer is not mpv's now (`options.pointer`): what it held is let go, nothing more goes. */
+  const notForwarding = (): boolean => {
+    if (forwarding()) return false;
+    pending = null;
+    releaseButtons();
+    return true;
   };
 
   // Keyboard: the whole window, in the bubbling phase.
@@ -160,6 +180,7 @@ export function attachVideoInput(el: HTMLElement): () => void {
   el.addEventListener(
     'pointermove',
     (e) => {
+      if (notForwarding()) return;
       const p = point(e);
       if (!p) return;
       pending = p;
@@ -173,6 +194,7 @@ export function attachVideoInput(el: HTMLElement): () => void {
   el.addEventListener(
     'pointerdown',
     (e) => {
+      if (notForwarding()) return;
       const button = buttonName(e.button);
       const p = point(e);
       if (!button || !p) return;
@@ -188,6 +210,7 @@ export function attachVideoInput(el: HTMLElement): () => void {
   el.addEventListener(
     'pointerup',
     (e) => {
+      if (notForwarding()) return;
       const button = buttonName(e.button);
       // Only a press this layer sent: not the end of a drag that began on the controls.
       if (!button || !buttons.delete(button)) return;
@@ -203,6 +226,7 @@ export function attachVideoInput(el: HTMLElement): () => void {
     (e) => {
       // Not passive: a wheel over the video neither scrolls nor zooms the page (Ctrl + wheel).
       e.preventDefault();
+      if (notForwarding()) return;
       const step = wheel.push(e);
       if (!step) return;
       flushMove();

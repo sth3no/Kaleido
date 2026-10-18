@@ -1,0 +1,102 @@
+/*
+ * The mini player (MiniPlayer.tsx; pages-navigation-v2.html, screen 2). The boxes are placed by
+ * script, in the elements' own px, on the numbers Rust places mpv's window by.
+ *
+ * The page around the hole: while the mini player is up the root is transparent (`data-video`,
+ * AppShell.module.css), and this layer paints what the root would, the page's background, with
+ * the hole cut out of it (`--mini-hole`, a clip path). It lies under the page's content, the
+ * sidebar and everything else, and takes no pointer.
+ */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--k-color-backdrop);
+  clip-path: var(--mini-hole);
+}
+
+/* Windows 11: Mica is the page's background, and Mica is behind the window everywhere already. */
+:global(:root[data-mica]) .backdrop {
+  background: none;
+}
+
+/*
+ * With reduced motion the video comes up in its place without moving (surface/useSurfaceLayout.ts):
+ * a cover in the page's background lies over the hole and fades out while the frame fades in.
+ * Both are opacity transitions from where `@starting-style` puts them; no keyframes.
+ */
+.cover {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--k-color-backdrop) fixed;
+  opacity: 0;
+  transition: opacity var(--k-motion-slow) ease;
+}
+
+@starting-style {
+  .cover {
+    opacity: 1;
+  }
+}
+
+:global(:root[data-mica]) .cover {
+  background: none;
+}
+
+/* The frame over the video: its edge and shadow, above the page's content. */
+.frame {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid var(--k-color-glass-border);
+  box-shadow: var(--k-shadow-popover);
+  transition: opacity var(--k-motion-slow) ease;
+}
+
+@starting-style {
+  .frame[data-fade='true'] {
+    opacity: 0;
+  }
+}
+
+/* The video: it takes the pointer here, so that the page under it does not. */
+.video {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  user-select: none;
+}
+
+/*
+ * The glass bar at the bottom, over the video (one of the shader's regions). It comes after
+ * theme/glass.module.css, so its place, radius and padding win over the glass' own. It fades in
+ * when the mini player has docked.
+ */
+.bar {
+  position: absolute;
+  bottom: var(--k-space-s);
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+  padding: var(--k-space-xs);
+  border-radius: var(--k-radius-pill);
+  transition: opacity var(--k-motion-fast) ease;
+}
+
+@starting-style {
+  .bar {
+    opacity: 0;
+  }
+}
+
+/* High contrast: the frame is a plain edge in the system's colour. */
+@media (forced-colors: active) {
+  .frame {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+}

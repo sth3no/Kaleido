@@ -13,7 +13,7 @@ use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
 use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
-use crate::surface::{CaptionButton, Layout, Surface};
+use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
 use crate::system::diagnostics::{self, License};
 use crate::system::{self, ROADMAP_URL, Snapshot, clipboard::PasteOutcome, dialog::DialogPurpose};
 use crate::themes::{self, SystemAppearance};
@@ -100,10 +100,15 @@ pub async fn system_open_roadmap() {
 
 /// Where the video goes: the whole window, a frame of the mini-player animation, the mini player
 /// in its corner, or nowhere. Synchronous, so it runs on the main thread, which moves mpv's
-/// window; that does not wait for mpv's core.
+/// window; that does not wait for mpv's core. The glass follows mpv's window (Ruling R45).
 #[tauri::command]
-pub fn surface_set_layout(surface: State<'_, Surface>, layout: Layout) {
+pub fn surface_set_layout(
+    surface: State<'_, Surface>,
+    glass: State<'_, GlassController>,
+    layout: Layout,
+) {
     surface.set_layout(layout);
+    sync_glass(&surface, &glass);
 }
 
 /// The window buttons the UI drew that Windows hit-tests itself (CSS px of the window): today the

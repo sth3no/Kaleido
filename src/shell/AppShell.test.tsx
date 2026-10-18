@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n } from '../i18n';
 import { usePlayerStore } from '../state/playerStore';
@@ -33,6 +33,16 @@ beforeEach(() => {
     command === 'system_ui_ready' || command === 'glass_state'
       ? new Promise(() => undefined)
       : Promise.resolve(null)) as unknown as typeof invoke);
+  // Windows' animations off: the mini player comes up in its place, with no frames running after
+  // a test (its animation is surface/useSurfaceLayout.test.ts's).
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({ media: query, matches: query === '(prefers-reduced-motion: reduce)' })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const shell = () =>
@@ -94,11 +104,19 @@ test('the page is transparent only while a video is shown', () => {
     usePlayerStore.setState({ loaded: true, props: PLAYING });
   });
   expect(shown()).toBe(true);
-  // The settings page (the mini player comes with Task 21) paints its own background.
+  // On the settings page the video goes into the mini player, and its hole layer paints the page
+  // around it (mini/MiniPlayer.tsx): the root stays transparent.
   act(() => {
     useUiStore.getState().setPage('settings');
   });
+  expect(shown()).toBe(true);
+  expect(document.querySelector('[data-mini-hole]')).not.toBeNull();
+  // With nothing open the page is opaque.
+  act(() => {
+    usePlayerStore.setState({ loaded: false, props: { 'idle-active': true } });
+  });
   expect(shown()).toBe(false);
+  expect(document.querySelector('[data-mini-hole]')).toBeNull();
 });
 
 test('the shell starts the bridge to Rust, once', async () => {

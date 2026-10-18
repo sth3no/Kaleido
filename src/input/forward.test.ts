@@ -436,4 +436,44 @@ describe('attachVideoInput', () => {
     wheel(100);
     expect(sent()).toHaveLength(count);
   });
+
+  test('while the pointer is not mpv’s nothing of it goes, and a held button is let go', () => {
+    detach();
+    vi.mocked(invoke).mockClear();
+    let forwarding = true;
+    detach = attachVideoInput(el, { pointer: () => forwarding });
+    pointer('pointerdown', { button: 0 });
+    expect(sent()).toEqual([
+      { type: 'mouseMove', x: 150, y: 75 },
+      { type: 'buttonDown', button: 'MBTN_LEFT' },
+    ]);
+
+    // The mini player has taken mpv's window elsewhere (Ruling R45): the next pointer event lets
+    // go of the button, and nothing else of the pointer is sent.
+    forwarding = false;
+    pointer('pointermove', { clientX: 210, clientY: 120 });
+    expect(sent().slice(2)).toEqual([{ type: 'buttonUp', button: 'MBTN_LEFT' }]);
+    pointer('pointerdown', { button: 0 });
+    pointer('pointerup', { button: 0 });
+    const notch = wheel(-100);
+    frame();
+    expect(sent()).toHaveLength(3);
+    expect(el.setPointerCapture).toHaveBeenCalledTimes(1);
+    // The page still neither scrolls nor zooms, and the WebView's menu still does not open.
+    expect(notch.defaultPrevented).toBe(true);
+    const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    el.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+    // The keyboard is not concerned.
+    key('keydown', { key: 'a', code: 'KeyA' });
+    expect(sent().at(-1)).toEqual({ type: 'keyDown', key: 'a' });
+
+    // mpv's window fills the window again: the pointer is mpv's again.
+    forwarding = true;
+    pointer('pointerdown', { button: 0 });
+    expect(sent().slice(-2)).toEqual([
+      { type: 'mouseMove', x: 150, y: 75 },
+      { type: 'buttonDown', button: 'MBTN_LEFT' },
+    ]);
+  });
 });
