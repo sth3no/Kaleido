@@ -147,6 +147,9 @@ první požadavek. Až vyjde 2.x s opravou, zvednout verzi v `src-tauri/Cargo.to
   soubory; zvlášť rychle za sebou dvojklik na dvě videa. Každé pětkrát. Vždy jedno okno a všechna
   videa v jednom playlistu v pořadí z Průzkumníku; zapsat, kolikrát vzniklo druhé okno nebo nějaké
   video chybělo.
+- [ ] **Čas z příkazové řádky (Ruling R55):** `Kaleido.exe --start=30 -- "<video ve složce s
+  dalšími videi>"` (za studena i do běžícího okna) hraje od 0:30, i když má video uloženou jinou
+  pozici, a playlist má jen toto video; bez `--start` se otevře celá složka jako dřív.
 - [ ] Kaleido běží: video otevřené z Průzkumníku hraje ve stejném okně a okno se obnoví z
   minimalizace a přejde do popředí. S Nastavení → Přehrávání → Při otevření souboru za běhu →
   Přidat do playlistu se video přidá na konec a přehrávání se nepřeruší.
