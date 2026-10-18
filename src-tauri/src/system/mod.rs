@@ -10,6 +10,7 @@ pub mod drop;
 pub mod instance;
 pub mod logs;
 pub mod open_queue;
+pub mod shell_open;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

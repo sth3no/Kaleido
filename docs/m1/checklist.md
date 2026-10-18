@@ -326,6 +326,12 @@ s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten hraje jen s 
   Esc video nic nedělá (Esc nejde do mpv).
 - [ ] Karta „Pokračovat ve sledování“ má štítek ROADMAPA. Klik kamkoli na kartu i na „Co chystáme →“
   otevře roadmapu v prohlížeči, a to jednou. Tab projde Otevřít soubor, Vložit odkaz, Co chystáme.
+- [ ] **Prohlížeč přežije zavření Kaleida (Ruling R51):** zavřít všechna okna výchozího prohlížeče
+  tak, aby žádný jeho proces neběžel (Správce úloh; u Edge vypnout Nastavení → Systém a výkon →
+  Posílení spuštění), v Kaleidu kliknout na „Co chystáme →“, počkat na roadmapu, otevřít v
+  prohlížeči ještě jednu kartu a zavřít Kaleido (✕): prohlížeč zůstane otevřený se všemi kartami.
+  Totéž s odkazy na zdroje v Nastavení → O aplikaci a s „Otevřít složku s logy“ (okno Průzkumníka
+  zůstane).
 - [ ] Nic z ovládání úvodní obrazovky neleží v horním pruhu (48 px), kde se okno přetahuje; při
   nízkém okně (640×360) se obsah dá posunout a nahoře se nic neořízne.
 - [ ] Ctrl+V bez odkazu ve schránce **při přehrávání** pole neukáže (pole je jen na úvodní

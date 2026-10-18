@@ -17,6 +17,7 @@ use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
 use crate::system::diagnostics::{self, License};
 use crate::system::{
     self, ROADMAP_URL, Snapshot, SourcePage, clipboard::PasteOutcome, dialog::DialogPurpose,
+    shell_open,
 };
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbStore};
@@ -91,23 +92,23 @@ pub fn system_open_text(app: AppHandle, text: String) -> Result<(), LoadIssue> {
     system::clipboard::open_text(&app, &text)
 }
 
-/// Opens the public roadmap in the browser. Asynchronous: starting the browser may take a
-/// moment.
+/// Opens the public roadmap in the browser, outside Kaleido's job (Ruling R51): the browser stays
+/// when Kaleido closes. Asynchronous: starting explorer.exe may take a moment.
 #[tauri::command]
 pub async fn system_open_roadmap() {
-    if let Err(error) = tauri_plugin_opener::open_url(ROADMAP_URL, None::<&str>) {
-        tracing::warn!("cannot open the roadmap: {error}");
+    if let Err(error) = shell_open::open(ROADMAP_URL) {
+        tracing::warn!("cannot open the roadmap: {error:#}");
     }
 }
 
 /// Opens a page about the sources of what Kaleido ships in the browser (spec 11.6): the releases
 /// of Kaleido, or the sources of the libmpv build. The UI names the page; the addresses are
-/// fixed in Rust, so no command opens a link the UI makes up. Asynchronous: starting the
-/// browser may take a moment.
+/// fixed in Rust, so no command opens a link the UI makes up. Outside Kaleido's job, as the
+/// roadmap. Asynchronous: starting explorer.exe may take a moment.
 #[tauri::command]
 pub async fn system_open_source(which: SourcePage) {
-    if let Err(error) = tauri_plugin_opener::open_url(which.url(), None::<&str>) {
-        tracing::warn!("cannot open the sources page {which:?}: {error}");
+    if let Err(error) = shell_open::open(which.url()) {
+        tracing::warn!("cannot open the sources page {which:?}: {error:#}");
     }
 }
 
@@ -387,14 +388,15 @@ async fn diagnostics_text(app: AppHandle) -> String {
     .unwrap_or_default()
 }
 
-/// Shows the logs folder in the file manager. Asynchronous: starting it may take a moment.
+/// Shows the logs folder in the file manager, outside Kaleido's job like the browser (Ruling
+/// R51). Asynchronous: starting explorer.exe may take a moment.
 #[tauri::command]
 pub async fn system_open_logs(app: AppHandle) {
     let Some(paths) = app.try_state::<AppPaths>() else {
         return;
     };
-    if let Err(error) = tauri_plugin_opener::open_path(&paths.logs_dir, None::<&str>) {
-        tracing::warn!("cannot open the logs folder: {error}");
+    if let Err(error) = shell_open::open(&paths.logs_dir) {
+        tracing::warn!("cannot open the logs folder: {error:#}");
     }
 }
 

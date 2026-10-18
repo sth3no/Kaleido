@@ -24,7 +24,6 @@ tauri = { version = "2.12", features = [] }
 tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-dialog = "2.8"
 tauri-plugin-clipboard-manager = "2"
-tauri-plugin-opener = "2"
 anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
