@@ -19,7 +19,8 @@ tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
 tauri = { version = "2.12", features = [] }
-# 2.5.4 is the newest 2.x; the Windows startup race fixed after it is on the M1 checklist.
+# 2.5.4 is the newest 2.x (checked 2026-10-18; only 3.0.0 alphas are newer). The Windows startup
+# race fixed after it (spec 9.3) is checked by hand: docs/m1/checklist.md, "Jediná instance".
 tauri-plugin-single-instance = "2.5.4"
 tauri-plugin-dialog = "2.8"
 tauri-plugin-clipboard-manager = "2"

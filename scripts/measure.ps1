@@ -1,23 +1,28 @@
 ﻿#Requires -Version 5.1
 <#
-  M0 Task 13, krok 1: výkonnostní měření sestaveného prototypu (spec 13, docs/m0/report.md → Výkon).
+  Výkonnostní měření sestaveného Kaleida (spec 13; cíle a postup v docs/m1/checklist.md → Výkon,
+  výsledky M0 v docs/m0/report.md → Výkon).
 
   Měří: čas od spuštění do viditelného okna, CPU při přehrávání proti referenční libmpv
   (kaleido-mpv.exe ve vlastním okně se stejnými volbami), CPU v pauze po dohrání (keep-open),
   paměť WebView2 a dobu zavření přes WM_CLOSE. CPU je podíl ze všech logických procesorů
   (jako Správce úloh) a sčítá Kaleido.exe s celým jeho stromem procesů.
 
+  Měří se místní instalace (scripts/install-local.ps1): vedle target\release\Kaleido.exe chybí
+  libmpv-2.dll a přibalené soubory. Klip se pokaždé pouští od začátku (--start=0), i když si
+  Kaleido pamatuje pozici (save-position-on-quit).
+
   Během měření nehýbej myší a nepiš do okna: ovládání se po 2,5 s skryje a UI má být v klidu.
   Zařízení D3D11 a hwdec se čtou z logu mpv; integrovaná GPU se volí ve Windows
   (Nastavení → Grafika → Kaleido.exe a kaleido-mpv.exe → Úspora energie).
 
   Příklady:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-m0.ps1
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-m0.ps1 `
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 `
       -Clip "$env:USERPROFILE\Videos\kaleido-m0\uhd-2160p.mkv"
 #>
 param(
-    # Složka s Kaleido.exe, kaleido-mpv.exe a libmpv-2.dll (místní instalace, viz docs/m0/local-install.md).
+    # Složka s Kaleido.exe, kaleido-mpv.exe a libmpv-2.dll (místní instalace ze scripts/install-local.ps1).
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Kaleido-M0'),
     [string]$Clip = (Join-Path $env:USERPROFILE 'Videos\kaleido-m0\sdr-1080p.mkv'),
     [int]$StartupRuns = 5,
@@ -26,13 +31,15 @@ param(
     [int]$PauseSeconds = 60,
     # Délka klipu v sekundách; 0 = přečíst z vlastností souboru ve Windows.
     [double]$ClipSeconds = 0,
-    # Log mpv, který zapisuje Kaleido M0 (options.rs: log-file v app_local_data_dir).
-    [string]$KaleidoLog = (Join-Path $env:LOCALAPPDATA 'com.sth3no.kaleido.m0\mpv.log')
+    # Log mpv, který zapisuje Kaleido (spec 4.3; src-tauri/src/player/options.rs: log-file).
+    [string]$KaleidoLog = (Join-Path $env:LOCALAPPDATA 'Kaleido\logs\mpv.log')
 )
 $ErrorActionPreference = 'Stop'
 $Exe = Join-Path $InstallDir 'Kaleido.exe'
 $Helper = Join-Path $InstallDir 'kaleido-mpv.exe'
-$RefLog = Join-Path ([System.IO.Path]::GetTempPath()) 'kaleido-m0-reference-mpv.log'
+# Název hlavního okna (src-tauri/tauri.conf.json).
+$WindowTitle = 'Kaleido'
+$RefLog = Join-Path ([System.IO.Path]::GetTempPath()) 'kaleido-reference-mpv.log'
 $Cores = [Environment]::ProcessorCount
 $SettleSeconds = 6   # soubor načtený, ovládání skryté po 2,5 s bez pohybu myši
 
@@ -94,7 +101,7 @@ function Start-Kaleido([string[]]$Arguments) {
     $proc = if ($Arguments) { Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru } else { Start-Process -FilePath $Exe -PassThru }
     $hwnd = [IntPtr]::Zero
     while ($hwnd -eq [IntPtr]::Zero -and $sw.ElapsedMilliseconds -lt 15000) {
-        $hwnd = [M0Win]::Find([uint32]$proc.Id, 'Kaleido M0')
+        $hwnd = [M0Win]::Find([uint32]$proc.Id, $WindowTitle)
         if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 2 }
     }
     if ($hwnd -eq [IntPtr]::Zero) { throw 'Okno Kaleida se do 15 s neobjevilo.' }
@@ -102,8 +109,9 @@ function Start-Kaleido([string[]]$Arguments) {
 }
 
 # Quoted so that paths with spaces stay one argument. In an array literal the comma binds
-# tighter than +, so the concatenation must stay in parentheses.
-function Get-ClipArguments { @('--', ('"' + $Clip + '"')) }
+# tighter than +, so the concatenation must stay in parentheses. --start=0: Kaleido resumes a clip
+# where the last run closed it (save-position-on-quit), and each run must play the same part.
+function Get-ClipArguments { @('--start=0', '--', ('"' + $Clip + '"')) }
 
 function Measure-Cpu([int[]]$Ids, [int]$Seconds) {
     $procs = @($Ids | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue } | Where-Object { $_ })
@@ -184,9 +192,9 @@ if ($PlaySample -lt 3) { throw "Klip má jen $Length s; na měření přehrává
 "Logické procesory: $Cores"
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Exe).Hash
 "Exe: $Exe ($((Get-Item -LiteralPath $Exe).LastWriteTime), SHA-256 $($hash.Substring(0, 16))…)"
-$RepoExe = Join-Path $PSScriptRoot '..\target\release\kaleido-proto.exe'
+$RepoExe = Join-Path $PSScriptRoot '..\target\release\Kaleido.exe'
 if (Test-Path -LiteralPath $RepoExe) {
-    "Shoda s target/release/kaleido-proto.exe: $(if ((Get-FileHash -Algorithm SHA256 -LiteralPath $RepoExe).Hash -eq $hash) { 'ano' } else { 'ne' })"
+    "Shoda s target/release/Kaleido.exe: $(if ((Get-FileHash -Algorithm SHA256 -LiteralPath $RepoExe).Hash -eq $hash) { 'ano' } else { 'ne' })"
 }
 "Klip: {0} ({1:N1} s)" -f $Clip, $Length
 Get-CimInstance Win32_VideoController | ForEach-Object { "Grafika: $($_.Name), $($_.CurrentHorizontalResolution)x$($_.CurrentVerticalResolution) @ $($_.CurrentRefreshRate) Hz" }

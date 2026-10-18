@@ -6,7 +6,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['dist', 'prototype', 'target', 'vendor', 'src-tauri/gen']),
+  globalIgnores(['dist', 'target', 'vendor', 'src-tauri/gen', 'e2e/driver', 'e2e/media']),
   js.configs.recommended,
   tseslint.configs.strict,
   {
@@ -28,8 +28,8 @@ export default defineConfig([
     rules: { 'i18next/no-literal-string': ['error', { mode: 'jsx-only' }] },
   },
   {
-    // Tooling runs in Node, not in the WebView.
-    files: ['*.config.{js,ts}', 'vitest.setup.ts'],
+    // Tooling and the E2E run (WebdriverIO) run in Node, not in the WebView.
+    files: ['*.config.{js,ts}', 'vitest.setup.ts', 'e2e/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
 ]);

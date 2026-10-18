@@ -7,13 +7,13 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    // The repo root also holds Rust build output (target/), vendored binaries and the
-    // prototype; watching them would burn CPU and reload the UI on every cargo build.
+    // The repo root also holds Rust build output (target/), vendored binaries and the E2E
+    // run's driver and clip; watching them would burn CPU and reload the UI on every cargo build.
     watch: {
       ignored: [
         '**/src-tauri/**',
         '**/crates/**',
-        '**/prototype/**',
+        '**/e2e/**',
         '**/target/**',
         '**/vendor/**',
         '**/.claude/**',
@@ -24,7 +24,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
-    // Not the prototype's tests, which run from its own folder.
+    // The UI's unit tests only; the E2E spec (e2e/*.e2e.ts) runs in WebdriverIO against the built app.
     include: ['src/**/*.test.{ts,tsx}'],
     // Vitest does not process CSS: a stylesheet imports as "" and a CSS module as a proxy of its
     // class names (`App.test.tsx` and the like need nothing more). The exception is a stylesheet

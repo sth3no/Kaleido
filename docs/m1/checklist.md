@@ -1,12 +1,251 @@
 # M1 – ruční kontrola
 
-Task 24 tento seznam doplní (vzhled ostrůvků a skla, výkon, Mica, vysoký kontrast, otevřené body
-z M0). Výsledky zapisuj sem, nebo je pošli Claudovi v chatu.
+Co testy nepokryjí: vzhled, skutečný hardware (měřítko, dva monitory, HDR, GPU), Windows (Snap
+Layouts, Mica, průhlednost, vysoký kontrast, Průzkumník, prohlížeč) a výkon. Výsledky zapisuj sem
+k bodu, nebo je pošli Claudovi v chatu.
 
-## Ověřit ve velkém průchodu
+Automaticky běží (ručně neopakovat; jak je spustit, říká [README.md](../../README.md)):
 
-Kontroly, které úkoly M1 připravily, ale v tichém režimu je nikdo nespustil ani neviděl. Spustit
-`npm run tauri dev` (nebo build z Task 24) a mít po ruce krátké 1080p video.
+- `cargo test --workspace`: skutečná libmpv s `vo=null` a `ao=null` (otevírání a cesty s
+  diakritikou, playlist s rozbitým souborem, sklo a jeho volby shaderu, náhledy thumbfastu,
+  nastavení a `mpv.conf`, zkratky, okno mpv a mini rozvržení, jediná instance a fronta otevření).
+- `npm test`: UI (vitest).
+- `npm run e2e`: sestavená aplikace pod WebView2. `Kaleido.exe --start=0 -- <klip>` předá klip
+  běžícímu oknu a skončí; do 5 s ukáže titulní ostrůvek název klipu a štítek 720p; přehrát/pauza
+  dojde do mpv a stav se vrátí do tlačítka; Nastavení ukáže zadokovaný mini přehrávač se třemi
+  tlačítky; ✕ ukončí `Kaleido.exe` i jeho `kaleido-mpv.exe` do 2 s.
+
+## Příprava
+
+- Vývojový běh: `npm run tauri dev` (F12 = konzole WebView2).
+- Build jako u uživatele, z kořene repozitáře:
+
+  ```powershell
+  npm run tauri build -- --no-bundle
+  cargo build --release -p kaleido-mpv
+  powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-local.ps1
+  ```
+
+  Skript nainstaluje build M1 do `%LOCALAPPDATA%\Programs\Kaleido-M0\` místo buildu M0.
+  Registrace (Přehrát v Kaleidu, Odeslat → Kaleido, Otevřít v programu) zůstává stejná jako v M0
+  ([docs/m0/local-install.md](../m0/local-install.md); `install-local.ps1` místo
+  `install-local-prototype.ps1`), nahradí ji instalátor v M4. Když Kaleido běží, skript odmítne
+  pokračovat.
+- Média: `%USERPROFILE%\Videos\kaleido-m0\` z M0 (SDR 1080p, letterbox 2.39:1, 4K 60 fps,
+  syntetické HDR10, kopie s českým názvem), skutečné HDR10 video, video s titulky a kapitolami
+  (mkv), video 4:3 a na výšku, složka s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube
+  (hraje jen s `yt-dlp` v `PATH`).
+
+## Před vydáním M1
+
+### Vzhled ostrůvků a skla
+
+- [ ] Ostrůvky (horní levý, horní pravý, spodní) a lišta vypadají jako v návrzích: zaoblené, pod
+  nimi rozmazané video, čitelný text, nic se nepřekrývá ani neořezává; totéž v okně 640×360 a v
+  maximalizovaném okně.
+- [ ] **Letterbox:** `letterbox-239.mkv` (černé pruhy nahoře a dole): rozmazání pod horními i
+  spodním ostrůvkem sedí na jejich tvar i nad pruhy, ne posunuté o výšku pruhu. Když je posunuté:
+  `OUTPUT_EXCLUDES_MARGINS = false` v `src-tauri/src/glass.rs` a zkusit znovu (M0 bod 5). Totéž s
+  videem užším než okno (pruhy vlevo a vpravo) a v mini přehrávači hned po zmenšení.
+- [ ] **Měřítko Windows 150 %** (Nastavení → Systém → Obrazovka → Měřítko): rozmazání, ⬜ (Snap
+  Layouts), časová osa i mini přehrávač sedí jako při 100 %, text je ostrý.
+- [ ] **Dva monitory s různým měřítkem** (třeba 100 % a 150 %): přetáhnout okno přehrávače i okno
+  v mini režimu z jednoho na druhý a zpět, a na každém maximalizovat: video vyplní okno (žádný pruh
+  ani zmáčknutý obdélník), rozmazání po puštění okna sedí, mini zůstane v rohu (M0 body 4 a 5).
+- [ ] 10 s rychle měnit velikost okna a přesouvat ho: nic nebliká, nezůstávají černé ani bílé
+  okraje (M0 bod 1).
+- [ ] Po 2,5 s bez pohybu myši ostrůvky zmizí a rozmazání s nimi, bez bliknutí; zapsat, kdyby na
+  chvíli zůstal rozmazaný obdélník bez ostrůvku (M0 bod 5).
+
+### Snap Layouts a přetažení odkazu (hroty z Task 16 a z Task 5 a 17)
+
+Oba hroty se zkoušejí v sekcích níže; výsledek zapsat sem.
+
+- [ ] **Snap Layouts** (Task 16, pokus 1: malé okno Win32 nad ⬜, přepínač `SNAP_LAYOUTS` v
+  `src/shell/captionButtons.ts`): podle sekce „Okno a horní ostrůvky“ sem zapsat **funguje**, nebo
+  **vypnuto, Snap Layouts zatím jen přes Win+Z**.
+- [ ] **Přetažení z prohlížeče** (Task 5 a 17: soubory přes `postMessageWithAdditionalObjects`,
+  odkazy z `text/uri-list`, zpráva o dropu je JSON objekt): podle sekce „Úvodní obrazovka, vložení
+  a přetažení“ sem zapsat, ze kterých prohlížečů odkaz hraje. Kdyby nehrál odnikud, záložní cesta
+  z plánu (rozhodnutí 8) je drop Tauri jen pro soubory a přetažení odkazu zůstane otevřené.
+
+### Mica, Snížit průhlednost, vysoký kontrast, čeština a angličtina
+
+- [ ] **Mica** (Windows 11): úvodní obrazovka, Nastavení a stránka kolem mini přehrávače mají
+  pozadí Mica (jemně probarvené tapetou), ne černé a ne průhledné na plochu. Nastavení → Vzhled →
+  Mica vypnout: gradient. Zapsat, kdyby Mica nebyla vidět vůbec (Task 14: okno bez rámečku ji může
+  potřebovat zapnout jinak, přes `DwmExtendFrameIntoClientArea`).
+- [ ] **Windows 10 22H2** (jiný počítač nebo VM, pokud je po ruce): místo Mica neprůhledné pozadí
+  s gradientem, nic neprosvítá (spec 11.1).
+- [ ] **Snížit průhlednost** ve Windows (Nastavení → Přizpůsobení → Barvy → Efekty průhlednosti
+  vypnout) i v Kaleidu (Nastavení → Vzhled → Snížit průhlednost): ostrůvky, panely, karty a pruh
+  mini přehrávače jsou neprůhledné a bez rozmazání; `I` → `2` v mpv neukazuje průchody
+  `kaleido-glass`. Přepnutí ve Windows za běhu se projeví nejpozději po návratu do okna Kaleida
+  (známé omezení: změnu za běhu Kaleido čte při získání fokusu).
+- [ ] **Vysoký kontrast** (Windows: Usnadnění → Kontrastní motivy): všude systémové barvy, žádné
+  sklo; tlačítka, posuvníky, časová osa a značky kapitol jsou vidět a fokus je vidět. Po vypnutí se
+  vzhled vrátí.
+- [ ] **Světlý režim** (Windows ve světlém režimu, nebo Vzhled → Barevný režim → Světlý): sklo je
+  světlé, ne tmavě tónované z tmavého režimu (Ruling R35); text je čitelný a fokus vidět.
+- [ ] **Čeština a angličtina:** česká Windows → UI česky. Vzhled → Jazyk → English: celé UI hned
+  anglicky, bez restartu (ostrůvky, panely, karty chyb, Nastavení, O aplikaci); Systém → zpět
+  česky. Po restartu s jazykem English zapsat, jestli první snímek na chvíli ukáže češtinu
+  (Task 15). Popisky filtrů v dialogu Otevřít soubor jdou podle jazyka Windows, ne podle nastavení:
+  známé omezení.
+- [ ] **České texty projít** (Task 23: zatím je nikdo nečetl): pravopis, všude stejné názvy věcí,
+  nic nepřetéká ani se neořezává; čísla a procenta po česku (`1,5×`, `90 %` s pevnou mezerou),
+  anglicky `1.5×` a `90%`.
+
+### Výkon (spec 13): `scripts/measure.ps1`
+
+Cíle: okno do 500 ms, první snímek do 1 s, CPU v pauze pod 1 %, při přehrávání nejvýš o 2
+procentní body víc než samotná libmpv a UI nepřekresluje, sklo do 1 ms GPU ve 4K, WebView2 do
+200 MB. Skript měří místní instalaci (Příprava; vedle `target\release\Kaleido.exe` chybí
+`libmpv-2.dll`). Z kořene repozitáře, během měření nehýbat myší:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure.ps1 -Clip "$env:USERPROFILE\Videos\kaleido-m0\uhd-2160p.mkv"
+```
+
+Výstup skriptu zapsat sem nebo poslat Claudovi.
+
+- [ ] RTX 5060 Ti, `sdr-1080p.mkv`: okno, CPU při přehrávání proti referenci, CPU v pauze, paměť
+  WebView2, zavření.
+- [ ] RTX 5060 Ti, `uhd-2160p.mkv`.
+- [ ] Integrovaná AMD (Windows: Nastavení → Systém → Obrazovka → Grafika → `Kaleido.exe` a
+  `kaleido-mpv.exe` → Úspora energie), oba klipy (v M0 neměřeno).
+- [ ] **Sklo ve 4K:** `uhd-2160p.mkv` na celé obrazovce s viditelnými ostrůvky, `I` → `2` (časy
+  průchodů): součet `kaleido-glass` blur H, blur V a composite do 1 ms, na obou GPU (M0 bod 5).
+- [ ] **První snímek do 1 s** skript neměří: záznam obrazovky (Win+Alt+R) dvojkliku na video v
+  Průzkumníku při zavřeném Kaleidu, od kliknutí po první snímek videa; zapsat čas.
+
+### HDR10 (M0 body 2 a 7)
+
+- [ ] Windows HDR zapnuté → HDR10 video: štítek „HDR“ v titulním ostrůvku, světla jasnější než
+  bílé UI, UI není vybledlé.
+- [ ] Windows HDR vypnuté → totéž video je tónově mapované, barvy nejsou vybledlé.
+- [ ] Náhledy na časové ose u HDR videa nejsou šedé ani přepálené, se zapnutým i vypnutým HDR.
+
+### Jediná instance (Ruling R9)
+
+`tauri-plugin-single-instance` je ve verzi 2.5.4, nejnovější 2.x (ověřeno 2026-10-18; novější je
+jen 3.0.0-alpha). Oprava startovního závodu na Windows, kterou chce spec 9.3, přišla až po 2.5.4:
+když se dvě spuštění sejdou za studena téměř současně, může vzniknout druhé okno, nebo se ztratí
+první požadavek. Až vyjde 2.x s opravou, zvednout verzi v `src-tauri/Cargo.toml`.
+
+- [ ] Kaleido zavřené: v Průzkumníku označit tři videa a Enter; zvlášť Odeslat → Kaleido se třemi
+  soubory; zvlášť rychle za sebou dvojklik na dvě videa. Každé pětkrát. Vždy jedno okno a všechna
+  videa v jednom playlistu v pořadí z Průzkumníku; zapsat, kolikrát vzniklo druhé okno nebo nějaké
+  video chybělo.
+- [ ] Kaleido běží: video otevřené z Průzkumníku hraje ve stejném okně a okno se obnoví z
+  minimalizace a přejde do popředí. S Nastavení → Přehrávání → Při otevření souboru za běhu →
+  Přidat do playlistu se video přidá na konec a přehrávání se nepřeruší.
+
+### Otevírání z Windows (M0 bod 9)
+
+Po místní instalaci (Příprava):
+
+- [ ] Klasické menu „Přehrát v Kaleidu“, Odeslat → Kaleido a „Otevřít v programu ›“ otevřou video
+  v M1, za studena i do běžícího okna; soubor s diakritikou a mezerami v názvu také.
+- [ ] **Po odhlášení a novém přihlášení** (registraci mezitím neměnit): pravé tlačítko na `.mkv` →
+  Otevřít v programu → Vybrat jinou aplikaci: je v seznamu Kaleido? Ano = hypotéza stavu z
+  přihlášení potvrzená; ne = čistý profil nebo VM a Procmon (docs/m0/report.md, sekce Open with).
+- [ ] `scripts/install-local.ps1 -ChooseDefault` → v Nastavení Windows vybrat Kaleido pro `.mkv` →
+  `scripts/diagnose-associations.ps1` (sekce 3) ukáže `Kaleido.M0.Video` a dvojklik na `.mkv`
+  otevře Kaleido.
+
+### Vstup a fullscreen (M0 body 3 a 4)
+
+- [ ] Mezerník = pauza; šipky ←/→ přetáčí o 5 s, ↑/↓ o minutu; podržená šipka přetáčí plynule a po
+  puštění přestane; pustit Ctrl dřív než šipku (Ctrl+šipka) → nic se nezasekne.
+- [ ] `Alt+F4` zavře aplikaci a pozice se uloží jako u ✕.
+- [ ] 10× rychle za sebou fullscreen (tlačítko, `f`, dvojklik do videa) → nic se nezasekne,
+  nezůstane černá clona ani špatná ikona.
+- [ ] **Kolečko při měřítku 125 % a 150 %:** jeden zářez kolečka nad videem změní hlasitost právě o
+  jeden krok (2), ne o dva ani o nic (Task 7: Chromium může při necelém měřítku hlásit jiný posun
+  než 100 px na zářez). Touchpad: posun dvěma prsty mění hlasitost po krocích, ne skokem.
+- [ ] **Boční tlačítka myši** (Zpět, Vpřed) nad videem dělají, co mají v mpv (výchozí: předchozí a
+  další v playlistu), a okno nikdy „nepřejde zpět“ (bílá stránka, nové načtení UI). Totéž zkusit nad
+  úvodní obrazovkou a nad Nastavením: tam Kaleido navigaci WebView2 neblokuje (Ruling R19 jen na
+  vrstvě videa); zapsat, kdyby se stránka vrátila nebo načetla znovu.
+
+### Snímky obrazovky (Task 8, rozhodnutí plánu 5)
+
+- [ ] S ostrůvky viditelnými nad videem: `s` (s titulky), `S` (jen video), `Ctrl+s` (okno) a `Alt+s`
+  (každý snímek: zapnout, pár sekund, vypnout) → soubory na Ploše; v žádném nejsou rozmazané
+  obdélníky skla. (Snímek, který plugin pořídí přímo příkazem `screenshot`, sklo obsahuje: M1 to
+  přijímá a říká to O aplikaci.)
+
+### Otevřít soubor a titulky ze souboru (Task 5, 17 a 20)
+
+- [ ] Úvodní obrazovka → Otevřít soubor, a `Ctrl+O` při přehrávání: dialog Windows s filtrem videí;
+  několik vybraných souborů je jeden playlist v pořadí výběru; Zrušit nic neudělá.
+- [ ] Rychlé nastavení (tlačítko Titulky) → titulky ze souboru: dialog s filtrem titulků (`.srt`,
+  `.ass`, …); vybrané titulky se ukážou a jsou vybrané v seznamu stop.
+
+### Karty chyb, načítání a indikátor (Task 19)
+
+- [ ] **Rozbitý soubor uprostřed playlistu** (složka s poškozeným nebo nepodporovaným souborem,
+  odkaz s 404): karta chyby se srozumitelnou zprávou, správným názvem souboru a textem, že přehrávání
+  pokračuje dalším souborem; „Podrobnosti“ rozbalí úryvek logu; přehrávání opravdu pokračuje.
+- [ ] Jediný rozbitý soubor: okno je na úvodní obrazovce a karta nabídne „Otevřít soubor“ (dialog
+  se otevře).
+- [ ] Karta zmizí po 8 s nebo po ✕; nejvýš tři najednou; rozmazání pod kartami sedí. Z klávesnice k
+  nim Tab dojde přes ostrůvky (do 8 s: známé omezení).
+- [ ] `Ctrl+V` bez odkazu ve schránce **při přehrávání** a v Nastavení ukáže upozornění v kartě
+  (Ruling R40); přetažený odkaz, který Kaleido odmítne, také.
+- [ ] **Načítání:** pomalý odkaz (YouTube s `yt-dlp`) ukazuje při načítání název serveru a potom
+  název videa; nic nebliká.
+- [ ] **Indikátor:** šipky, `9` a `0`, `m`, `[` a `]` krátce ukážou skleněný indikátor (přetáčení,
+  hlasitost, rychlost) se správnou hodnotou, i se skrytým ovládáním; rozmazání pod ním sedí; v
+  Nastavení a v mini přehrávači se neukazuje.
+
+### Panely: Rychlé nastavení a Playlist (Task 20)
+
+- [ ] Tlačítko Titulky otevře nad sebou Rychlé nastavení (záložky Titulky a Zvuk), tlačítko
+  Playlist playlist; panel se vysune pružně (150–250 ms), s vypnutými animacemi se jen prolne;
+  rozmazání pod panelem sedí.
+- [ ] Výběr stopy titulků a zvuku, velikost titulků (posuvník) a vypnutí titulků se v mpv projeví
+  hned; při tažení posuvníku se video nepřetáčí.
+- [ ] Playlist: aktuální položka je označená, klik ji přehraje, tažení přeřadí (u okraje se seznam
+  sám neposouvá: známé omezení), z klávesnice přeřazení podle nápovědy, odebrání. Při měřítku UI 90
+  % a 150 % a v okně 640×360 panel nepřesahuje okno.
+- [ ] Esc panel zavře a fokus se vrátí na tlačítko (z klávesnice); po zavření myší (klik vedle, na
+  tlačítko, do videa) nemá fokus nic a mezerník pozastaví video (Ruling R44). Klik do videa s
+  otevřeným panelem panel jen zavře.
+- [ ] Všechno najednou (panel, karta chyby, indikátor a ostrůvky): má rozmazání každý prvek? Oblastí
+  skla je omezený počet; zapsat, který zůstal bez rozmazání.
+
+### Nastavení (Task 22 a 23)
+
+- [ ] Sekce Přehrávání, Titulky, Zvuk, Obraz, Vzhled, Zkratky a O aplikaci: změna, která platí
+  hned, se při přehrávání projeví hned (velikost a barva titulků, maximální hlasitost, …), ta, která
+  potřebuje restart, to řekne. V `%APPDATA%\Kaleido\mpv.conf` se mění jen blok Kaleida; vlastní
+  řádky a komentáře zůstanou (spec 8.10).
+- [ ] **Okraj titulků** (Barva okraje, Šířka okraje = `sub-border-*`): po změně není v
+  `%LOCALAPPDATA%\Kaleido\logs\mpv.log` varování „was replaced with“ (Task 10: v novém mpv to mohou
+  být zastaralé aliasy `sub-outline-*`). Zapsat, kdyby bylo.
+- [ ] Hledání najde položky podle názvu i popisu, i bez diakritiky; ↓ a Enter skočí do výsledků,
+  Esc zpět do pole.
+- [ ] Rozbalovací seznamy (písmo, zvukové zařízení, …) se otevírají ve stránce a nepřekryjí mini
+  přehrávač; poslední položku stránky jde odsunout nad mini přehrávač.
+- [ ] Barvy: hex a vzorek; neplatný hex se neuloží a pole řekne proč.
+- [ ] Vzhled: tónování, krytí, rozmazání, sytost a zaoblení skla, barva zvýraznění a měřítko
+  rozhraní 90–150 % se projeví hned a náhled jim odpovídá; „Obnovit výchozí“ vrátí hodnoty.
+- [ ] **Zkratky:** Změnit → nová klávesa → zkratka se přesune a hned funguje; obsazená klávesa →
+  otázka Nahradit / Zrušit; Obnovit vrátí výchozí; Tab a klávesa Windows se odmítnou s
+  vysvětlením. Zkratky pluginů (stats, thumbfast) jsou ve skupinách se svým jménem.
+- [ ] **O aplikaci:** verze Kaleida a libmpv, seznam licencí; odkazy na zdroje Kaleida a libmpv
+  otevřou prohlížeč, a to jednou; Kopírovat diagnostiku dá do schránky text se zakrytými cestami k
+  souborům; Otevřít logy otevře Průzkumník ve složce `%LOCALAPPDATA%\Kaleido\logs`; je tam poznámka o
+  snímcích z pluginů se sklem.
+
+## Podle úkolů M1
+
+Kontroly, které úkoly M1 připravily v tichém režimu. Velký průchod testů je mezitím spustil
+automaticky; tady zůstává, co je potřeba vidět. Spustit `npm run tauri dev` nebo místní instalaci
+(Příprava) a mít po ruce krátké 1080p video.
 
 ### Okno a horní ostrůvky (Task 16)
 
@@ -20,12 +259,17 @@ Kontroly, které úkoly M1 připravily, ale v tichém režimu je nikdo nespustil
 - [ ] S pokusem 1 (`SNAP_LAYOUTS = true`, výchozí): klik na ⬜ okno maximalizuje a další klik ho obnoví,
   vždy právě jednou; ikona se přepne (⬜ / dvě okna). ⬜ jde ovládat i klávesnicí (Tab, Enter).
   Známé omezení: nad ⬜ stránka nevidí myš, takže tlačítko při najetí nezesvětlí.
+- [ ] Najet na ⬜, počkat na nabídku rozložení a pak na ⬜ kliknout (bez výběru rozložení): okno se
+  maximalizuje. Nabídka nesmí zmizet hned po otevření a klik nesmí propadnout (Task 16: sledování
+  odchodu myši a ztráty zachycení myši nad ⬜).
 - [ ] Přetáhnout okno za horní levý ostrůvek (název videa) i za pozadí pravého ostrůvku; na úvodní
   obrazovce a v Nastavení za prázdný pruh nahoře vpravo od lišty.
-- [ ] Dvojklik na horní levý ostrůvek okno maximalizuje a obnoví. S pokusem 1 ukáže pravé tlačítko
-  na ostrůvku systémovou nabídku okna (Obnovit, Přesunout, Minimalizovat…).
+- [ ] Dvojklik na horní levý ostrůvek okno maximalizuje a obnoví, vždy právě jednou (ne maximalizovat
+  a hned zase obnovit). S pokusem 1 ukáže pravé tlačítko na ostrůvku systémovou nabídku okna
+  (Obnovit, Přesunout, Minimalizovat…).
 - [ ] — minimalizuje okno; obnovení z hlavního panelu vrátí video na celé okno.
-- [ ] ✕ zavře aplikaci do 2 s a uloží pozici (další otevření téhož videa pokračuje, kde skončilo).
+- [ ] ✕ zavře aplikaci (do 2 s hlídá E2E) a uloží pozici: další otevření téhož videa pokračuje,
+  kde skončilo.
 - [ ] ☰ (myší i Enter) otevře lištu nad videem; najetí k levému okraji okna ji ukáže a odjetí
   doprava ji zase schová; Esc ji zavře a video přitom **neopustí** fullscreen; šipky nahoru a dolů
   přecházejí mezi Přehrávačem a Nastavením; klik vedle lišty ji zavře a video se nepozastaví.
@@ -41,8 +285,7 @@ Kontroly, které úkoly M1 připravily, ale v tichém režimu je nikdo nespustil
 
 ### Měřítko UI 90 % a 150 % (Task 16)
 
-Měřítko je v Nastavení → Vzhled (Task 22); do té doby `"uiScale": 0.9` nebo `1.5` v části
-`appearance` souboru `%APPDATA%\Kaleido\settings.json` (a znovu spustit).
+Nastavení → Vzhled → Měřítko rozhraní.
 
 - [ ] Rozmazání pod horními ostrůvky a pod otevřenou lištou sedí přesně na jejich tvar (zaoblené
   konce, žádný posun) při 90 % i 150 %, i po přetažení okna na monitor s jiným měřítkem.
@@ -85,8 +328,8 @@ s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten hraje jen s 
   otevře roadmapu v prohlížeči, a to jednou. Tab projde Otevřít soubor, Vložit odkaz, Co chystáme.
 - [ ] Nic z ovládání úvodní obrazovky neleží v horním pruhu (48 px), kde se okno přetahuje; při
   nízkém okně (640×360) se obsah dá posunout a nahoře se nic neořízne.
-- [ ] Známé omezení M1: Ctrl+V bez odkazu ve schránce **při přehrávání** pole neukáže (pole je jen na
-  úvodní obrazovce). Zapsat sem, jestli to vadí.
+- [ ] Ctrl+V bez odkazu ve schránce **při přehrávání** pole neukáže (pole je jen na úvodní
+  obrazovce); místo něj přijde upozornění v kartě (viz „Karty chyb, načítání a indikátor“).
 
 ### Spodní ostrůvek, časová osa, autohide a fullscreen (Task 18)
 
@@ -99,12 +342,12 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   (`0:05:12` a `1:42:00`). Při objevení se ostrůvek vysune zdola a prolne (s vypnutými animacemi
   ve Windows se jen prolne). Rozmazání pod ním sedí přesně na jeho tvar, i při měřítku UI 90 % a
   150 % a v okně 640×360 (nic se nepřekrývá ani neřeže).
-- [ ] **Náhled na časové ose:** najetí na lištu ukáže nad ní bublinu s náhledem snímku a časem pod
-  ukazatelem; náhled jde za myší plynule a bez zpoždění, před prvním náhledem je v bublině jen
-  čas. U levého i pravého okraje okna bublina okno nepřesáhne. Rozmazání pod bublinou sleduje
-  bublinu (nezůstane na starém místě). Odjetí bublinu schová a po novém najetí se neukáže starý
-  snímek; po přepnutí na další video v playlistu také ne. Rychlé jezdění myší po liště UI ani mpv
-  nezahltí (požadavky na náhled jdou nejvýš asi 33× za sekundu).
+- [ ] **Náhled na časové ose:** najetí na lištu ukáže do 300 ms nad ní bublinu s náhledem snímku a
+  časem pod ukazatelem (M0 bod 7); náhled jde za myší plynule a bez zpoždění, před prvním náhledem
+  je v bublině jen čas. U levého i pravého okraje okna bublina okno nepřesáhne. Rozmazání pod
+  bublinou sleduje bublinu (nezůstane na starém místě). Odjetí bublinu schová a po novém najetí se
+  neukáže starý snímek; po přepnutí na další video v playlistu také ne. Rychlé jezdění myší po
+  liště UI ani mpv nezahltí (požadavky na náhled jdou nejvýš asi 33× za sekundu).
 - [ ] **Tažení za lištu:** video se při tažení přetáčí (rychle, po klíčových snímcích) a po
   puštění skočí přesně na místo; čas a lišta při tažení ukazují polohu myši a po puštění
   neskočí zpět; tažení pokračuje, i když myš vyjede z lišty. Prostý klik na lištu přeskočí na
@@ -130,8 +373,7 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
   ho; po skrytí ostrůvku sjedou dolů, ale **ne na spodní hranu**: na vlastní okraj mpv (výchozí
   `sub-margin-y=34` u přibaleného libmpv, nebo hodnota z `mpv.conf`; zkusit `sub-margin-y=60` a ověřit, že skrytí
   ostrůvku nechá titulky ve výšce 60, ne níž); po návratu ostrůvku zase nahoru; stejně po změně
-  velikosti okna a ve fullscreenu. (Tlačítka Titulky a Playlist zatím jen nastaví, který panel je otevřený:
-  panely přijdou s Task 20; tlačítko Titulky má `aria-expanded`.)
+  velikosti okna a ve fullscreenu.
 - [ ] **Autohide:** při přehrávání po 2,5 s bez pohybu myši zmizí spodní ostrůvek, oba horní ostrůvky
   a kurzor; pohyb myši i kterákoli klávesa (a kolečko, klik) je hned vrátí. V pauze, při načítání
   a při otevřené postranní liště ☰ zůstávají. Zůstávají i tehdy, když myš v klidu leží nad
@@ -166,20 +408,21 @@ s kapitolami (mkv), video s titulky, složka s několika videi (playlist). `npm 
 
 ### Mini přehrávač (Task 21)
 
-Potřeba: video 16:9, video 4:3 a video na výšku (z telefonu), složka s několika videi. Stránka
-Nastavení je do Task 22 prázdná; mini přehrávač je na ní i tak.
+Potřeba: video 16:9, video 4:3 a video na výšku (z telefonu), složka s několika videi, video 2.39:1
+s letterboxem.
 
 - [ ] **Otevřít Nastavení během přehrávání** (lišta → Nastavení): video se asi za čtvrt vteřiny
   plynule zmenší do pravého dolního rohu (360 px široké, 16 px od okrajů) a okno mpv jde s
-  rámečkem snímek po snímku. Zapsat sem, jestli video za rámečkem viditelně zaostává (spec 8.6:
-  pak náhradní cesta skok + prolnutí, která už je hotová pro omezené animace). Kolem videa je
-  stránka neprůhledná (gradient; ve Windows 11 s Mica pozadí Mica), nikde neprosvítá plocha ani
-  černá, ani během animace.
+  rámečkem snímek po snímku. Záznam 60 fps (Win+Alt+R) při zmenšení i zvětšení: hrana videa
+  zaostává za rámečkem nejvýš o jeden snímek (M0 bod 6); když víc, zapsat (spec 8.6: pak náhradní
+  cesta skok + prolnutí, která už je hotová pro omezené animace). Kolem videa je stránka
+  neprůhledná (gradient; ve Windows 11 s Mica pozadí Mica), nikde neprosvítá plocha ani černá, ani
+  během animace.
 - [ ] **Rámeček:** zaoblené rohy (roh videa nepřečnívá přes zaoblení), tenký okraj a stín. Po
   dojetí do rohu se dole prolne skleněný pruh s ▶/❚❚, „Zpět do přehrávače“ a „Zastavit“.
   **Rozmazání pod pruhem sedí přesně na pruh** (ne posunuté k levému hornímu rohu okna: Ruling
   R45, Rust posouvá oblasti skla o místo okna mpv), i při měřítku UI 90 % a 150 % a na monitoru
-  se 150 %. Žádné rozmazání nikde jinde.
+  se 150 %, i u videa s letterboxem hned po zmenšení. Žádné rozmazání nikde jinde.
 - [ ] ▶/❚❚ video pozastaví a pustí (ikona i popisek se změní); „Zastavit“ video zastaví, mini
   přehrávač zmizí a Nastavení zůstane; „Zpět do přehrávače“ video plynule zvětší na celé okno a
   ukáže přehrávač s ovládáním.
@@ -205,8 +448,8 @@ Nastavení je do Task 22 prázdná; mini přehrávač je na ní i tak.
   mu rozvržení po vytvoření znovu nepošle (Task 6): zapsat sem, jestli video zůstane v rohu, nebo
   skočí na celé okno (pak je v díře vidět jen jeho výřez nebo nic) a vrátí se až po změně
   velikosti okna.
-- [ ] **Měřítko UI** (Nastavení → Vzhled, Task 22) změněné při mini přehrávači: mini se zvětší nebo
-  zmenší s UI (při 150 % je 540 px široké) a díra pořád sedí na video.
+- [ ] **Měřítko UI** (Nastavení → Vzhled → Měřítko rozhraní) změněné při mini přehrávači: mini se
+  zvětší nebo zmenší s UI (při 150 % je 540 px široké) a díra pořád sedí na video.
 - [ ] **Omezené animace** (Windows: Nastavení → Usnadnění → Vizuální efekty → Efekty animace
   vypnout): po otevření Nastavení je video hned v rohu, nic se nehýbe a rámeček s videem se
   prolnou; „Zpět do přehrávače“ skočí na celé okno bez pohybu a přehrávač se prolne z pozadí
@@ -214,9 +457,10 @@ Nastavení je do Task 22 prázdná; mini přehrávač je na ní i tak.
 - [ ] **Žádná spára (Ruling R47):** při měřítku Windows 100, 125, 150 a 175 % a v okně libovolné
   velikosti (tažením za okraj po jednom pixelu) není mezi stránkou a videem ani na jedné straně
   světlá nebo černá linka (okno mpv sahá na každé straně o pixel pod stránku).
-- [ ] **Stránka nekreslí přes video (Ruling R46):** obsah Nastavení u pravého dolního rohu (až bude,
-  Task 22: dlouhý seznam posunutý dolů, rozbalená nabídka) je v díře useknutý a video zůstává
-  celé vidět; během zmenšování se text stránky nekreslí přes zmenšující se video.
+- [ ] **Stránka nekreslí přes video (Ruling R46):** obsah Nastavení u pravého dolního rohu (dlouhý
+  seznam posunutý dolů, rozbalená nabídka) je v díře useknutý a video zůstává celé vidět; během
+  zmenšování se text stránky nekreslí přes zmenšující se video. Skleněné prvky stránky vypadají s
+  mini přehrávačem stejně jako bez něj.
 - [ ] **Fokus z klávesnice:** Tab na „Zastavit“ a Enter: video se zastaví a fokus je na první
   položce stránky (bez ní na položce Nastavení v liště), ne nikde. Tab na „Zpět do přehrávače“
   a Enter: přehrávač se vrátí a fokus je na tlačítku přehrát/pozastavit (viditelný fokus).

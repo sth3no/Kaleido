@@ -14,7 +14,7 @@ import {
   type Rect,
 } from './mini';
 
-// Ported from the M0 prototype (prototype/src/surface/mini.test.ts), with M1's numbers: 360 px
+// Ported from the M0 prototype's tests (branch m0-prototype), with M1's numbers: 360 px
 // wide, 16 px from the corner.
 
 describe('mini player geometry', () => {

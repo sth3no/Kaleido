@@ -1,6 +1,14 @@
 ﻿#Requires -Version 5.1
 <#
-Install the standalone M0 build and its per-user shell registration.
+Install the local M1 build (the release Kaleido.exe with its UI inside) and its per-user shell
+registration. Build it first, from the repository root:
+
+    npm run tauri build -- --no-bundle
+    cargo build --release -p kaleido-mpv
+
+The registration is the one M0 made, unchanged until the M4 installer replaces it: the same
+install folder (Programs\Kaleido-M0), ProgID, verb, Capabilities key and shortcuts, so that an
+existing M0 installation is updated in place and keeps its registration and the user's choices.
 
 Capability registration only (Microsoft "Application Registration" / "Default Programs"):
 Applications\Kaleido.exe, one ProgID, Classes\<ext>\OpenWithProgids, Capabilities +
@@ -17,7 +25,7 @@ installation.
 param(
     [switch]$Unregister,
     [switch]$ChooseDefault,
-    # Folder with the release kaleido-proto.exe and kaleido-mpv.exe (another worktree's build is fine).
+    # Folder with the release Kaleido.exe and kaleido-mpv.exe (another worktree's build is fine).
     [string]$BuildDir
 )
 
@@ -156,14 +164,24 @@ if ($Unregister) {
         if ((Test-Path -LiteralPath $Link) -and -not (Test-ShortcutOurs $Link)) { throw "Another program owns $Link." }
     }
 
+    # The layout Kaleido reads (spec 4.3): the bundled files under resources\ next to the exe.
+    # tauri-build puts them in the build folder as bundle.resources in src-tauri\tauri.conf.json
+    # maps them, so they are the ones of that build.
+    $Bundled = @(
+        'resources\essentials\thumbfast.lua',
+        'resources\defaults\mpv.conf',
+        'resources\defaults\input.conf',
+        'resources\licenses\extra.json',
+        'resources\licenses\third-party.json'
+    )
     $Files = @(
-        @{ Source = Join-Path $BuildDir 'kaleido-proto.exe'; Destination = 'Kaleido.exe' },
+        @{ Source = Join-Path $BuildDir 'Kaleido.exe'; Destination = 'Kaleido.exe' },
         @{ Source = Join-Path $BuildDir 'kaleido-mpv.exe'; Destination = 'kaleido-mpv.exe' },
         @{ Source = Join-Path $RepoRoot 'vendor\libmpv\libmpv-2.dll'; Destination = 'libmpv-2.dll' },
-        @{ Source = Join-Path $RepoRoot 'vendor\thumbfast\thumbfast.lua'; Destination = 'resources\thumbfast.lua' },
-        @{ Source = Join-Path $RepoRoot 'prototype\src-tauri\test-scripts\click-target.lua'; Destination = 'resources\click-target.lua' },
         @{ Source = Join-Path $RepoRoot 'LICENSE'; Destination = 'LICENSE' }
-    )
+    ) + @($Bundled | ForEach-Object { @{ Source = Join-Path $BuildDir $_; Destination = $_ } })
+    # What the M0 build had there and M1 reads from elsewhere (resources\essentials) or not at all.
+    $Retired = @('resources\thumbfast.lua', 'resources\click-target.lua')
     foreach ($File in $Files) {
         if (-not (Test-Path -LiteralPath $File.Source -PathType Leaf)) {
             throw "Missing $($File.Source). Build the release app and kaleido-mpv first (or pass -BuildDir)."
@@ -174,10 +192,15 @@ if ($Unregister) {
         Where-Object { $_.Path -and $_.Path.StartsWith($InstallDir, [StringComparison]::OrdinalIgnoreCase) })
     if ($Running.Count) { throw "Close Kaleido first (running: $(($Running | ForEach-Object { "$($_.ProcessName) $($_.Id)" }) -join ', '))." }
 
-    if (-not $PSCmdlet.ShouldProcess($InstallDir, "Install Kaleido M0 and register it for $($Extensions.Count) video extensions")) { return }
-    New-Item -ItemType Directory -Path (Join-Path $InstallDir 'resources') -Force | Out-Null
+    if (-not $PSCmdlet.ShouldProcess($InstallDir, "Install Kaleido M1 and register it for $($Extensions.Count) video extensions")) { return }
     foreach ($File in $Files) {
-        Copy-Item -LiteralPath $File.Source -Destination (Join-Path $InstallDir $File.Destination) -Force
+        $Destination = Join-Path $InstallDir $File.Destination
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Destination) -Force | Out-Null
+        Copy-Item -LiteralPath $File.Source -Destination $Destination -Force
+    }
+    foreach ($Old in $Retired) {
+        $Path = Join-Path $InstallDir $Old
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path }
     }
 
     Set-RegistrationValue $AppKey 'FriendlyAppName' 'Kaleido'

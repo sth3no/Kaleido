@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { zoomFrame } from '../theme/zoom';
 import { measure, sameRects } from './regions';
 
-// Ported from the M0 prototype (prototype/src/glass/regions.test.ts); the boxes are DOMRect's
+// Ported from the M0 prototype's tests (branch m0-prototype); the boxes are DOMRect's
 // left/top, which the video layer's tests mock as well.
 const el = (left: number, top: number, width: number, height: number, currentCSSZoom?: number) => ({
   getBoundingClientRect: () => ({ left, top, width, height }),

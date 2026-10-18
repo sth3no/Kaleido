@@ -3,6 +3,7 @@
 node_modules/
 /dist/
 /src-tauri/gen/
-/prototype/dist/
-/prototype/src-tauri/gen/
+# The E2E run's msedgedriver (e2e/fetch-driver.ps1) and its generated clip (e2e/make-media.ps1).
+/e2e/driver/
+/e2e/media/
 *.log

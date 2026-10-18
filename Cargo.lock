@@ -2034,22 +2034,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kaleido-proto"
-version = "0.0.0"
-dependencies = [
- "mpv-ffi",
- "raw-window-handle",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-single-instance",
- "tempfile",
- "windows",
-]
-
-[[package]]
 name = "keyboard-types"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
