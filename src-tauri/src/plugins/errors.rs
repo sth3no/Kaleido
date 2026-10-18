@@ -66,9 +66,9 @@ impl PluginErrors {
 /// The client names mpv gives the running plugins, to the plugins' names. `running` is
 /// `(name, script_name)` in the order the scripts were loaded: the first script of a name gets the
 /// name, the next ones `<name>2`, `<name>3`, … as `mp_new_client` numbers them (see
-/// [`super::names`]). mpv's own clients (`stats`, `console`, …) are not known here; a plugin
-/// named like one of them is numbered by mpv without this knowing, and its lines are not
-/// attributed.
+/// [`super::names`]). mpv's own clients (`stats`, `console`, …) are not known here: a plugin
+/// named like one of them is `stats2` to mpv, so its own lines are missed and the built-in
+/// script's errors are counted as the plugin's.
 pub fn clients<'a>(
     running: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> BTreeMap<String, String> {
