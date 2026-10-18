@@ -376,13 +376,14 @@ export type PlayerStateBatch = { changes: Record<string, unknown> };
 /** The payload of `system:open-request`: Rust has handed the player `count` sources. */
 export type OpenRequest = { count: number };
 
-/** The payload of `player:file-loaded`, `system:paste-empty` and `system:error`: `{}`. */
+/** The payload of `player:file-loaded`, `player:engine-restarted`, `system:paste-empty` and `system:error`: `{}`. */
 export type EmptyPayload = Record<string, never>;
 
 /** Every event Rust emits to the UI today, by name. */
 export interface EventTable {
   'player:state': PlayerStateBatch;
   'player:file-loaded': EmptyPayload;
+  'player:engine-restarted': EmptyPayload;
   'player:end-file': EndFile;
   'player:message': PlayerMessage;
   'player:log': LogLine;

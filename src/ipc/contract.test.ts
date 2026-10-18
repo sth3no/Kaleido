@@ -22,6 +22,7 @@ import glassStateJson from '../../src-tauri/tests/fixtures/ipc/glass_state.json'
 import glassStateEventJson from '../../src-tauri/tests/fixtures/ipc/glass.state.json';
 import playerCommandJson from '../../src-tauri/tests/fixtures/ipc/player_command.json';
 import playerEndFileEventJson from '../../src-tauri/tests/fixtures/ipc/player.end-file.json';
+import playerEngineRestartedEventJson from '../../src-tauri/tests/fixtures/ipc/player.engine-restarted.json';
 import playerFileLoadedEventJson from '../../src-tauri/tests/fixtures/ipc/player.file-loaded.json';
 import playerInputJson from '../../src-tauri/tests/fixtures/ipc/player_input.json';
 import playerLoadJson from '../../src-tauri/tests/fixtures/ipc/player_load.json';
@@ -180,6 +181,7 @@ const commandFixtures = {
 const eventFixtures = {
   'glass:state': glassStateEventJson,
   'player:end-file': playerEndFileEventJson,
+  'player:engine-restarted': playerEngineRestartedEventJson,
   'player:file-loaded': playerFileLoadedEventJson,
   'player:log': playerLogEventJson,
   'player:message': playerMessageEventJson,
@@ -544,7 +546,12 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(eventFixtures['glass:state'], GLASS_STATE, 'GlassState');
     expectShape(eventFixtures['settings:changed'], SETTINGS, 'Settings');
     expectShape(eventFixtures['system:appearance-changed'], SYSTEM_APPEARANCE, 'SystemAppearance');
-    for (const channel of ['player:file-loaded', 'system:paste-empty', 'system:error'] as const) {
+    for (const channel of [
+      'player:file-loaded',
+      'player:engine-restarted',
+      'system:paste-empty',
+      'system:error',
+    ] as const) {
       for (const payload of eventFixtures[channel]) expect(Object.keys(payload), channel).toEqual([]);
     }
     // What commands resolve or reject with.
@@ -629,6 +636,7 @@ const wrappers = {
 const subscribers = {
   'glass:state': events.onGlassState,
   'player:end-file': events.onEndFile,
+  'player:engine-restarted': events.onEngineRestarted,
   'player:file-loaded': events.onFileLoaded,
   'player:log': events.onLog,
   'player:message': events.onMessage,

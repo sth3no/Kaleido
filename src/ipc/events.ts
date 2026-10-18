@@ -39,6 +39,13 @@ export const onPlayerState = (callback: (payload: PlayerStateBatch) => void) =>
 export const onFileLoaded = (callback: (payload: EmptyPayload) => void) =>
   on('player:file-loaded', callback);
 
+/**
+ * The player core was restarted ("Použít" for plugins) and plays on where it was. The new core
+ * reports every property in `player:state` itself; nothing has to be asked for.
+ */
+export const onEngineRestarted = (callback: (payload: EmptyPayload) => void) =>
+  on('player:engine-restarted', callback);
+
 /** A file stopped, and why. */
 export const onEndFile = (callback: (payload: EndFile) => void) => on('player:end-file', callback);
 

@@ -5,12 +5,20 @@ pub mod command;
 pub mod engine;
 pub mod load;
 pub mod options;
+pub mod resume;
 pub mod state;
 
 pub use command::{CommandError, PlayerCommand, to_mpv};
-pub use engine::{ENGINE_OBSERVE_BASE, Engine, EngineConfig, EventLoop, Request};
+pub use engine::{
+    ENGINE_OBSERVE_BASE, Engine, EngineConfig, EntryOptions, EventLoop, QUIT_TIMEOUT, Request,
+    Restart, RestartError,
+};
 pub use load::{LoadIssue, LoadMode, open_sources};
 pub use state::{EndReason, EventSink, LogLine, PlayerEvent, StateLoop, observe_all, snapshot};
+
+/// The event that tells the UI the core was restarted ("Použít" for plugins, spec 6.3); its
+/// payload is `{}`. The new core reports every observed property itself.
+pub const ENGINE_RESTARTED_EVENT: &str = "player:engine-restarted";
 
 #[cfg(test)]
 pub(crate) mod testing {

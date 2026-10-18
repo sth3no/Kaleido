@@ -559,6 +559,25 @@ impl GlassController {
         self.send(commands);
     }
 
+    /// The core was restarted (`Engine::restart`): the commands the new core needs, which has
+    /// only the user's shaders from mpv.conf. If the glass is on: the current regions, then the
+    /// shader (so that its first frame has them). What was pushed to the old core is forgotten;
+    /// what is remembered is what these commands put there. The new core takes no screenshot of
+    /// every frame, so `each-frame` is off again and the regions are the real ones. Sends nothing
+    /// itself: the restart runs the commands on the new core before anything queued meanwhile.
+    pub fn after_restart(&self) -> Vec<Vec<String>> {
+        let mut shared = self.lock();
+        shared.each_frame = false;
+        shared.pushed = None;
+        if !shared.attached {
+            return Vec::new();
+        }
+        let wanted = shared.wanted();
+        let commands = vec![merge_opts(&wanted), self.attach()];
+        shared.pushed = Some(wanted);
+        commands
+    }
+
     /// Looks at a log line of mpv. A failure of the glass shader switches the glass off, once.
     /// Returns whether this line did.
     pub fn on_log(&self, line: &LogLine) -> bool {
@@ -1365,6 +1384,75 @@ mod tests {
         host.take();
         glass.set_user_shaders(&[]);
         assert_eq!(host.take(), [clear]);
+    }
+
+    /// A restarted core has no glass of its own: it gets the regions and then the shader, once,
+    /// from the controller's state (a new scale and `each-frame` included), and the same regions
+    /// again are not sent twice.
+    #[test]
+    fn after_a_restart_the_new_core_gets_the_regions_and_the_shader() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (host, glass, path) = started(tmp.path());
+        let panel = rect(10.0, 20.0, 100.0, 40.0, 8.0);
+        glass.set_regions(vec![panel]);
+        glass.set_scale(1.5);
+        // The old core took screenshots of every frame; the new one does not.
+        glass.screenshot(ScreenshotMode::EachFrame);
+        host.take();
+
+        let attach = cmd(&["change-list", "glsl-shaders", "append", &path]);
+        assert_eq!(
+            glass.after_restart(),
+            [merge(&regions(&[panel], 1.5)), attach.clone()]
+        );
+        assert!(
+            host.take().is_empty(),
+            "the restart runs them, not the host"
+        );
+        glass.set_regions(vec![panel]);
+        assert!(host.take().is_empty(), "the new core has these regions");
+        // A screenshot is a plain one-shot again.
+        glass.screenshot(ScreenshotMode::Video);
+        assert_eq!(
+            host.take(),
+            [
+                merge(&regions(&[], 1.5)),
+                cmd(&["screenshot", "video"]),
+                merge(&regions(&[panel], 1.5))
+            ]
+        );
+        // Every restart gives its core the same.
+        assert_eq!(
+            glass.after_restart(),
+            [merge(&regions(&[panel], 1.5)), attach]
+        );
+    }
+
+    /// A glass that is off (switched off, or failed) gives a new core nothing, and comes back as
+    /// it does on the old one.
+    #[test]
+    fn a_glass_that_is_off_gives_a_restarted_core_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (host, glass, path) = started(tmp.path());
+        let panel = rect(10.0, 20.0, 100.0, 40.0, 8.0);
+        glass.set_regions(vec![panel]);
+        glass.set_enabled(false, GlassReason::User);
+        host.take();
+
+        assert!(glass.after_restart().is_empty());
+        glass.set_enabled(true, GlassReason::User);
+        assert_eq!(
+            host.take(),
+            [
+                merge(&regions(&[panel], 1.0)),
+                cmd(&["change-list", "glsl-shaders", "append", &path])
+            ]
+        );
+
+        glass.on_log(&gpu_error("kaleido-glass blur H failed"));
+        host.take();
+        assert!(glass.after_restart().is_empty());
+        assert_eq!(glass.state(), GlassState::off(GlassReason::GpuFailure));
     }
 
     #[test]

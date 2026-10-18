@@ -23,8 +23,12 @@ use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 
 use glass::{AppHost, GlassController};
+use mpv_ffi::Mpv;
+use paths::AppPaths;
 use player::command::ScreenshotMode;
-use player::{Engine, EngineConfig, EventSink, PlayerEvent, Request, StateLoop};
+use player::{
+    Engine, EngineConfig, EventSink, PlayerEvent, Request, Restart, RestartError, StateLoop,
+};
 use surface::{Surface, WindowSync};
 use system::OpenThread;
 use system::clipboard::PasteOutcome;
@@ -167,7 +171,7 @@ pub fn run() {
 
 /// The app's setup, once the main window is there. An error ends the start (see `run`).
 fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
-    let paths = paths::AppPaths::resolve(app.handle())?;
+    let paths = AppPaths::resolve(app.handle())?;
     // First, so that everything after is logged. The logs folder is known only from here, so
     // lines logged before are not captured (the job object's failure goes to stderr). It makes
     // the folder itself, and the guard stays managed so that the writer lives as long as the app
@@ -252,6 +256,105 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     app.state::<OpenThread>().attach(app.handle().clone());
     system::fatal::started();
     Ok(())
+}
+
+/// Restarts the player core and plays on where it was ("Použít" for plugins, spec 6.3; see
+/// [`Engine::restart`]). Blocks until the new core runs: call it on a thread of its own or a
+/// blocking task, never on the main thread (it is refused there). The essentials get Kaleido's
+/// options first (plan decision 2: the scripts read them when the new core loads them), the new
+/// core gets what every core gets ([`prepare_core`]), and the UI hears `player:engine-restarted`
+/// once it runs (also when the old core did not end in time: `RestartError::Quit`).
+pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
+    let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
+    else {
+        return Err(RestartError::Start("the player is not running".to_owned()));
+    };
+    if let Some(startup) = app.try_state::<plugins::Startup>() {
+        plugins::essentials::write_managed(
+            &paths,
+            &startup.manifest,
+            &startup.registry,
+            startup.language,
+        );
+    }
+    let window = WindowFlags::of(app);
+    let logs_dir = paths.logs_dir.clone();
+    let restart = Restart {
+        events: Box::new(StateLoop::new(AppSink { app: app.clone() })),
+        prepare: Box::new({
+            let app = app.clone();
+            move |mpv| prepare_core(&app, mpv, window)
+        }),
+        // Task 12: the quality chosen for a stream.
+        entry_options: Box::new(|_| Vec::new()),
+        before_start: Box::new({
+            let app = app.clone();
+            move || {
+                // The old core has closed mpv.log, and the new one opens it anew (as at start).
+                if let Err(error) = system::logs::rotate_mpv_log(&logs_dir, SystemTime::now()) {
+                    tracing::warn!("cannot archive the mpv log of the old core: {error}");
+                }
+                // From before the new core makes its idle window (Ruling R56).
+                surface::watch_for_first_window(&app);
+            }
+        }),
+    };
+    let result = engine.restart(restart);
+    if !matches!(result, Err(RestartError::Start(_)))
+        && let Err(error) = app.emit(player::ENGINE_RESTARTED_EVENT, serde_json::json!({}))
+    {
+        tracing::warn!(
+            "cannot send {} to the UI: {error}",
+            player::ENGINE_RESTARTED_EVENT
+        );
+    }
+    result
+}
+
+/// The window's fullscreen and always-on-top. A new core starts with mpv's own, and the window
+/// follows what mpv reports (spec 5.1): without these it would leave fullscreen at a restart.
+#[derive(Debug, Clone, Copy, Default)]
+struct WindowFlags {
+    fullscreen: bool,
+    ontop: bool,
+}
+
+impl WindowFlags {
+    /// Read off the window (not on the main thread, which answers).
+    fn of(app: &AppHandle) -> WindowFlags {
+        let Some(window) = app.get_webview_window(surface::MAIN_WINDOW) else {
+            return WindowFlags::default();
+        };
+        WindowFlags {
+            fullscreen: window.is_fullscreen().unwrap_or(false),
+            ontop: window.is_always_on_top().unwrap_or(false),
+        }
+    }
+}
+
+/// What a restarted core gets on the request thread, before it has reported anything and before
+/// its playback is restored: the window's flags (first, so that the observations report them and
+/// the window stays as it is), the observations the UI renders, and the glass. The tools'
+/// options join them in Task 9.
+fn prepare_core(app: &AppHandle, mpv: &Mpv, window: WindowFlags) {
+    for (name, on) in [("fullscreen", window.fullscreen), ("ontop", window.ontop)] {
+        if let Err(error) = mpv.set_property(name, if on { "yes" } else { "no" }) {
+            tracing::warn!("the restarted player does not take the window's {name}: {error}");
+        }
+    }
+    if let Err(error) = player::observe_all(mpv) {
+        tracing::error!("cannot observe the player state: {error}");
+    }
+    let mut commands = Vec::new();
+    if let Some(glass) = app.try_state::<GlassController>() {
+        commands.extend(glass.after_restart());
+    }
+    for args in commands {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let Err(error) = mpv.command(&args) {
+            tracing::warn!("the restarted player refuses {args:?}: {error}");
+        }
+    }
 }
 
 /// Delivers the player's events: Rust's own handlers first, the UI for the rest.

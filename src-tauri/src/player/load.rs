@@ -63,6 +63,19 @@ pub struct LoadOptions {
 const FORMAT_SYMBOLS: &str = "_+-/*[]<>=!~^$?.:()";
 const FORMAT_LENGTH: RangeInclusive<usize> = 1..=200;
 
+/// The per-file option every entry Kaleido opens with options gets (Ruling R55). Kaleido's
+/// mpv.conf has `autocreate-playlist=filter`, which opens a file through its folder: mpv replaces
+/// the entry with the folder's playlist, and the entry it then plays has lost the per-file
+/// options.
+pub(crate) const NO_FOLDER_PLAYLIST: &str = "autocreate-playlist=no";
+
+/// One per-file option of `loadfile`, written as `name=%N%value`: mpv reads the value for exactly
+/// N bytes, so nothing in it can end the option early or start another. `name` is one of mpv's
+/// option names, given by Kaleido (never by the user).
+pub(crate) fn per_file_option(name: &str, value: &str) -> String {
+    format!("{name}=%{}%{value}", value.len())
+}
+
 impl LoadOptions {
     /// Whether the options may be used: `start` is a finite time from the start of the file
     /// and `format` is a short selection made of the characters above.
@@ -84,21 +97,18 @@ impl LoadOptions {
     }
 
     /// The value of `loadfile`'s options argument, if there is any option. Each value is
-    /// written as `%N%value`, which mpv reads for exactly N bytes; nothing in it can end the
-    /// option early or start another.
+    /// written as `%N%value` ([`per_file_option`]).
     ///
-    /// With any option, the entry also gets `autocreate-playlist=no` (Ruling R55). Kaleido's
-    /// mpv.conf has `autocreate-playlist=filter`, which opens a file through its folder: mpv
-    /// replaces the entry with the folder's playlist, and the entry it then plays has lost the
-    /// per-file options, so `--start` gave way to the saved position or to 0. A launch that names a
-    /// time means this file at this time, so the folder is not opened around it.
+    /// With any option, the entry also gets [`NO_FOLDER_PLAYLIST`] (Ruling R55): without it
+    /// `--start` gave way to the saved position or to 0. A launch that names a time means this
+    /// file at this time, so the folder is not opened around it.
     fn to_mpv(&self) -> Option<String> {
-        let quoted = |name: &str, value: &str| format!("{name}=%{}%{value}", value.len());
         let mut options: Vec<String> = [
-            self.start.map(|start| quoted("start", &start.to_string())),
+            self.start
+                .map(|start| per_file_option("start", &start.to_string())),
             self.format
                 .as_deref()
-                .map(|format| quoted("ytdl-format", format)),
+                .map(|format| per_file_option("ytdl-format", format)),
         ]
         .into_iter()
         .flatten()
@@ -106,7 +116,7 @@ impl LoadOptions {
         if options.is_empty() {
             return None;
         }
-        options.push("autocreate-playlist=no".to_owned());
+        options.push(NO_FOLDER_PLAYLIST.to_owned());
         Some(options.join(","))
     }
 }
@@ -148,7 +158,7 @@ fn mpv_path(path: &Path) -> String {
 /// The scheme of `text`, if mpv would read it as a URL: letters, digits, `+`, `-` and `.`,
 /// starting with a letter, before the first `://` (mpv's own test). `C:\Videa` and
 /// `\\server\share` have none.
-fn scheme(text: &str) -> Option<&str> {
+pub(crate) fn scheme(text: &str) -> Option<&str> {
     let (scheme, _) = text.split_once("://")?;
     let mut chars = scheme.chars();
     let valid = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
