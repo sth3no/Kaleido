@@ -54,6 +54,9 @@ pub enum Event {
     FileLoaded,
     EndFile {
         reason: EndFileReason,
+        /// The playlist entry that ended (`mpv_event_end_file.playlist_entry_id`): the `id` of an
+        /// entry of the `playlist` property. mpv counts them from 1.
+        playlist_entry_id: i64,
     },
     VideoReconfig,
     Seek,
@@ -127,7 +130,10 @@ pub(crate) unsafe fn from_raw(api: &Api, raw: *const sys::mpv_event) -> Event {
                     sys::MPV_END_FILE_REASON_REDIRECT => EndFileReason::Redirect,
                     other => EndFileReason::Other(other),
                 };
-                Event::EndFile { reason }
+                Event::EndFile {
+                    reason,
+                    playlist_entry_id: e.playlist_entry_id,
+                }
             }
             sys::MPV_EVENT_VIDEO_RECONFIG => Event::VideoReconfig,
             sys::MPV_EVENT_SEEK => Event::Seek,

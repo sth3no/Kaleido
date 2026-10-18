@@ -84,7 +84,7 @@
   z-index: 4;
 }
 
-/* The error cards (player/ErrorCards.tsx): over the sidebar, on every view. */
+/* The error cards (shell/notices/ErrorCards.tsx): over the sidebar, on every view. */
 .notices {
   position: absolute;
   inset: 0;

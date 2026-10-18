@@ -15,11 +15,16 @@ fn plays_generated_clip_to_eof() {
     mpv.command(&["loadfile", clip.to_str().unwrap()]).unwrap();
     let seen = common::wait_for(&mpv, 20, |e| matches!(e, Event::EndFile { .. }));
     assert!(seen.contains(&Event::FileLoaded), "{seen:#?}");
-    assert_eq!(
-        seen.last(),
-        Some(&Event::EndFile {
-            reason: EndFileReason::Eof
-        })
+    // The entry that ended has the id mpv gave it (they count up from 1, per process).
+    assert!(
+        matches!(
+            seen.last(),
+            Some(Event::EndFile {
+                reason: EndFileReason::Eof,
+                playlist_entry_id
+            }) if *playlist_entry_id > 0
+        ),
+        "{seen:#?}"
     );
 }
 
@@ -43,8 +48,9 @@ fn missing_file_ends_with_error() {
         matches!(
             seen.last(),
             Some(Event::EndFile {
-                reason: EndFileReason::Error { .. }
-            })
+                reason: EndFileReason::Error { .. },
+                playlist_entry_id
+            }) if *playlist_entry_id > 0
         ),
         "{seen:#?}"
     );

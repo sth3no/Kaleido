@@ -1,9 +1,9 @@
 import styles from './App.module.css';
 import HomeScreen from './home/HomeScreen';
 import { useDrop } from './home/useDrop';
-import ErrorCards from './player/ErrorCards';
 import PlayerPage from './player/PlayerPage';
 import AppShell from './shell/AppShell';
+import ErrorCards from './shell/notices/ErrorCards';
 
 /**
  * The app: the window's shell with its pages. The pages come with the tasks that build them: the

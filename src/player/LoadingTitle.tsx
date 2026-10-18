@@ -7,8 +7,10 @@
  *   `player:file-loaded`. There is no video yet, and no controls island either (PlayerPage).
  * - Buffering: `paused-for-cache`, mpv's wait for the network while a file plays.
  *
- * The name is mpv's `media-title`; for a link, until mpv knows it, the host from the playlist
- * entry (a path of a link tells little). Paths show without the `\\?\` of long ones.
+ * The name is mpv's `media-title`; for a link, until mpv knows a title, the host from the playlist
+ * entry (a path of a link tells little). mpv answers `media-title` at once, with the tail of the
+ * address (`watch?v=abc`) when it has no title: that counts as no title (`knownTitle`). Paths show
+ * without the `\\?\` of long ones.
  *
  * It is invisible for its first quarter of a second (a transition with a delay), so that a local
  * file that opens at once does not flash it. It then fades in, and fades out when the wait is over.
@@ -22,14 +24,13 @@ import { useTranslation } from 'react-i18next';
 
 import { glassRegions, useGlassRegion } from '../glass/useGlassRegion';
 import {
-  displayPath,
   selectIdle,
   usePlayerStore,
   type PlayerProps,
   type PlayerState,
 } from '../state/playerStore';
 import glass from '../theme/glass.module.css';
-import { currentEntryName } from './entryName';
+import { currentEntryName, knownTitle } from './entryName';
 import styles from './LoadingTitle.module.css';
 import { useLinger } from './useAutohide';
 
@@ -46,11 +47,9 @@ export function selectWaiting({ props, loaded }: Pick<PlayerState, 'props' | 'lo
   return null;
 }
 
-/** mpv's `media-title`, else the current playlist entry (the host of a link). */
+/** mpv's `media-title` where it is a title, else the current playlist entry (the host of a link). */
 export function loadingName(props: PlayerProps): string {
-  const title = props['media-title'];
-  if (typeof title === 'string' && title !== '') return displayPath(title);
-  return currentEntryName(props);
+  return knownTitle(props) || currentEntryName(props);
 }
 
 export default function LoadingTitle() {

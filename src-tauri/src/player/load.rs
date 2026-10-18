@@ -967,7 +967,8 @@ mod tests {
                     matches!(
                         event,
                         Event::EndFile {
-                            reason: EndFileReason::Error { .. }
+                            reason: EndFileReason::Error { .. },
+                            ..
                         }
                     )
                 });
@@ -1004,7 +1005,8 @@ mod tests {
                 matches!(
                     event,
                     Event::EndFile {
-                        reason: EndFileReason::Error { .. }
+                        reason: EndFileReason::Error { .. },
+                        ..
                     }
                 )
             });

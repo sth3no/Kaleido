@@ -114,13 +114,24 @@ test('a file that fails to open leaves its card on the start screen, where mpv i
   });
 
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed' });
+    usePlayerStore.getState().endFile({
+      reason: 'error',
+      error: 'loading failed',
+      file: 'C:\\Videa\\poškozený.mkv',
+    });
   });
 
   // The player page is not there for it: the card is the shell's, over every page.
   expect(screen.getByRole('main').getAttribute('data-view')).toBe('home');
   expect(screen.getByRole('alert').textContent).toContain('could not be opened');
+  expect(screen.getByText('Cannot play poškozený.mkv')).toBeTruthy();
   expect(screen.getByRole('list', { name: 'Notifications' })).toBeTruthy();
+
+  // Nothing is left to play: the way on is the open dialog, which the card has.
+  const card = screen.getByRole('list', { name: 'Notifications' });
+  fireEvent.click(within(card).getByRole('button', { name: 'Open file' }));
+  expect(invoke).toHaveBeenCalledWith('system_open_dialog', { purpose: 'media' });
+  expect(screen.queryByRole('list', { name: 'Notifications' })).toBeNull();
 });
 
 test('a dropped link that Rust refuses says so on a card', async () => {

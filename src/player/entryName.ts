@@ -1,10 +1,10 @@
 /**
- * What the current playlist entry is called while mpv does not know a title for it (yet): the name
- * of the file, or for a link its host. `media-title` is the better name when mpv has one, and the
- * loading title (`LoadingTitle.tsx`) takes that first.
+ * What a file or an entry of the playlist is called: the name of the file, for a link its host (the
+ * last part of a link's address says little), and a title from mpv where it has one. Paths come
+ * without the `\\?\` of long ones.
  */
 
-import { fileName, selectPlaylist, type PlayerProps } from '../state/playerStore';
+import { displayPath, fileName, selectPlaylist, type PlayerProps } from '../state/playerStore';
 
 /** The host of a link (never its user name or password), `null` for a path. */
 export function linkHost(path: string): string | null {
@@ -18,8 +18,17 @@ export function linkHost(path: string): string | null {
 }
 
 /**
+ * What a path or a link is called: its file name, or the host of a link. Empty for `null`, which is
+ * what Rust sends where it does not know the file.
+ */
+export function nameOfFile(file: string | null): string {
+  if (file === null || file === '') return '';
+  return linkHost(file) ?? fileName(file);
+}
+
+/**
  * The name of the entry that is current: its title if the playlist has one, else the file name, or
- * the host of a link (the last part of a link's address says little). Empty without a current entry.
+ * the host of a link. Empty without a current entry.
  */
 export function currentEntryName(props: PlayerProps): string {
   const entry = selectPlaylist(props).find((item) => item.current);
@@ -27,4 +36,31 @@ export function currentEntryName(props: PlayerProps): string {
   const host = linkHost(entry.filename);
   // `title` is the playlist's own title, or else `fileName`: only the second is replaced by the host.
   return host !== null && entry.title === fileName(entry.filename) ? host : entry.title;
+}
+
+/** What mpv's `filename` property says for a link: the part after the last `/`, %-escapes undone. */
+function addressTails(link: string): string[] {
+  const tail = link.slice(link.lastIndexOf('/') + 1);
+  let unescaped = tail;
+  try {
+    unescaped = decodeURIComponent(tail);
+  } catch {
+    // Not valid escapes: the tail as it is.
+  }
+  return [link, tail, unescaped, fileName(link)];
+}
+
+/**
+ * mpv's `media-title` where it is a title, `''` where it is not one yet. Until the demuxer has a
+ * title mpv answers with its `filename` property, which for a link is the tail of the address
+ * (`watch?v=abc`), at once: that names nothing, and the host of the entry does better.
+ */
+export function knownTitle(props: PlayerProps): string {
+  const title = props['media-title'];
+  if (typeof title !== 'string' || title === '') return '';
+  const entry = selectPlaylist(props).find((item) => item.current);
+  if (entry && linkHost(entry.filename) !== null && addressTails(entry.filename).includes(title)) {
+    return '';
+  }
+  return displayPath(title);
 }

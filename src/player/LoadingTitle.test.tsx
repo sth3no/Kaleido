@@ -90,6 +90,13 @@ describe('loadingName', () => {
     );
     expect(loadingName({})).toBe('');
   });
+
+  test('is the host of a link while mpv\'s title is the tail of its address, which it answers at once', () => {
+    const playlist = [{ filename: 'https://example.com/watch?v=abc', current: true }];
+    expect(loadingName({ 'media-title': 'watch?v=abc', playlist })).toBe('example.com');
+    // Once the demuxer has a title, that is the name.
+    expect(loadingName({ 'media-title': 'A talk about glass', playlist })).toBe('A talk about glass');
+  });
 });
 
 test('loading title shows until file-loaded', () => {
@@ -117,7 +124,7 @@ test('it shows again for the next file of the playlist, whose end cleared loaded
   expect(capsule()).toBeNull();
 
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed' });
+    usePlayerStore.getState().endFile({ reason: 'error', error: 'loading failed', file: null });
     usePlayerStore.getState().applyChanges({ 'media-title': 'Druhý' });
   });
 
@@ -140,6 +147,18 @@ test('it shows the host of a link until mpv knows its title, and none of the cre
   });
   expect(screen.getByText('A talk about glass')).toBeTruthy();
   expect(screen.queryByText('example.com')).toBeNull();
+});
+
+test('a link shows its host while mpv\'s title is only the tail of its address', () => {
+  state({
+    'idle-active': false,
+    'media-title': 'watch?v=abc',
+    playlist: [{ filename: 'https://example.com/watch?v=abc', current: true }],
+  });
+  render(<LoadingTitle />);
+
+  expect(screen.getByText('example.com')).toBeTruthy();
+  expect(screen.queryByText('watch?v=abc')).toBeNull();
 });
 
 test('a long path shows without its \\\\?\\ prefix', () => {

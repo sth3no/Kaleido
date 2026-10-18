@@ -743,12 +743,24 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
         EndReason::Error,
         EndReason::Redirect,
     ];
+    // The file is the playlist entry that ended (a string), or none where the playlist no longer
+    // has it (null); the fixture has both for an error.
     for reason in end_reasons {
         ui_events.push(PlayerEvent::EndFile {
             reason,
             error: (reason == EndReason::Error).then(|| "loading failed".to_owned()),
+            file: match reason {
+                EndReason::Eof => Some(r"C:\Videa\a.mkv".to_owned()),
+                EndReason::Error => Some(r"C:\Videa\poškozený.mkv".to_owned()),
+                _ => None,
+            },
         });
     }
+    ui_events.push(PlayerEvent::EndFile {
+        reason: EndReason::Error,
+        error: Some("loading failed".to_owned()),
+        file: None,
+    });
     covers(
         "EndReason",
         &end_reasons,

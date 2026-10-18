@@ -284,7 +284,7 @@ impl Engine {
                 Event::FileLoaded => {
                     let _ = app.emit("player:file-loaded", ());
                 }
-                Event::EndFile { reason } => {
+                Event::EndFile { reason, .. } => {
                     let _ = app.emit("player:end-file", format!("{reason:?}"));
                 }
                 Event::LogMessage {

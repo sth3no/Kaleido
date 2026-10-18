@@ -1,47 +1,37 @@
 /**
  * One card of the notice stack (spec 10.1, 10.2). A file that could not be played says what
- * happened in words (`errors.playback.*`), offers "Next" where the playlist goes on, and has
- * "Details" with mpv's own word for the error and the last lines of its log. A notice of the app
- * (Ctrl+V without a link, a dropped link that was refused) is a message and Close.
+ * happened in words (`errors.playback.*`) and what happens now (Ruling R41), and has "Details" with
+ * mpv's own word for the error and the last lines of its log. A notice of the app (Ctrl+V without
+ * a link, a dropped link that was refused) is a message and Close.
  *
+ * - What happens now follows from where the failed file stood in the playlist when it failed
+ *   (`playbackRemedy`). mpv always goes on by itself (spec 10.2), so there is no "Next" to offer:
+ *   it would skip an entry that was never seen. Where another entry follows, the card says that
+ *   playback continues with the next file; where the failure left mpv with nothing to play, it
+ *   offers "Open file", the way out.
  * - It goes by itself after 8 s. The clock is held while someone is dealing with the card: the
  *   pointer is over it, the focus is in it, or its details are open (a card that is being read, or
  *   copied from, must not vanish); the 8 s start anew when that ends.
  * - It never takes the focus: it can be reached with Tab. Esc on a focused card closes it, and the
  *   key is handled here (`preventDefault`), so it does not go on to mpv, where it would leave
  *   fullscreen. When a card that holds the focus closes, the focus goes back to where it came from.
- * - The text of the card is a live region: `alert` (assertive) for something that failed, `status`
- *   (polite) for a hint. A failed file is an interruption the user asked for ("play this") and
- *   did not get, so it is read at once; the hint about the clipboard waits for the reader.
- * - "Next" is offered while the playlist has an entry after the current one. mpv has already moved
- *   on by itself when the card shows, so this is a way to skip that one too, not to leave the
- *   broken file.
+ * - What a failure says is `role="alert"` (assertive): a failed file is an interruption of what the
+ *   user asked for ("play this"), so it is read at once. A hint (Ctrl+V without a link) is not
+ *   announced by its card at all: a region that arrives with its text is announced unreliably, so
+ *   the stack has a permanent polite region for hints (`ErrorCards.tsx`).
  */
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { blurAfterPointer } from '../input/forward';
-import { playerCommand } from '../ipc/commands';
-import Icon, { CHEVRON_DOWN, CLOSE, INFO, WARNING } from '../shell/Icon';
-import {
-  NOTICE_MS,
-  useNoticeStore,
-  type Notice,
-  type PlaybackNotice,
-} from '../state/noticeStore';
-import { selectPlaylist, usePlayerStore, type PlayerProps } from '../state/playerStore';
+import { blurAfterPointer } from '../../input/forward';
+import { systemOpenDialog } from '../../ipc/commands';
+import { NOTICE_MS, useNoticeStore, type Notice, type PlaybackNotice } from '../../state/noticeStore';
+import Icon, { CHEVRON_DOWN, CLOSE, INFO, WARNING } from '../Icon';
 import styles from './ErrorCards.module.css';
 
 export interface ErrorCardProps {
   notice: Notice;
-}
-
-/** Whether the playlist has an entry after the one that is current. */
-export function hasFollowingEntry(props: PlayerProps): boolean {
-  const list = selectPlaylist(props);
-  const current = list.findIndex((item) => item.current);
-  return current >= 0 && current < list.length - 1;
 }
 
 /** The lines of the details: mpv's word for the error, then the log, oldest first. */
@@ -61,8 +51,7 @@ const within = (card: HTMLElement, target: EventTarget | null): boolean =>
 export default function ErrorCard({ notice }: ErrorCardProps) {
   const { t } = useTranslation();
   const dismiss = useNoticeStore((state) => state.dismiss);
-  const playback = notice.kind === 'playback';
-  const hasNext = usePlayerStore((state) => playback && hasFollowingEntry(state.props));
+  const playback = notice.kind === 'playback' ? notice : null;
   const [expanded, setExpanded] = useState(false);
   const [pointerOver, setPointerOver] = useState(false);
   const [focusInside, setFocusInside] = useState(false);
@@ -93,8 +82,9 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
     dismiss(id);
   };
 
-  const next = () => {
-    playerCommand({ type: 'playlistNext' }).catch(warn('player_command'));
+  // The dialog is the system's, and the file it returns is opened by Rust; the card has done its job.
+  const openFile = () => {
+    systemOpenDialog('media').catch(warn('system_open_dialog'));
     close();
   };
 
@@ -117,13 +107,12 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   };
 
   const tone = notice.kind === 'playback' ? 'alert' : notice.tone;
-  const title =
-    notice.kind === 'playback'
-      ? notice.name !== ''
-        ? t('errors.playback.title', { name: notice.name })
-        : t('errors.playback.titleUnknown')
-      : null;
-  const lines = notice.kind === 'playback' ? detailLines(notice) : [];
+  const title = playback
+    ? playback.name !== ''
+      ? t('errors.playback.title', { name: playback.name })
+      : t('errors.playback.titleUnknown')
+    : null;
+  const lines = playback ? detailLines(playback) : [];
 
   return (
     <li
@@ -144,9 +133,12 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
         <span className={styles.icon} data-tone={tone}>
           <Icon path={tone === 'alert' ? WARNING : INFO} />
         </span>
-        <div className={styles.text} role={tone === 'alert' ? 'alert' : 'status'}>
+        <div className={styles.text} role={tone === 'alert' ? 'alert' : undefined}>
           {title !== null && <p className={styles.title}>{title}</p>}
           <p className={styles.message}>{t(notice.message)}</p>
+          {playback?.remedy === 'continues' && (
+            <p className={styles.remedy}>{t('errors.playback.continues')}</p>
+          )}
         </div>
         <button
           type="button"
@@ -161,9 +153,9 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       </div>
       {playback && (
         <div className={styles.actions}>
-          {hasNext && (
-            <button type="button" className={styles.action} onClick={next} {...blurAfterPointer}>
-              {t('player.next')}
+          {playback.remedy === 'open' && (
+            <button type="button" className={styles.action} onClick={openFile} {...blurAfterPointer}>
+              {t('home.openFile')}
             </button>
           )}
           <button

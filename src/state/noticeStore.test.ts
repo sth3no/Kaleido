@@ -16,6 +16,7 @@ const playback = (name: string, lines: LogLine[] = []) =>
     kind: 'playback',
     message: 'errors.playback.notFound',
     name,
+    remedy: 'open',
     error: 'loading failed',
     lines,
   });

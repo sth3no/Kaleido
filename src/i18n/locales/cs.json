@@ -45,12 +45,12 @@
     "next": "Další",
     "mute": "Ztlumit",
     "volume": "Hlasitost",
-    "volumeValue": "{{percent}}\u00a0%",
+    "volumeValue": "{{percent}} %",
     "muted": "Ztlumeno",
     "speed": "Rychlost",
-    "speedValue": "{{speed}}\u00d7",
-    "loading": "Na\u010d\u00edt\u00e1n\u00ed\u2026",
-    "buffering": "Na\u010d\u00edt\u00e1n\u00ed dat\u2026",
+    "speedValue": "{{speed}}×",
+    "loading": "Načítání…",
+    "buffering": "Načítání dat…",
     "subtitles": "Titulky",
     "fullscreen": "Celá obrazovka",
     "exitFullscreen": "Zrušit celou obrazovku",
@@ -83,7 +83,8 @@
       "titleUnknown": "Soubor nelze přehrát",
       "notFound": "Soubor nebo odkaz se nepodařilo otevřít. Mohl být přesunut nebo smazán, nebo je adresa nedostupná.",
       "unsupported": "Kaleido tento soubor nepřehraje: formát se nepodařilo rozpoznat nebo není podporovaný, případně je soubor poškozený.",
-      "generic": "Soubor se nepodařilo přehrát."
+      "generic": "Soubor se nepodařilo přehrát.",
+      "continues": "Přehrávání pokračuje dalším souborem."
     },
     "pasteEmpty": "Ve schránce není žádný odkaz. Zkopíruj webovou adresu (http:// nebo https://) a stiskni Ctrl+V.",
     "dropLink": "Přetažený odkaz se nepodařilo otevřít. Musí to být jedna úplná webová adresa, která začíná http:// nebo https://."

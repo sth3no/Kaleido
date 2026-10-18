@@ -114,9 +114,9 @@ describe('startPlayerBridge', () => {
     fire('player:file-loaded', {});
     expect(usePlayerStore.getState().loaded).toBe(true);
 
-    fire('player:end-file', { reason: 'error', error: 'loading failed' });
+    fire('player:end-file', { reason: 'error', error: 'loading failed', file: null });
     expect(usePlayerStore.getState().loaded).toBe(false);
-    expect(usePlayerStore.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed' });
+    expect(usePlayerStore.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed', file: null });
 
     fire('player:log', { level: 'warn', prefix: 'ffmpeg', text: 'Invalid NAL unit size' });
     expect(usePlayerStore.getState().logTail).toEqual([
@@ -183,7 +183,7 @@ describe('startPlayerBridge', () => {
     fire('player:log', { level: 'warn', prefix: 'ffmpeg', text: 'late' });
     fire('player:state', { changes: { pause: false } });
     fire('player:file-loaded', {});
-    fire('player:end-file', { reason: 'eof', error: null });
+    fire('player:end-file', { reason: 'eof', error: null, file: null });
     fire('glass:state', { enabled: false, reason: 'user' });
     fire('system:open-request', { count: 1 });
     expect(usePlayerStore.getState().logTail).toEqual([]);
@@ -259,8 +259,8 @@ describe('usePlayerBridge', () => {
     expect(usePlayerStore.getState().logTail).toEqual([
       { level: 'warn', prefix: 'ffmpeg', text: 'Invalid NAL unit size' },
     ]);
-    fireAll('player:end-file', { reason: 'error', error: 'loading failed' });
-    expect(usePlayerStore.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed' });
+    fireAll('player:end-file', { reason: 'error', error: 'loading failed', file: null });
+    expect(usePlayerStore.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed', file: null });
 
     unmount();
     await vi.waitFor(() => expect(steps('unlisten')).toHaveLength(2 * EVENTS.length));

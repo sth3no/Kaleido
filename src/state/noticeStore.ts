@@ -1,9 +1,9 @@
 /**
  * The notices the error cards show (spec 10.1, 10.2; Ruling R40): a file that cannot be played
- * (`player/ErrorCards.tsx` makes those from `end-file`) and the two notices of the app itself, a
- * Ctrl+V that found no link and a dropped link that Rust refused. At most `MAX_NOTICES` are kept,
- * the newest first; the oldest goes when a new one needs its place. A notice goes by itself after
- * `NOTICE_MS` or when it is closed (`player/ErrorCard.tsx`).
+ * (`shell/notices/ErrorCards.tsx` makes those from `end-file`) and the two notices of the app
+ * itself, a Ctrl+V that found no link and a dropped link that Rust refused. At most `MAX_NOTICES`
+ * are kept, the newest first; the oldest goes when a new one needs its place. A notice goes by
+ * itself after `NOTICE_MS` or when it is closed (`shell/notices/ErrorCard.tsx`).
  *
  * Other code adds one with `pushAppNotice`; the card stack is the only reader.
  */
@@ -27,11 +27,21 @@ interface NoticeBase {
   message: string;
 }
 
+/**
+ * What the card of a file that could not be played has to say about what happens now (spec 10.1,
+ * Ruling R41), decided when the file failed:
+ *
+ * - `continues`: another entry follows the failed one, and mpv goes on with it by itself.
+ * - `open`: the failure left mpv with nothing to play; the user has to open something.
+ */
+export type PlaybackRemedy = 'continues' | 'open';
+
 /** A file that could not be played. */
 export interface PlaybackNotice extends NoticeBase {
   kind: 'playback';
-  /** The file or the host of the link; empty where the playlist did not say. */
+  /** The file or the host of the link; empty where Rust could not say which file it was. */
   name: string;
+  remedy: PlaybackRemedy;
   /** mpv's own word for the error (`loading failed`), shown in the details. */
   error: string | null;
   /** The last lines of mpv's log, oldest first. */

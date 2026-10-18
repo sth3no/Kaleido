@@ -3,12 +3,12 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import HomeScreen from '../home/HomeScreen';
-import { initI18n, setLanguage } from '../i18n';
-import { shouldForward } from '../input/forward';
-import { MAX_NOTICES, NOTICE_MS, pushAppNotice, useNoticeStore } from '../state/noticeStore';
-import { usePlayerStore } from '../state/playerStore';
-import { useUiStore } from '../state/uiStore';
+import HomeScreen from '../../home/HomeScreen';
+import { initI18n, setLanguage } from '../../i18n';
+import { shouldForward } from '../../input/forward';
+import { MAX_NOTICES, NOTICE_MS, pushAppNotice, useNoticeStore } from '../../state/noticeStore';
+import { usePlayerStore } from '../../state/playerStore';
+import { useUiStore } from '../../state/uiStore';
 import ErrorCards, { LOG_FOLLOW_MS } from './ErrorCards';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
@@ -61,10 +61,13 @@ const advance = (ms: number) => {
 /** The cards, newest first. */
 const cards = () => screen.queryAllByRole('listitem');
 
-/** `player:end-file` for a file that failed; a new object each time, as every event is one. */
-const fails = (error: string | null = 'loading failed') => {
+/**
+ * `player:end-file` for a file that failed, `file` being the playlist entry Rust names; a new object
+ * each time, as every event is one.
+ */
+const fails = (error: string | null = 'loading failed', file: string | null = null) => {
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error });
+    usePlayerStore.getState().endFile({ reason: 'error', error, file });
   });
 };
 
@@ -192,37 +195,47 @@ describe('a file that cannot be played', () => {
     expect(within(cards()[0]).getByText(message)).toBeTruthy();
   });
 
-  test('the card names the file that failed, or says it does not know it', () => {
+  test('the card names the file Rust says failed, or says it does not know it', () => {
     render(<ErrorCards />);
-    playlist(1, 'C:\\Videa\\první.mkv', 'C:\\Videa (2026)\\poškozený soubor.mkv', 'C:\\Videa\\třetí.mkv');
-    fails();
+    fails('loading failed', 'C:\\Videa (2026)\\poškozený soubor.mkv');
     expect(screen.getByText('Cannot play poškozený soubor.mkv')).toBeTruthy();
 
-    act(() => {
-      usePlayerStore.getState().applyChanges({ playlist: [] });
-    });
-    fails();
+    // Rust found no such entry in the playlist.
+    fails('loading failed', null);
     expect(screen.getByText('Cannot play this file')).toBeTruthy();
   });
 
-  test('a link is named by its host', () => {
+  test('the name is the failed file\'s, not that of the entry that is current', () => {
     render(<ErrorCards />);
-    playlist(0, 'https://example.com/watch?v=abc');
-    fails();
+    // mpv has gone on to the third entry; the one that failed was the first.
+    playlist(2, 'C:\\Videa\\první.mkv', 'C:\\Videa\\druhý.mkv', 'C:\\Videa\\třetí.mkv');
 
+    fails('loading failed', 'C:\\Videa\\první.mkv');
+
+    expect(screen.getByText('Cannot play první.mkv')).toBeTruthy();
+    expect(screen.queryByText('Cannot play třetí.mkv')).toBeNull();
+  });
+
+  test('a long path is named without its prefix, a link by its host', () => {
+    render(<ErrorCards />);
+    fails('loading failed', '\\\\?\\C:\\Videa\\a.mkv');
+    fails('loading failed', 'https://user:secret@example.com/watch?v=abc');
+
+    expect(screen.getByText('Cannot play a.mkv')).toBeTruthy();
     expect(screen.getByText('Cannot play example.com')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('secret');
   });
 
   test('only an error makes a card, and one that was there before the stack is no card', () => {
     act(() => {
-      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed' } });
+      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed', file: null } });
     });
     render(<ErrorCards />);
     expect(cards()).toHaveLength(0);
 
     for (const reason of ['eof', 'stop', 'quit', 'redirect'] as const) {
       act(() => {
-        usePlayerStore.getState().endFile({ reason, error: null });
+        usePlayerStore.getState().endFile({ reason, error: null, file: 'C:\\Videa\\a.mkv' });
       });
     }
     expect(cards()).toHaveLength(0);
@@ -254,51 +267,101 @@ describe('a file that cannot be played', () => {
     expect(within(cards()[0]).getByRole('alert').textContent).toContain('nepodařilo otevřít');
     expect(screen.getByRole('button', { name: 'Podrobnosti' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Zavřít' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Otevřít soubor' })).toBeTruthy();
   });
 });
 
-describe('the actions', () => {
-  test('error card offers Next only with a following playlist entry', () => {
+describe('what the card says is going on (Ruling R41)', () => {
+  const NAMES = ['a.mkv', 'b.mkv', 'c.mkv'];
+
+  test('error card says playback continues only with a following entry, and offers Open file only when playback ended', () => {
     render(<ErrorCards />);
-    playlist(0, 'a.mkv', 'b.mkv', 'c.mkv');
-    fails();
-    expect(within(cards()[0]).getByRole('button', { name: 'Next' })).toBeTruthy();
 
-    // The last entry: nothing follows.
-    playlist(2, 'a.mkv', 'b.mkv', 'c.mkv');
-    expect(within(cards()[0]).queryByRole('button', { name: 'Next' })).toBeNull();
+    // The first of three fails: mpv goes on with the second by itself.
+    playlist(0, ...NAMES);
+    fails('loading failed', 'a.mkv');
+    const continuing = cards()[0];
+    expect(within(continuing).getByText('Playback continues with the next file.')).toBeTruthy();
+    expect(within(continuing).queryByRole('button', { name: 'Open file' })).toBeNull();
 
-    // A playlist of one, and a player with no playlist at all.
+    // The last one fails: nothing is left to play, and the way on is to open a file.
+    playlist(2, ...NAMES);
+    fails('loading failed', 'c.mkv');
+    const ended = cards()[0];
+    expect(within(ended).queryByText('Playback continues with the next file.')).toBeNull();
+    expect(within(ended).getByRole('button', { name: 'Open file' })).toBeTruthy();
+
+    // The first card was decided when its file failed: the playlist that moved since changes nothing.
+    expect(within(cards()[1]).getByText('Playback continues with the next file.')).toBeTruthy();
+    expect(within(cards()[1]).queryByRole('button', { name: 'Open file' })).toBeNull();
+  });
+
+  test('there is no Next: mpv goes on by itself, and Next would skip a file nobody saw', () => {
+    render(<ErrorCards />);
+    playlist(0, ...NAMES);
+    fails('loading failed', 'a.mkv');
+    playlist(2, ...NAMES);
+    fails('loading failed', 'c.mkv');
+
+    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(sentCommands('player_command')).toEqual([]);
+  });
+
+  test('it goes by where the failed file stood, not by the entry that is current now', () => {
+    render(<ErrorCards />);
+    // mpv has gone on: the current entry is the last one, but the one that failed was the first.
+    playlist(2, ...NAMES);
+    fails('loading failed', 'a.mkv');
+    expect(within(cards()[0]).getByText('Playback continues with the next file.')).toBeTruthy();
+
+    // And the other way round: the current entry is the first, but the last one failed.
+    playlist(0, ...NAMES);
+    fails('loading failed', 'c.mkv');
+    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
+  });
+
+  test('a file that was alone in the playlist, or that Rust could not name, leaves Open file', () => {
+    render(<ErrorCards />);
     playlist(0, 'a.mkv');
-    expect(within(cards()[0]).queryByRole('button', { name: 'Next' })).toBeNull();
+    fails('loading failed', 'a.mkv');
+    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
+
+    // No file, no playlist: nothing is known to play next.
     act(() => {
       usePlayerStore.getState().applyChanges({ playlist: [] });
     });
-    expect(within(cards()[0]).queryByRole('button', { name: 'Next' })).toBeNull();
-    // Close and Details are always there.
-    expect(within(cards()[0]).getByRole('button', { name: 'Close' })).toBeTruthy();
-    expect(within(cards()[0]).getByRole('button', { name: 'Details' })).toBeTruthy();
+    fails('loading failed', null);
+    expect(within(cards()[0]).getByRole('button', { name: 'Open file' })).toBeTruthy();
+    expect(within(cards()[0]).queryByText('Playback continues with the next file.')).toBeNull();
   });
 
-  test('Next skips to the next entry and closes the card', () => {
+  test('the sentence is part of what is read out with the failure', () => {
     render(<ErrorCards />);
-    playlist(0, 'a.mkv', 'b.mkv');
-    fails();
+    playlist(0, ...NAMES);
+    fails('loading failed', 'a.mkv');
 
-    fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Next' }));
+    expect(within(cards()[0]).getByRole('alert').textContent).toContain(
+      'Playback continues with the next file.',
+    );
+  });
 
-    expect(sentCommands('player_command')).toEqual([['player_command', { cmd: { type: 'playlistNext' } }]]);
+  test('Open file asks for the open dialog and closes the card', () => {
+    render(<ErrorCards />);
+    fails('loading failed', 'a.mkv');
+
+    fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Open file' }));
+
+    expect(sentCommands('system_open_dialog')).toEqual([['system_open_dialog', { purpose: 'media' }]]);
     expect(cards()).toHaveLength(0);
   });
 
-  test('a Next that mpv refuses is logged, and the card is gone all the same', async () => {
+  test('a dialog that cannot open is logged, and the card is gone all the same', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.mocked(invoke).mockRejectedValueOnce('no next entry');
+    vi.mocked(invoke).mockRejectedValueOnce('no dialog');
     render(<ErrorCards />);
-    playlist(0, 'a.mkv', 'b.mkv');
-    fails();
+    fails('loading failed', 'a.mkv');
 
-    fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Next' }));
+    fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Open file' }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -308,12 +371,22 @@ describe('the actions', () => {
     warn.mockRestore();
   });
 
+  test('Close and Details are always there', () => {
+    render(<ErrorCards />);
+    playlist(0, ...NAMES);
+    fails('loading failed', 'a.mkv');
+    fails('loading failed', null);
+
+    for (const card of cards()) {
+      expect(within(card).getByRole('button', { name: 'Close' })).toBeTruthy();
+      expect(within(card).getByRole('button', { name: 'Details' })).toBeTruthy();
+    }
+  });
+
   test('Close closes the card, and only that one', () => {
     render(<ErrorCards />);
-    playlist(0, 'a.mkv');
-    fails();
-    playlist(0, 'b.mkv');
-    fails();
+    fails('loading failed', 'a.mkv');
+    fails('loading failed', 'b.mkv');
     expect(cards()).toHaveLength(2);
 
     fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Close' }));
@@ -328,10 +401,7 @@ describe('the stack', () => {
   test('at most three error cards stack, the newest on top', () => {
     expect(MAX_NOTICES).toBe(3);
     render(<ErrorCards />);
-    for (const name of ['1.mkv', '2.mkv', '3.mkv', '4.mkv']) {
-      playlist(0, name);
-      fails();
-    }
+    for (const name of ['1.mkv', '2.mkv', '3.mkv', '4.mkv']) fails('loading failed', name);
 
     expect(cards()).toHaveLength(3);
     const titles = screen.getAllByText(/^Cannot play /).map((element) => element.textContent);
@@ -536,19 +606,64 @@ describe('what the app itself says', () => {
     expect(within(card).getByRole('alert').textContent).toContain('dropped link could not be opened');
     expect(within(card).getByRole('button', { name: 'Close' })).toBeTruthy();
     expect(within(card).queryByRole('button', { name: 'Details' })).toBeNull();
-    expect(within(card).queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Open file' })).toBeNull();
+    expect(within(card).queryByText('Playback continues with the next file.')).toBeNull();
   });
 
-  test('a hint is read politely, a failure at once', () => {
+  test('a failure is read out at once, by its card', () => {
     render(<ErrorCards />);
     act(() => {
-      pushAppNotice('errors.pasteEmpty', 'status');
+      pushAppNotice('errors.dropLink');
     });
-    expect(within(cards()[0]).getByRole('status')).toBeTruthy();
-    expect(within(cards()[0]).queryByRole('alert')).toBeNull();
+    expect(within(cards()[0]).getByRole('alert')).toBeTruthy();
 
     fails();
     expect(within(cards()[0]).getByRole('alert')).toBeTruthy();
+  });
+
+  test('a hint is read out politely by a region that is in the page before it has one', () => {
+    render(<ErrorCards />);
+    const region = screen.getByRole('status');
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.textContent).toBe('');
+
+    act(() => {
+      pushAppNotice('errors.pasteEmpty', 'status');
+    });
+
+    // The same element, now with the text; the card shows it too but is no live region itself.
+    expect(screen.getByRole('status')).toBe(region);
+    expect(region.textContent).toContain('no link on the clipboard');
+    expect(within(cards()[0]).getByText(/no link on the clipboard/)).toBeTruthy();
+    expect(within(cards()[0]).queryByRole('status')).toBeNull();
+    expect(within(cards()[0]).queryByRole('alert')).toBeNull();
+
+    // A failure does not go through it.
+    fails();
+    expect(region.textContent).toContain('no link on the clipboard');
+    expect(within(cards()[0]).getByRole('alert')).toBeTruthy();
+
+    // The hint goes with its card, and the region is empty again.
+    advance(NOTICE_MS);
+    expect(region.textContent).toBe('');
+  });
+
+  test('the same hint again is announced again: its text is a new node of the region', () => {
+    render(<ErrorCards />);
+    const region = screen.getByRole('status');
+    act(() => {
+      pushAppNotice('errors.pasteEmpty', 'status');
+    });
+    const first = region.firstElementChild;
+    expect(first).not.toBeNull();
+
+    act(() => {
+      pushAppNotice('errors.pasteEmpty', 'status');
+    });
+
+    expect(region.firstElementChild).not.toBeNull();
+    expect(region.firstElementChild).not.toBe(first);
+    expect(region.textContent).toContain('no link on the clipboard');
   });
 
   test('the same notice twice is one card', () => {
@@ -587,7 +702,8 @@ describe('Ctrl+V without a link (system:paste-empty)', () => {
     pasteEmpty();
 
     expect(cards()).toHaveLength(1);
-    expect(within(cards()[0]).getByRole('status').textContent).toContain('no link on the clipboard');
+    expect(within(cards()[0]).getByText(/no link on the clipboard/)).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('no link on the clipboard');
   });
 
   test('on the settings page, which has no paste field, too', () => {
@@ -611,6 +727,8 @@ describe('Ctrl+V without a link (system:paste-empty)', () => {
     pasteEmpty();
 
     expect(cards()).toHaveLength(0);
+    // Nor does the live region say it: the paste field is what the user is given.
+    expect(screen.getByRole('status').textContent).toBe('');
   });
 
   test('the start screen and the cards never both react', () => {
@@ -630,6 +748,7 @@ describe('Ctrl+V without a link (system:paste-empty)', () => {
 
     expect(screen.getByRole('textbox', { name: 'Link to a video' })).toBeTruthy();
     expect(cards()).toHaveLength(0);
+    expect(screen.getByRole('status').textContent).toBe('');
   });
 
   test('it is the view at the moment of the event that decides', () => {

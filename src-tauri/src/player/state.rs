@@ -89,6 +89,9 @@ pub enum PlayerEvent {
     EndFile {
         reason: EndReason,
         error: Option<String>,
+        /// The `filename` of the playlist entry that ended, as mpv's `playlist` property has it
+        /// (the path or link as it was loaded); `None` where the playlist no longer has the entry.
+        file: Option<String>,
     },
     /// A `script-message kaleido …`, without the leading `kaleido`.
     Message {
@@ -194,19 +197,43 @@ impl<S: EventSink> StateLoop<S> {
         }
     }
 
+    /// [`handle_with`] for an event that needs nothing of mpv's.
+    ///
+    /// [`handle_with`]: StateLoop::handle_with
+    #[cfg(test)]
+    fn handle(&mut self, now: Instant, event: Event) {
+        self.handle_with(now, event, || None);
+    }
+
     /// Takes one mpv event at time `now`. Property changes wait in the batch for [`flush`]; the
     /// other events are sent at once, after the batch so far: the UI sees them in the order mpv
     /// produced them (a `script-message` that follows `add volume 5` must find the new volume).
     /// `time-pos` stays throttled whatever else arrives.
     ///
+    /// `playlist` reads mpv's `playlist` property (JSON text); it is called for the end of a
+    /// file, to name the entry that ended.
+    ///
     /// [`flush`]: StateLoop::flush
-    fn handle(&mut self, now: Instant, event: Event) {
+    fn handle_with(
+        &mut self,
+        now: Instant,
+        event: Event,
+        playlist: impl FnOnce() -> Option<String>,
+    ) {
         match event {
             Event::PropertyChange { name, value, .. } => self.change(now, name, value),
             Event::FileLoaded => self.send(PlayerEvent::FileLoaded),
-            Event::EndFile { reason } => {
+            Event::EndFile {
+                reason,
+                playlist_entry_id,
+            } => {
                 let (reason, error) = end_reason(reason);
-                self.send(PlayerEvent::EndFile { reason, error });
+                let file = playlist().and_then(|text| playlist_file(&text, playlist_entry_id));
+                self.send(PlayerEvent::EndFile {
+                    reason,
+                    error,
+                    file,
+                });
             }
             Event::ClientMessage { args } => match client_message(args) {
                 // Rust's own, not part of what the UI sees in order.
@@ -285,6 +312,18 @@ fn end_reason(reason: EndFileReason) -> (EndReason, Option<String>) {
     }
 }
 
+/// The `filename` of the entry with `id` in mpv's `playlist` property (the JSON text of a list
+/// of `{ "id", "filename", … }`); `None` when there is no such entry (it was removed already, or
+/// the text is not what mpv writes). mpv numbers the entries from 1, so 0 names none.
+fn playlist_file(playlist: &str, id: i64) -> Option<String> {
+    let entries: Value = serde_json::from_str(playlist).ok()?;
+    let entry = entries
+        .as_array()?
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_i64) == Some(id))?;
+    entry.get("filename")?.as_str().map(str::to_owned)
+}
+
 /// `script-message kaleido <action> …` is for the UI and `script-message thumbfast-render
 /// <json>` for Rust; any other message is not Kaleido's.
 fn client_message(mut args: Vec<String>) -> Option<PlayerEvent> {
@@ -318,8 +357,8 @@ fn to_json(name: &str, value: PropertyValue) -> Value {
 }
 
 impl<S: EventSink> EventLoop for StateLoop<S> {
-    fn on_event(&mut self, _mpv: &Mpv, event: Event) {
-        self.handle(Instant::now(), event);
+    fn on_event(&mut self, mpv: &Mpv, event: Event) {
+        self.handle_with(Instant::now(), event, || mpv.get_string("playlist").ok());
     }
 
     fn on_idle(&mut self, _mpv: &Mpv) -> Option<Duration> {
@@ -612,6 +651,7 @@ mod tests {
             now,
             Event::EndFile {
                 reason: EndFileReason::Eof,
+                playlist_entry_id: 1,
             },
         );
         state.flush(now);
@@ -627,7 +667,8 @@ mod tests {
                 changes([("pause", json!(true))]),
                 PlayerEvent::EndFile {
                     reason: EndReason::Eof,
-                    error: None
+                    error: None,
+                    file: None
                 },
             ]
         );
@@ -648,11 +689,18 @@ mod tests {
             },
             EndFileReason::Redirect,
         ] {
-            state.handle(now, Event::EndFile { reason });
+            state.handle(
+                now,
+                Event::EndFile {
+                    reason,
+                    playlist_entry_id: 1,
+                },
+            );
         }
         let ended = |reason, error: Option<&str>| PlayerEvent::EndFile {
             reason,
             error: error.map(str::to_owned),
+            file: None,
         };
         assert_eq!(
             recorder.events(),
@@ -664,6 +712,79 @@ mod tests {
                 ended(EndReason::Redirect, None),
             ]
         );
+    }
+
+    const PLAYLIST: &str = r#"[
+        {"filename": "C:\\Videa\\a.mkv", "id": 4},
+        {"filename": "https://example.com/watch?v=abc", "id": 7, "current": true}
+    ]"#;
+
+    /// An end of a file is told with the file: the playlist entry whose `id` is the event's.
+    #[test]
+    fn end_file_names_the_entry_by_its_id() {
+        let end = |id, playlist: Option<&'static str>| {
+            let recorder = Recorder::default();
+            let mut state = StateLoop::new(recorder.clone());
+            let event = Event::EndFile {
+                reason: EndFileReason::Error {
+                    code: -13,
+                    message: "loading failed".into(),
+                },
+                playlist_entry_id: id,
+            };
+            state.handle_with(Instant::now(), event, || playlist.map(str::to_owned));
+            let events = recorder.events();
+            assert_eq!(events.len(), 1, "{events:?}");
+            match events.into_iter().next() {
+                Some(PlayerEvent::EndFile { file, .. }) => file,
+                other => panic!("not an end of a file: {other:?}"),
+            }
+        };
+        assert_eq!(end(4, Some(PLAYLIST)).as_deref(), Some(r"C:\Videa\a.mkv"));
+        assert_eq!(
+            end(7, Some(PLAYLIST)).as_deref(),
+            Some("https://example.com/watch?v=abc")
+        );
+        // An entry the playlist no longer has (or never had: mpv's ids start at 1).
+        assert_eq!(end(5, Some(PLAYLIST)), None);
+        assert_eq!(end(0, Some(PLAYLIST)), None);
+        // No playlist to read, text that is no JSON, JSON that is no list, an entry without a name.
+        assert_eq!(end(4, None), None);
+        assert_eq!(end(4, Some("[{")), None);
+        assert_eq!(end(4, Some(r#"{"id": 4, "filename": "a"}"#)), None);
+        assert_eq!(end(4, Some(r#"[{"id": 4}]"#)), None);
+        assert_eq!(end(4, Some(r#"[{"id": 4, "filename": 5}]"#)), None);
+    }
+
+    /// The playlist is read when a file ends, and for nothing else.
+    #[test]
+    fn the_playlist_is_read_for_the_end_of_a_file_only() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        let now = Instant::now();
+        let reads = std::cell::Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            Some(PLAYLIST.to_owned())
+        };
+        state.handle_with(now, Event::FileLoaded, read);
+        state.handle_with(now, message(&["kaleido", "osd", "volume"]), read);
+        assert_eq!(reads.get(), 0);
+
+        state.handle_with(
+            now,
+            Event::EndFile {
+                reason: EndFileReason::Eof,
+                playlist_entry_id: 4,
+            },
+            read,
+        );
+        assert_eq!(reads.get(), 1);
+        assert!(recorder.events().contains(&PlayerEvent::EndFile {
+            reason: EndReason::Eof,
+            error: None,
+            file: Some(r"C:\Videa\a.mkv".into()),
+        }));
     }
 
     #[test]
@@ -739,16 +860,18 @@ mod tests {
         assert_eq!(
             payload(&PlayerEvent::EndFile {
                 reason: EndReason::Error,
-                error: Some("loading failed".into())
+                error: Some("loading failed".into()),
+                file: Some(r"C:\Videa\a.mkv".into())
             }),
-            json!({"reason": "error", "error": "loading failed"})
+            json!({"reason": "error", "error": "loading failed", "file": r"C:\Videa\a.mkv"})
         );
         assert_eq!(
             payload(&PlayerEvent::EndFile {
                 reason: EndReason::Eof,
-                error: None
+                error: None,
+                file: None
             }),
-            json!({"reason": "eof", "error": null})
+            json!({"reason": "eof", "error": null, "file": null})
         );
         assert_eq!(
             payload(&PlayerEvent::Message {
@@ -777,6 +900,7 @@ mod tests {
         let end = PlayerEvent::EndFile {
             reason: EndReason::Stop,
             error: None,
+            file: None,
         };
         let message = PlayerEvent::Message { args: vec![] };
         assert_eq!(state.channel(), Some("player:state"));
@@ -932,11 +1056,37 @@ mod tests {
         engine.command(&["loadfile", &missing.to_string_lossy()]);
 
         let (reason, error) = recorder.wait_for("the end of the file", |event| match event {
-            PlayerEvent::EndFile { reason, error } => Some((*reason, error.clone())),
+            PlayerEvent::EndFile { reason, error, .. } => Some((*reason, error.clone())),
             _ => None,
         });
         assert_eq!(reason, EndReason::Error);
         assert!(error.is_some_and(|error| !error.is_empty()));
+    }
+
+    /// The UI names the file that failed by this: a playlist of [missing.mkv, good clip] ends the
+    /// first with an error and says which file it was.
+    #[test]
+    fn end_file_names_the_file_that_failed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing.mkv");
+        let good = clip(tmp.path(), 5);
+        let (engine, recorder) = running(tmp.path());
+        engine.command(&["loadfile", &missing.to_string_lossy()]);
+        engine.command(&["loadfile", &good.to_string_lossy(), "append"]);
+
+        let file = recorder.wait_for("the failed file", |event| match event {
+            PlayerEvent::EndFile {
+                reason: EndReason::Error,
+                file,
+                ..
+            } => Some(file.clone()),
+            _ => None,
+        });
+        assert!(
+            file.as_deref()
+                .is_some_and(|file| file.ends_with("missing.mkv")),
+            "{file:?}"
+        );
     }
 
     #[test]

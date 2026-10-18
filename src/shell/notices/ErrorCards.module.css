@@ -4,6 +4,16 @@
  * theme/glass.module.css, so its radius and padding win over the glass'. The layer it sits in lets
  * the pointer through (AppShell.module.css); the sheet takes it.
  */
+
+/* The live region for hints: in the page for a screen reader to hear, not on the screen. */
+.announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .stack {
   position: absolute;
   top: calc(var(--shell-island-height) + 2 * var(--k-space-l));
@@ -90,6 +100,14 @@
   overflow-wrap: anywhere;
 }
 
+/* What happens now: "Playback continues with the next file." */
+.remedy {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .close {
   flex: none;
   display: grid;
@@ -145,7 +163,10 @@
   rotate: 180deg;
 }
 
-/* mpv's log: what it said is shown as it said it. */
+/*
+ * mpv's log: what it said is shown as it said it. It keeps the glass' text shadow, so that it stays
+ * readable over any video (spec 8.9).
+ */
 .log {
   margin-left: calc(20px + var(--k-space-m));
   padding: var(--k-space-s);
@@ -153,7 +174,6 @@
   background: color-mix(in srgb, var(--k-color-on-glass) 10%, transparent);
   font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: var(--k-font-size-xs);
-  text-shadow: none;
   user-select: text;
 }
 

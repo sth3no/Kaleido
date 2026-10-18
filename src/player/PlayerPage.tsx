@@ -12,8 +12,8 @@
  * The indicator (volume, speed, seek) and the loading title (a file that loads, a stream that
  * buffers) are the page's own and do not depend on the island: they work while the controls are
  * hidden, and the loading title while there are none yet. The error cards are not here but one
- * level up, in the shell's notice layer (`ErrorCards.tsx`): a file that fails to open leaves the
- * player for the start screen, and its card has to outlive this page.
+ * level up, in the shell's notice layer (`shell/notices/ErrorCards.tsx`): a file that fails to
+ * open leaves the player for the start screen, and its card has to outlive this page.
  *
  * Later tasks add the panels above the controls (Task 20).
  */

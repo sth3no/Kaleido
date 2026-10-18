@@ -335,8 +335,12 @@ export type OsdDimensions = { w: number; h: number; ml: number; mr: number; mt: 
 /** Why a file stopped. */
 export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
 
-/** The payload of `player:end-file`. */
-export type EndFile = { reason: EndReason; error: string | null };
+/**
+ * The payload of `player:end-file`. `file` is the playlist entry that ended: its `filename` as
+ * mpv's `playlist` has it (a path, with the `\\?\` of a long one, or a link), found by the id of
+ * the entry; `null` where the playlist no longer has it.
+ */
+export type EndFile = { reason: EndReason; error: string | null; file: string | null };
 
 /** The payload of `player:log`: only the warnings and errors of mpv's log. */
 export type LogLine = { level: 'warn' | 'error' | 'fatal'; prefix: string; text: string };

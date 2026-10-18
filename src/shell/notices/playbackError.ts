@@ -17,7 +17,13 @@
  *
  * `loading failed` is all mpv says for a missing file, a 404, a host that does not answer and a
  * file that cannot be read, so the text for it names those causes together.
+ *
+ * What the card offers besides (spec 10.1, Ruling R41) depends on what mpv did, and mpv always
+ * goes on with the playlist by itself (spec 10.2): see `playbackRemedy`.
  */
+
+import { displayPath, selectPlaylist, type PlayerProps } from '../../state/playerStore';
+import type { PlaybackRemedy } from '../../state/noticeStore';
 
 export type PlaybackErrorKind = 'notFound' | 'unsupported' | 'generic';
 
@@ -38,4 +44,26 @@ export function playbackErrorKind(error: string | null): PlaybackErrorKind {
 /** The key of the card's text in the locale files: `errors.playback.notFound`, `.unsupported` or `.generic`. */
 export function playbackErrorKey(error: string | null): string {
   return `errors.playback.${playbackErrorKind(error)}`;
+}
+
+/**
+ * What the card says is going on, from where the failed file stood in the playlist when it failed
+ * (not from the entry that is current later: mpv moves on at once, and the entry that plays then
+ * was never seen to fail):
+ *
+ * - `continues`: an entry follows the failed one, so mpv goes on with it.
+ * - `open`: it was the last, or Rust could not say which file failed, or the playlist (as the UI
+ *   has it) does not have it: nothing is known to play next, and the way on is to open a file.
+ *
+ * `file` is `end-file`'s: the `filename` of the failed entry, to be found in the playlist's.
+ */
+export function playbackRemedy(props: PlayerProps, file: string | null): PlaybackRemedy {
+  if (file === null) return 'open';
+  const list = selectPlaylist(props);
+  const shown = displayPath(file);
+  const same = list.filter((item) => item.filename === shown);
+  // The same file twice: the one that plays, else the first.
+  const failed = same.find((item) => item.current) ?? same[0];
+  if (failed === undefined) return 'open';
+  return list.indexOf(failed) < list.length - 1 ? 'continues' : 'open';
 }
