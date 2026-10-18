@@ -9,7 +9,8 @@
  *   to mpv, and stopped, so that nothing else on the page sees them). A modifier on its own does not
  *   end the wait, Esc cancels it, and so does a click elsewhere or leaving the window. The name of
  *   the key is `toMpvKey`'s (`input/keys.ts`). A key that is Windows' or moves the focus (Tab) is
- *   refused with a word, since mpv never gets it (`shortcuts.ts`).
+ *   refused with a word, since mpv never gets it (`shortcuts.ts`). The key that ends the wait (the
+ *   answer, or Esc) stays the page's until it is released (`swallowUntilReleased`): held, it repeats.
  * - A key that is bound already is shown with what it does, and is replaced only after a "Replace":
  *   Rust overwrites it (Task 11), so the question is the UI's.
  * - **Reset** puts the key back to what it is without the user (Kaleido's default, mpv's, the
@@ -18,7 +19,9 @@
  * - The list is one stop for Tab: the arrows move through the buttons of the rows (up and down
  *   through the rows, left and right in a row; Home and End to the first and the last row), and the
  *   keys they handle are `preventDefault`ed, so that mpv does not also get them. After a change the
- *   focus follows the shortcut, if the list had it.
+ *   focus follows the shortcut, if the list had it. While Rust works on a row, its buttons say so
+ *   (`aria-disabled`) and keep the focus; one row waiting leaves the others usable. A button that goes
+ *   away under the focus (the question of a conflict) hands it to the row's Change.
  * - What Rust refuses is said in the row. A player that is not up answers with no bindings, which
  *   the page says, and offers to read again.
  */
@@ -45,6 +48,7 @@ import {
   isSilenced,
   readCapture,
   sameKey,
+  swallowUntilReleased,
 } from '../shortcuts';
 import { isSettingsError } from '../useSetting';
 import styles from './Shortcuts.module.css';
@@ -90,8 +94,8 @@ export default function Shortcuts() {
   /** The key of a text that says what was wrong with the last key pressed while waiting. */
   const [note, setNote] = useState<string | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
-  /** The key whose change is on its way to Rust. */
-  const [busy, setBusy] = useState<string | null>(null);
+  /** The keys whose change is on its way to Rust, each on its own (one row's answer frees that row only). */
+  const [busy, setBusy] = useState<ReadonlySet<string>>(() => new Set());
   /** The key of the text that says why a shortcut could not be changed, by key. */
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   /** What was done, for the screen reader (the list moves under it). */
@@ -134,19 +138,34 @@ export default function Shortcuts() {
     setErrors((now) => Object.fromEntries(Object.entries(now).filter(([name]) => name !== key)));
   }, []);
 
+  /** Marks the row of `key` as waiting for Rust, or done; the other rows are left as they are. */
+  const working = useCallback((key: string, on: boolean) => {
+    setBusy((now) => {
+      if (now.has(key) === on) return now;
+      const next = new Set(now);
+      if (on) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
   /** Whether the focus is in the list (and so is to follow the shortcut, not to be dropped). */
   const listHasFocus = useCallback(
     () => root.current?.contains(document.activeElement) ?? false,
     [],
   );
 
+  // The buttons of a row that waits for Rust say so with `aria-disabled` and do nothing, but keep
+  // the focus: a disabled button would drop it to the page. Where a button that had it goes away (the
+  // question of a conflict), the focus goes to a button of the row that stays, on a failure too.
   const rebind = useCallback(
     async (from: string, to: string): Promise<void> => {
+      // Asked first, while the button that asked (Replace) is still there.
+      const follow = listHasFocus();
       setConflict(null);
-      setBusy(from);
+      working(from, true);
       withoutError(from);
       setAnnouncement('');
-      const follow = listHasFocus();
       try {
         await settingsRebind(from, to);
         await read();
@@ -155,19 +174,20 @@ export default function Shortcuts() {
       } catch (reason) {
         console.warn(`cannot move the shortcut ${from} to ${to}`, reason);
         setErrors((now) => ({ ...now, [from]: failureText(reason) }));
+        if (follow) setFocusId(changeId(from));
       } finally {
-        setBusy(null);
+        working(from, false);
       }
     },
-    [read, t, withoutError, listHasFocus],
+    [read, t, withoutError, listHasFocus, working],
   );
 
   const reset = async (key: string): Promise<void> => {
+    const follow = listHasFocus();
     setConflict(null);
-    setBusy(key);
+    working(key, true);
     withoutError(key);
     setAnnouncement('');
-    const follow = listHasFocus();
     try {
       await settingsResetBinding(key);
       await read();
@@ -176,9 +196,20 @@ export default function Shortcuts() {
     } catch (reason) {
       console.warn(`cannot reset the shortcut ${key}`, reason);
       setErrors((now) => ({ ...now, [key]: failureText(reason) }));
+      if (follow) setFocusId(resetId(key));
     } finally {
-      setBusy(null);
+      working(key, false);
     }
+  };
+
+  /**
+   * Drops the question of a conflict. Its buttons go with it: a focus that was in the list (Cancel or
+   * Esc from the keyboard) goes back to the row's Change; after a pointer nothing has it (`blurAfterPointer`).
+   */
+  const dropConflict = (key: string) => {
+    const follow = listHasFocus();
+    setConflict(null);
+    if (follow) setFocusId(changeId(key));
   };
 
   /** The user pressed `to` for the shortcut on `from`: moved at once, or after a "Replace" if `to` is taken. */
@@ -211,6 +242,8 @@ export default function Shortcuts() {
       const pressed = readCapture(e);
       switch (pressed.type) {
         case 'cancel':
+          // Held, Esc would go on to mpv once the wait is over (and leave fullscreen).
+          swallowUntilReleased(e.code || e.key);
           cancel();
           break;
         case 'wait':
@@ -219,6 +252,8 @@ export default function Shortcuts() {
           setNote('settings.shortcuts.reserved');
           break;
         case 'key':
+          // Held, it would run its old command in mpv once the wait is over.
+          swallowUntilReleased(e.code || e.key);
           cancel();
           propose(from, pressed.key);
           break;
@@ -389,6 +424,7 @@ export default function Shortcuts() {
                   const waiting = capturing === key;
                   const asked = conflict?.from === key ? conflict : null;
                   const error = errors[key];
+                  const waitsForRust = busy.has(key);
                   return (
                     <li
                       key={key}
@@ -398,7 +434,7 @@ export default function Shortcuts() {
                         if (e.key === 'Escape' && asked !== null) {
                           // Handled: the question is dropped, and Esc does not go on to mpv.
                           e.preventDefault();
-                          setConflict(null);
+                          dropConflict(key);
                         }
                       }}
                     >
@@ -428,8 +464,9 @@ export default function Shortcuts() {
                             tabIndex={entry === changeId(key) ? 0 : -1}
                             aria-label={t('settings.shortcuts.changeLabel', { key })}
                             aria-pressed={waiting}
-                            disabled={busy === key}
+                            aria-disabled={waitsForRust}
                             onClick={() => {
+                              if (waitsForRust) return;
                               if (waiting) {
                                 setCapturing(null);
                                 setNote(null);
@@ -451,8 +488,9 @@ export default function Shortcuts() {
                           data-rove-id={resetId(key)}
                           tabIndex={entry === resetId(key) ? 0 : -1}
                           aria-label={t('settings.shortcuts.resetLabel', { key })}
-                          disabled={busy === key}
+                          aria-disabled={waitsForRust}
                           onClick={() => {
+                            if (waitsForRust) return;
                             setCapturing(null);
                             void reset(key);
                           }}
@@ -502,7 +540,7 @@ export default function Shortcuts() {
                             type="button"
                             className={styles.action}
                             onClick={() => {
-                              setConflict(null);
+                              dropConflict(key);
                             }}
                             {...blurAfterPointer}
                           >

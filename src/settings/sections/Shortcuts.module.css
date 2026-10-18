@@ -162,7 +162,7 @@
   font-size: inherit;
 }
 
-.action:hover:not(:disabled),
+.action:hover:not(:disabled, [aria-disabled='true']),
 .retry:hover {
   background: var(--k-color-selected);
 }
@@ -172,7 +172,9 @@
   background: var(--k-color-selected);
 }
 
-.action:disabled {
+/* A row waiting for Rust: its buttons keep the focus, so they are aria-disabled, not disabled. */
+.action:disabled,
+.action[aria-disabled='true'] {
   opacity: 0.5;
 }
 

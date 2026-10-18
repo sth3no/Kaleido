@@ -125,6 +125,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // A key that answered a wait is the page's until it is released or the window is left
+  // (`swallowUntilReleased`); the tests let go of none, so the window is left for them.
+  window.dispatchEvent(new Event('blur'));
   vi.restoreAllMocks();
   setLanguage('en');
 });
@@ -577,16 +580,202 @@ describe('changing a shortcut', () => {
     fireEvent.click(change('m'));
     press('x', { code: 'KeyX' });
 
-    expect((change('m') as HTMLButtonElement).disabled).toBe(true);
-    expect((reset('m') as HTMLButtonElement).disabled).toBe(true);
-    expect((change('RIGHT') as HTMLButtonElement).disabled).toBe(false);
+    // They say so and do nothing, but are not disabled: the browser takes the focus away from a
+    // disabled button (jsdom does not), and the keyboard user would be left on the page.
+    expect(change('m').getAttribute('aria-disabled')).toBe('true');
+    expect(reset('m').getAttribute('aria-disabled')).toBe('true');
+    expect((change('m') as HTMLButtonElement).disabled).toBe(false);
+    expect(change('RIGHT').getAttribute('aria-disabled')).toBe('false');
+    fireEvent.click(reset('m'));
+    fireEvent.click(change('m'));
+    expect(calls('settings_reset_binding')).toEqual([]);
+    expect(within(row('m')).queryByRole('status')).toBeNull();
 
     await act(async () => {
       answer();
       await Promise.resolve();
     });
     await settle();
-    expect((change('x') as HTMLButtonElement).disabled).toBe(false);
+    expect(change('x').getAttribute('aria-disabled')).toBe('false');
+  });
+
+  test('each row waits for its own answer: one that is done does not free another', async () => {
+    const answers = new Map<string, () => void>();
+    rust({
+      settings_rebind: (args) =>
+        new Promise((resolve) => {
+          const { key, newKey } = args as { key: string; newKey: string };
+          answers.set(key, () => {
+            moveBinding(key, newKey);
+            resolve(null);
+          });
+        }),
+      settings_reset_binding: (args) =>
+        new Promise((resolve) => {
+          answers.set((args as { key: string }).key, () => {
+            resolve(null);
+          });
+        }),
+    });
+    await open();
+    fireEvent.click(change('m'));
+    press('x', { code: 'KeyX' });
+    fireEvent.click(reset('RIGHT'));
+    expect(change('m').getAttribute('aria-disabled')).toBe('true');
+    expect(reset('RIGHT').getAttribute('aria-disabled')).toBe('true');
+
+    // RIGHT is done first: m still waits.
+    await act(async () => {
+      answers.get('RIGHT')?.();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(reset('RIGHT').getAttribute('aria-disabled')).toBe('false');
+    expect(change('m').getAttribute('aria-disabled')).toBe('true');
+    expect(reset('m').getAttribute('aria-disabled')).toBe('true');
+
+    await act(async () => {
+      answers.get('m')?.();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(change('x').getAttribute('aria-disabled')).toBe('false');
+    expect(reset('m').getAttribute('aria-disabled')).toBe('false');
+  });
+
+  test('a key held after it answered does not reach mpv until it is released', async () => {
+    await open();
+    const detach = attachVideoInput(document.createElement('div'));
+    try {
+      // The answer is a key that is taken: the question is asked, and the key is still down.
+      fireEvent.click(change('m'));
+      press('f', { code: 'KeyF' });
+      expect(within(row('m')).getByRole('alert')).toBeTruthy();
+      // Held past the repeat delay: its keydowns are the page's, not mpv's (f would go fullscreen).
+      for (let i = 0; i < 3; i += 1) {
+        expect(press('f', { code: 'KeyF', repeat: true })).toBe(false);
+      }
+      expect(forwarded()).toEqual([]);
+      expect(fireEvent.keyUp(document.body, { key: 'f', code: 'KeyF' })).toBe(false);
+      expect(forwarded()).toEqual([]);
+      expect(calls('settings_rebind')).toEqual([]);
+      // Released: the key is mpv's again, and other keys were all along.
+      press('f', { code: 'KeyF' });
+      expect(forwarded()).toHaveLength(1);
+
+      // A free key moves the shortcut at once; held, it does not reach mpv either. (So far mpv got
+      // f down and f up.)
+      fireEvent.keyUp(document.body, { key: 'f', code: 'KeyF' });
+      expect(forwarded()).toHaveLength(2);
+      fireEvent.click(within(row('m')).getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(change('m'));
+      press('j', { code: 'KeyJ' });
+      press('j', { code: 'KeyJ', repeat: true });
+      // Another key is mpv's at once.
+      press('k', { code: 'KeyK' });
+      expect(forwarded()).toHaveLength(3);
+      fireEvent.keyUp(document.body, { key: 'j', code: 'KeyJ' });
+      expect(forwarded()).toHaveLength(3);
+      expect(calls('settings_rebind')).toEqual([{ key: 'm', newKey: 'j' }]);
+      await settle();
+    } finally {
+      detach();
+    }
+  });
+
+  test('Esc held after it cancelled the wait does not reach mpv until it is released', async () => {
+    await open();
+    const detach = attachVideoInput(document.createElement('div'));
+    try {
+      fireEvent.click(change('m'));
+      press('Escape', { code: 'Escape' });
+      expect(within(row('m')).queryByRole('status')).toBeNull();
+      // mpv would leave fullscreen.
+      press('Escape', { code: 'Escape', repeat: true });
+      fireEvent.keyUp(document.body, { key: 'Escape', code: 'Escape' });
+      expect(forwarded()).toEqual([]);
+      press('Escape', { code: 'Escape' });
+      expect(forwarded()).toHaveLength(1);
+    } finally {
+      detach();
+    }
+  });
+
+  test('a conflict dropped from the keyboard gives the focus to the row\'s Change', async () => {
+    await open();
+    act(() => {
+      change('m').focus();
+    });
+    fireEvent.click(change('m'));
+    press('f', { code: 'KeyF' }, change('m'));
+    fireEvent.keyUp(change('m'), { key: 'f', code: 'KeyF' });
+    const cancel = within(row('m')).getByRole('button', { name: 'Cancel' });
+    act(() => {
+      cancel.focus();
+    });
+    // Enter on Cancel: the click it makes. The button goes; the focus does not go to the page.
+    fireEvent.click(cancel);
+    expect(within(row('m')).queryByRole('alert')).toBeNull();
+    expect(document.activeElement).toBe(change('m'));
+
+    // Esc on Replace: the same.
+    fireEvent.click(change('m'));
+    press('f', { code: 'KeyF' }, change('m'));
+    fireEvent.keyUp(change('m'), { key: 'f', code: 'KeyF' });
+    const replace = within(row('m')).getByRole('button', { name: 'Replace' });
+    act(() => {
+      replace.focus();
+    });
+    fireEvent.keyDown(replace, { key: 'Escape', code: 'Escape' });
+    expect(within(row('m')).queryByRole('alert')).toBeNull();
+    expect(document.activeElement).toBe(change('m'));
+    expect(calls('settings_rebind')).toEqual([]);
+  });
+
+  test('a conflict dropped with the pointer leaves nothing focused, so that Space goes to mpv', async () => {
+    await open();
+    fireEvent.click(change('m'));
+    press('f', { code: 'KeyF' });
+    fireEvent.keyUp(document.body, { key: 'f', code: 'KeyF' });
+    const cancel = within(row('m')).getByRole('button', { name: 'Cancel' });
+    // pointerup takes the focus away (blurAfterPointer), then the click.
+    act(() => {
+      cancel.focus();
+    });
+    fireEvent.pointerUp(cancel);
+    fireEvent.click(cancel);
+    expect(within(row('m')).queryByRole('alert')).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test('after a failed change from the keyboard the focus is on the row\'s Change', async () => {
+    rust({ settings_rebind: () => Promise.reject({ type: 'io', message: 'locked' }) });
+    await open();
+
+    // Replace, pressed from the keyboard: the question goes, and the change fails.
+    act(() => {
+      change('m').focus();
+    });
+    fireEvent.click(change('m'));
+    press('f', { code: 'KeyF' }, change('m'));
+    fireEvent.keyUp(change('m'), { key: 'f', code: 'KeyF' });
+    const replace = within(row('m')).getByRole('button', { name: 'Replace' });
+    act(() => {
+      replace.focus();
+    });
+    fireEvent.click(replace);
+    await within(row('m')).findByRole('alert');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(change('m'));
+    });
+
+    // A free key, from the Change button: the focus stays on it through the wait and the failure.
+    fireEvent.click(change('m'));
+    press('j', { code: 'KeyJ' }, change('m'));
+    expect(document.activeElement).toBe(change('m'));
+    await settle();
+    expect(within(row('m')).getByRole('alert')).toBeTruthy();
+    expect(document.activeElement).toBe(change('m'));
   });
 
   test('the focus follows a shortcut that was changed from the keyboard', async () => {
@@ -663,6 +852,20 @@ describe('reset', () => {
     expect((await within(row('f')).findByRole('alert')).textContent).toBe(
       'The shortcut could not be saved. Check that the settings folder can be written to.',
     );
+  });
+
+  test('a reset that fails from the keyboard leaves the focus on Reset', async () => {
+    rust({ settings_reset_binding: () => Promise.reject({ type: 'io', message: 'locked' }) });
+    await open();
+    act(() => {
+      reset('f').focus();
+    });
+    fireEvent.click(reset('f'));
+    expect(reset('f').getAttribute('aria-disabled')).toBe('true');
+    await within(row('f')).findByRole('alert');
+    await settle();
+    expect(document.activeElement).toBe(reset('f'));
+    expect(reset('f').getAttribute('aria-disabled')).toBe('false');
   });
 
   test('ends a wait that was on', async () => {

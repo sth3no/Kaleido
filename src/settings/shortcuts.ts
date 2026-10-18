@@ -101,6 +101,51 @@ export function readCapture(e: KeyboardEvent): Capture {
   return { type: 'key', key };
 }
 
+/**
+ * Keeps the key `code` (`KeyboardEvent.code`, or `key` where the engine gives no code) from the page
+ * and from mpv until it is released. It ended the wait (it is the answer, or Esc), but a key held past
+ * the repeat delay goes on sending keydowns, which `input/forward.ts` would pass on to mpv (with the
+ * keyup after them): the key's old command would run, in a conflict even before "Replace". Its
+ * keydowns and its keyup are handled (`preventDefault`) and stopped in the capture of the window,
+ * before anything else sees them. The keyup ends it, and so does leaving the window (the keyup then
+ * goes elsewhere). Returns the function that ends it at once.
+ */
+export function swallowUntilReleased(code: string): () => void {
+  const abort = new AbortController();
+  const { signal } = abort;
+  const ours = (e: KeyboardEvent) => (e.code || e.key) === code;
+  const swallow = (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (ours(e)) swallow(e);
+    },
+    { signal, capture: true },
+  );
+  window.addEventListener(
+    'keyup',
+    (e) => {
+      if (!ours(e)) return;
+      swallow(e);
+      abort.abort();
+    },
+    { signal, capture: true },
+  );
+  window.addEventListener(
+    'blur',
+    () => {
+      abort.abort();
+    },
+    { signal },
+  );
+  return () => {
+    abort.abort();
+  };
+}
+
 // --- Groups and search ------------------------------------------------------------------------------
 
 export interface BindingGroup {
