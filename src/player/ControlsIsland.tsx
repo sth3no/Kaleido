@@ -5,7 +5,9 @@
  *
  * - Previous and next work with a playlist; without one they are off.
  * - The subtitles button opens quick settings on its Subtitles tab and the playlist button the
- *   playlist; the panels are `panels/` (Task 20): here only `uiStore.panel` and `quickTab` are set.
+ *   playlist (`uiStore.panel` and `quickTab`). The panels are `panels/`: they stand over these
+ *   buttons, which they get as their anchor, and are drawn by the island so that they go with it
+ *   (when the island goes, the panel is closed, whatever took the island away).
  * - Fullscreen is mpv's property: the button asks mpv, and Rust switches the window (the UI never
  *   does), so a double click on the video and the key do the same.
  * - It is glass over the video, so it is one of the regions the shader blurs, and the subtitles
@@ -14,12 +16,14 @@
  *   tab order and of the screen reader's reach, and takes no pointer.
  */
 
-import { useRef, type MouseEvent } from 'react';
+import { useEffect, useRef, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useGlassRegion } from '../glass/useGlassRegion';
 import { playerCommand } from '../ipc/commands';
 import type { PlayerCommand } from '../ipc/types';
+import PlaylistPanel from '../panels/PlaylistPanel';
+import QuickSettings from '../panels/QuickSettings';
 import {
   selectPaused,
   selectPlaylist,
@@ -62,6 +66,8 @@ const noContextMenu = (e: MouseEvent) => {
 export default function ControlsIsland({ hidden = false }: ControlsIslandProps) {
   const { t } = useTranslation();
   const island = useRef<HTMLDivElement>(null);
+  const subtitlesButton = useRef<HTMLButtonElement>(null);
+  const playlistButton = useRef<HTMLButtonElement>(null);
   const paused = usePlayerStore((state) => selectPaused(state.props));
   // One entry is no list to go through.
   const hasPlaylist = usePlayerStore((state) => selectPlaylist(state.props).length > 1);
@@ -72,6 +78,16 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
   const setQuickTab = useUiStore((state) => state.setQuickTab);
   useGlassRegion(island);
   useSubMargin(island, hidden);
+
+  // A panel belongs to the island: with the island gone (the video ended, another page) it is
+  // closed, or the autohide would hold the next island open for a panel nobody sees.
+  useEffect(
+    () => () => {
+      const { panel: open, setPanel: close } = useUiStore.getState();
+      if (open !== null) close(null);
+    },
+    [],
+  );
 
   const subtitlesOpen = panel === 'quick-settings' && quickTab === 'subtitles';
   const playlistOpen = panel === 'playlist';
@@ -138,6 +154,7 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
         </div>
         <div className={styles.tools}>
           <ControlButton
+            ref={subtitlesButton}
             label={t('player.subtitles')}
             icon={SUBTITLES}
             popup
@@ -145,6 +162,7 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
             onClick={toggleSubtitles}
           />
           <ControlButton
+            ref={playlistButton}
             label={t('panels.playlist')}
             icon={PLAYLIST}
             popup
@@ -158,6 +176,8 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
           />
         </div>
       </div>
+      {panel === 'quick-settings' && <QuickSettings anchor={subtitlesButton} />}
+      {panel === 'playlist' && <PlaylistPanel anchor={playlistButton} />}
     </div>
   );
 }

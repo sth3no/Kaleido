@@ -4,7 +4,13 @@
  * without the `\\?\` of long ones.
  */
 
-import { displayPath, fileName, selectPlaylist, type PlayerProps } from '../state/playerStore';
+import {
+  displayPath,
+  fileName,
+  selectPlaylist,
+  type PlayerProps,
+  type PlaylistItem,
+} from '../state/playerStore';
 
 /** The host of a link (never its user name or password), `null` for a path. */
 export function linkHost(path: string): string | null {
@@ -27,15 +33,21 @@ export function nameOfFile(file: string | null): string {
 }
 
 /**
- * The name of the entry that is current: its title if the playlist has one, else the file name, or
- * the host of a link. Empty without a current entry.
+ * The name of an entry of the playlist: its title if it has one, else the file name, or the host
+ * of a link.
  */
-export function currentEntryName(props: PlayerProps): string {
-  const entry = selectPlaylist(props).find((item) => item.current);
-  if (!entry) return '';
+export function entryName(entry: PlaylistItem): string {
   const host = linkHost(entry.filename);
   // `title` is the playlist's own title, or else `fileName`: only the second is replaced by the host.
   return host !== null && entry.title === fileName(entry.filename) ? host : entry.title;
+}
+
+/**
+ * The name of the entry that is current (`entryName`). Empty without a current entry.
+ */
+export function currentEntryName(props: PlayerProps): string {
+  const entry = selectPlaylist(props).find((item) => item.current);
+  return entry ? entryName(entry) : '';
 }
 
 /** What mpv's `filename` property says for a link: the part after the last `/`, %-escapes undone. */

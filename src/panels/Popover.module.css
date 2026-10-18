@@ -1,0 +1,44 @@
+/*
+ * The panel above the controls (Popover.tsx; key-screens-v2.html, screen 2). It comes after
+ * theme/glass.module.css, so its position, radius and padding win over the glass' own.
+ *
+ * It is fixed to the window and a child of the body. Its `left` and `top` are set by script, in its
+ * own px (window px / the UI scale, which is `zoom` on the root); `--popover-fit-w` and
+ * `--popover-fit-h` (set by script too) are how much of the window it may take, and a panel sets
+ * its own width and `--popover-max-h`. It stands above the shell and its notices (`.root` of
+ * App.module.css is a stacking context of its own) and below the black curtain of a switch to or
+ * from fullscreen (z-index 100).
+ *
+ * It opens by fading in and rising a little with the spring (a transition from @starting-style);
+ * with reduced motion only the fade is left (theme/global.css).
+ */
+.popover {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  padding: var(--k-space-s);
+  border-radius: var(--k-radius-l);
+  max-width: var(--popover-fit-w, none);
+  max-height: min(var(--popover-max-h, 9999px), var(--popover-fit-h, 9999px));
+  font-size: var(--k-font-size-m);
+  pointer-events: auto;
+  /* Never title bar: WebView2 builds its caption from app-region in document order (Sidebar). */
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+  transition:
+    opacity var(--k-motion-base) ease,
+    translate var(--k-motion-base) var(--k-motion-spring);
+}
+
+/* Where it comes from when it opens. */
+@starting-style {
+  .popover {
+    opacity: 0;
+    translate: 0 var(--k-space-m);
+  }
+}

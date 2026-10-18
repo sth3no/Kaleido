@@ -1,0 +1,63 @@
+/*
+ * Quick settings (QuickSettings.tsx; key-screens-v2.html, screen 2): a panel 330 px wide with two
+ * tabs as a segmented control, and under it the tab's content. The options, rows and sliders are
+ * Panel.module.css's. It comes after Popover.module.css in the bundle, so its width wins.
+ */
+.quick {
+  width: 330px;
+  --popover-max-h: 560px;
+}
+
+.tabs {
+  display: flex;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--k-color-on-glass) 18%, transparent);
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-color-on-glass) 12%, transparent);
+}
+
+.tab {
+  flex: 1;
+  padding: 5px 13px;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-s);
+  text-align: center;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.tab:hover {
+  background: var(--k-color-hover);
+}
+
+/* The tab that is open: the glass' text colour as the ground, the tint on it. */
+.tab[aria-selected='true'] {
+  background: var(--k-color-on-glass);
+  color: var(--k-glass-tint);
+  font-weight: 700;
+  text-shadow: none;
+}
+
+/*
+ * A long list of tracks scrolls inside the panel, the tabs stay. The padding leaves room for the
+ * focus ring (2 px and its 2 px offset), which an overflowing box would cut off at its edge.
+ */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  min-height: 0;
+  padding: var(--k-space-xs);
+  overflow-y: auto;
+}
+
+@media (forced-colors: active) {
+  .tab[aria-selected='true'] {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+}

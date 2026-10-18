@@ -15,7 +15,8 @@
  * level up, in the shell's notice layer (`shell/notices/ErrorCards.tsx`): a file that fails to
  * open leaves the player for the start screen, and its card has to outlive this page.
  *
- * Later tasks add the panels above the controls (Task 20).
+ * The panels above the controls (quick settings, the playlist; `panels/`) belong to the island:
+ * it draws them over its buttons, and with the island gone they are closed.
  */
 
 import { createPortal } from 'react-dom';

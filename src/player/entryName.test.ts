@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import { currentEntryName, knownTitle, linkHost, nameOfFile } from './entryName';
+import type { PlaylistItem } from '../state/playerStore';
+import { currentEntryName, entryName, knownTitle, linkHost, nameOfFile } from './entryName';
 
 const entries = (...list: { filename: string; title?: string; current?: boolean }[]) => ({
   playlist: list,
@@ -118,5 +119,29 @@ describe('knownTitle', () => {
     expect(knownTitle({})).toBe('');
     expect(knownTitle({ 'media-title': '' })).toBe('');
     expect(knownTitle({ 'media-title': '\\\\?\\C:\\Videa\\a.mkv' })).toBe('C:\\Videa\\a.mkv');
+  });
+});
+
+describe('entryName', () => {
+  const entry = (filename: string, title: string): PlaylistItem => ({
+    index: 0,
+    filename,
+    title,
+    current: false,
+  });
+
+  test('is the file name where the playlist has no title of its own', () => {
+    // `selectPlaylist` gives the file name as the title then.
+    expect(entryName(entry('C:\\Videa\\a.mkv', 'a.mkv'))).toBe('a.mkv');
+  });
+
+  test('is the title the playlist gives', () => {
+    expect(entryName(entry('C:\\Videa\\a.mkv', 'Duna'))).toBe('Duna');
+    expect(entryName(entry('https://example.com/watch?v=abc', 'A talk'))).toBe('A talk');
+  });
+
+  test('is the host of a link that has no title, and never its user name or password', () => {
+    expect(entryName(entry('https://example.com/watch?v=abc', 'watch'))).toBe('example.com');
+    expect(entryName(entry('https://user:secret@example.com/clip.mp4', 'clip.mp4'))).toBe('example.com');
   });
 });

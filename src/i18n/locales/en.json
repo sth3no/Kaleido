@@ -61,7 +61,38 @@
   },
   "panels": {
     "playlist": "Playlist",
-    "quickSettings": "Quick settings"
+    "quickSettings": "Quick settings",
+    "tabs": {
+      "label": "Quick settings sections",
+      "subtitles": "Subtitles",
+      "audio": "Audio"
+    },
+    "track": {
+      "fallback": "Track {{id}}",
+      "forced": "Forced",
+      "external": "External file"
+    },
+    "subtitles": {
+      "tracks": "Subtitle tracks",
+      "off": "Off",
+      "none": "This file has no subtitles",
+      "load": "Load from file…",
+      "size": "Size"
+    },
+    "audio": {
+      "tracks": "Audio tracks",
+      "none": "This file has no audio tracks"
+    },
+    "delay": {
+      "label": "Delay",
+      "decrease": "Decrease by {{step}} s",
+      "increase": "Increase by {{step}} s",
+      "value": "{{value}} s"
+    },
+    "playlistEmpty": "The playlist is empty",
+    "playlistPosition": "{{position}} of {{total}}",
+    "remove": "Remove {{name}} from the playlist",
+    "reorderHint": "Drag to reorder, or press Alt+↑ or Alt+↓"
   },
   "settings": {
     "title": "Settings",

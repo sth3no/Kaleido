@@ -61,7 +61,38 @@
   },
   "panels": {
     "playlist": "Seznam k přehrání",
-    "quickSettings": "Rychlé nastavení"
+    "quickSettings": "Rychlé nastavení",
+    "tabs": {
+      "label": "Oddíly rychlého nastavení",
+      "subtitles": "Titulky",
+      "audio": "Zvuk"
+    },
+    "track": {
+      "fallback": "Stopa {{id}}",
+      "forced": "Vynucené",
+      "external": "Externí soubor"
+    },
+    "subtitles": {
+      "tracks": "Stopy titulků",
+      "off": "Vypnuto",
+      "none": "Soubor nemá žádné titulky",
+      "load": "Načíst ze souboru…",
+      "size": "Velikost"
+    },
+    "audio": {
+      "tracks": "Zvukové stopy",
+      "none": "Soubor nemá žádné zvukové stopy"
+    },
+    "delay": {
+      "label": "Posun",
+      "decrease": "Zmenšit o {{step}} s",
+      "increase": "Zvětšit o {{step}} s",
+      "value": "{{value}} s"
+    },
+    "playlistEmpty": "Seznam k přehrání je prázdný",
+    "playlistPosition": "{{position}} z {{total}}",
+    "remove": "Odebrat {{name}} ze seznamu",
+    "reorderHint": "Přetažením změníš pořadí, nebo stiskni Alt+↑ či Alt+↓"
   },
   "settings": {
     "title": "Nastavení",

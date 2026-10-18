@@ -1,0 +1,184 @@
+/*
+ * What the panels share (key-screens-v2.html, screen 2): lists of options, a row with a label and a
+ * control, the round step buttons, the slider. The colour of the text is the glass' own
+ * (theme/glass.module.css); fainter text is that colour at a lower opacity.
+ */
+
+/* A list of options, the one that is chosen marked. */
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--k-space-s);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid transparent;
+  border-radius: var(--k-radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.option:hover {
+  background: var(--k-color-hover);
+}
+
+.option[aria-selected='true'] {
+  background: var(--k-color-selected);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--k-font-size-xs);
+  opacity: 0.72;
+}
+
+/* An action beside the options ("Load from file…"): an option that chooses nothing, a little fainter. */
+.action {
+  justify-content: flex-start;
+  opacity: 0.85;
+}
+
+.action:hover {
+  opacity: 1;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--k-space-s) var(--k-space-m);
+  opacity: 0.72;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--k-space-xs);
+  background: var(--k-color-divider);
+}
+
+/* A label and a control on one line: the size, the delay. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-m);
+}
+
+.label {
+  flex: 0 0 5.5em;
+}
+
+.step {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--k-color-glass-border);
+  border-radius: var(--k-radius-pill);
+  background: color-mix(in srgb, var(--k-color-on-glass) 14%, transparent);
+  color: inherit;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.step:hover {
+  background: color-mix(in srgb, var(--k-color-on-glass) 24%, transparent);
+}
+
+.value {
+  flex: 1;
+  min-width: 4.5em;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/*
+ * The slider is the browser's own (arrows, Home, End, the screen reader's name and value), drawn as
+ * the volume is (player/VolumeControl.module.css): `--fill` is how much of it is set, 0 to 1, by script.
+ */
+.range {
+  --thumb: 14px;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 4px;
+  background:
+    var(--k-accent-gradient) left / calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fill, 0)) 100%
+      no-repeat,
+    color-mix(in srgb, var(--k-color-on-glass) 25%, transparent);
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: -5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--k-color-on-glass);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--k-accent-solid) 35%, transparent);
+}
+
+.range:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+  border-radius: 4px;
+}
+
+/* High contrast: system colours, and an edge where a tint would show the choice. */
+@media (forced-colors: active) {
+  .option[aria-selected='true'] {
+    border-color: Highlight;
+  }
+
+  .step {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .range::-webkit-slider-runnable-track {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+
+  .range::-webkit-slider-thumb {
+    background: ButtonText;
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+}

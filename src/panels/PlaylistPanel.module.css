@@ -1,0 +1,164 @@
+/*
+ * The playlist panel (PlaylistPanel.tsx; key-screens-v2.html, screen 2): a list of entries, each with
+ * a grip, its name and ✕. The entry that plays is marked. It comes after Popover.module.css in the
+ * bundle, so its width wins; a long list scrolls inside the panel and the header stays.
+ */
+.playlist {
+  width: 380px;
+  --popover-max-h: 440px;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--k-space-s);
+  padding: var(--k-space-xs) var(--k-space-m) 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-l);
+  font-weight: 700;
+}
+
+.position {
+  font-size: var(--k-font-size-s);
+  opacity: 0.72;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--k-space-s) var(--k-space-m);
+  opacity: 0.72;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  margin: 0;
+  /* Room for the focus ring (2 px and its 2 px offset), which the scrolling box would cut off. */
+  padding: var(--k-space-xs);
+  overflow-y: auto;
+  list-style: none;
+  /* A drag by the grip does not select the names it passes. */
+  user-select: none;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+  padding: 0 var(--k-space-xs);
+  border: 1px solid transparent;
+  border-radius: var(--k-radius-m);
+}
+
+.row:hover {
+  background: var(--k-color-hover);
+}
+
+.row[data-current='true'] {
+  background: var(--k-color-selected);
+}
+
+.row[data-dragging='true'] {
+  opacity: 0.5;
+}
+
+/* Where the dragged entry would land: a line in the gap before a row, or after the last. */
+.row[data-drop='before']::before,
+.row[data-drop='after']::after {
+  content: '';
+  position: absolute;
+  left: var(--k-space-s);
+  right: var(--k-space-s);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--k-accent-solid);
+  pointer-events: none;
+}
+
+.row[data-drop='before']::before {
+  top: -2px;
+}
+
+.row[data-drop='after']::after {
+  bottom: -2px;
+}
+
+/* The grip: the pointer's way to move an entry (the keyboard's is Alt+↑ and Alt+↓). */
+.handle {
+  display: grid;
+  place-items: center;
+  flex: none;
+  align-self: stretch;
+  width: 20px;
+  cursor: grab;
+  opacity: 0.6;
+  /* The pointer is the drag's: the page does not pan or scroll under it. */
+  touch-action: none;
+}
+
+.handle:hover {
+  opacity: 1;
+}
+
+.row[data-dragging='true'] .handle {
+  cursor: grabbing;
+}
+
+.play {
+  flex: 1;
+  min-width: 0;
+  padding: var(--k-space-s) var(--k-space-xs);
+  border: 0;
+  border-radius: var(--k-radius-s);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play[aria-current='true'] {
+  font-weight: 700;
+}
+
+.remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.remove:hover,
+.remove:focus-visible {
+  background: var(--k-color-hover);
+  opacity: 1;
+}
+
+/* High contrast: no tint to show the playing entry by, so an edge. */
+@media (forced-colors: active) {
+  .row[data-current='true'] {
+    border-color: Highlight;
+  }
+
+  .row[data-drop='before']::before,
+  .row[data-drop='after']::after {
+    background: Highlight;
+  }
+}

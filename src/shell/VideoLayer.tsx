@@ -23,5 +23,6 @@ export default function VideoLayer() {
     return attachVideoInput(element);
   }, []);
 
-  return <div ref={layer} className={styles.layer} />;
+  // `data-video-layer`: a press on it is a press on the bare video (panels/Popover.tsx).
+  return <div ref={layer} className={styles.layer} data-video-layer />;
 }

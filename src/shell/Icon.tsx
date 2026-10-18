@@ -50,6 +50,14 @@ export const INFO =
   'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z';
 export const CHEVRON_DOWN = 'M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z';
 
+// The panels above the controls (Task 20).
+export const PLUS = 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z';
+export const MINUS = 'M19 13H5v-2h14z';
+export const CHECK = 'M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z';
+/** Two columns of three dots: the grip of a row that can be dragged. */
+export const GRIP =
+  'M7.4 6a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0zM13.4 6a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0zM7.4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0zM13.4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0zM7.4 18a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0zM13.4 18a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0z';
+
 const VIEW_BOX = '0 0 24 24';
 
 export default function Icon({ path }: { path: string }) {
