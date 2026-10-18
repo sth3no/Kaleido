@@ -333,18 +333,22 @@ test('tab goes round inside the panel, and shift+tab the other way', () => {
   const one = button('One');
   const two = button('Two');
   const slider = screen.getByRole('slider', { name: 'Slider' });
+  // The last element Tab reaches is Done, after the slider.
+  const last = button('Done');
 
   // From the last element to the first, and back.
-  slider.focus();
-  expect(fireEvent.keyDown(slider, { key: 'Tab', code: 'Tab' })).toBe(false);
+  last.focus();
+  expect(fireEvent.keyDown(last, { key: 'Tab', code: 'Tab' })).toBe(false);
   expect(document.activeElement).toBe(one);
   expect(fireEvent.keyDown(one, { key: 'Tab', code: 'Tab', shiftKey: true })).toBe(false);
-  expect(document.activeElement).toBe(slider);
+  expect(document.activeElement).toBe(last);
 
-  // In the middle the browser moves the focus itself.
-  two.focus();
-  expect(fireEvent.keyDown(two, { key: 'Tab', code: 'Tab' })).toBe(true);
-  expect(document.activeElement).toBe(two);
+  // In the middle the browser moves the focus itself; the slider is in the middle too.
+  for (const element of [two, slider]) {
+    element.focus();
+    expect(fireEvent.keyDown(element, { key: 'Tab', code: 'Tab' })).toBe(true);
+    expect(document.activeElement).toBe(element);
+  }
 
   // From the panel's own background (nothing in it focused) Tab goes to the end it was heading for.
   dialog.focus();
@@ -352,7 +356,7 @@ test('tab goes round inside the panel, and shift+tab the other way', () => {
   expect(document.activeElement).toBe(one);
   dialog.focus();
   expect(fireEvent.keyDown(dialog, { key: 'Tab', code: 'Tab', shiftKey: true })).toBe(false);
-  expect(document.activeElement).toBe(slider);
+  expect(document.activeElement).toBe(last);
 });
 
 test('focus that lands outside the panel is brought back in', () => {
@@ -393,8 +397,11 @@ test('the arrows and the page keys are the panel’s while the focus is in it; a
     // The slider moves with them itself.
     const slider = screen.getByRole('slider', { name: 'Slider' });
     expect(fireEvent.keyDown(slider, { key: 'ArrowLeft', code: 'ArrowLeft' })).toBe(true);
-    // Other keys are not the panel's business.
-    expect(fireEvent.keyDown(two, { key: 'x', code: 'KeyX' })).toBe(true);
+    expect(forwarded()).toEqual([]);
+    // Other keys are not the panel's business: it leaves them, and they go on to mpv as they do
+    // from any focused control (input/forward.ts handles them, so the default is prevented there).
+    fireEvent.keyDown(two, { key: 'x', code: 'KeyX' });
+    expect(sentToMpv('keyDown').map((event) => event.key)).toEqual(['x']);
   } finally {
     detach();
   }
