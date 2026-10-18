@@ -701,6 +701,29 @@ describe('changing a shortcut', () => {
     }
   });
 
+  test('Esc held after it dropped a conflict does not reach mpv until it is released', async () => {
+    await open();
+    const detach = attachVideoInput(document.createElement('div'));
+    try {
+      fireEvent.click(change('m'));
+      press('f', { code: 'KeyF' });
+      fireEvent.keyUp(document.body, { key: 'f', code: 'KeyF' });
+      const replace = within(row('m')).getByRole('button', { name: 'Replace' });
+      fireEvent.keyDown(replace, { key: 'Escape', code: 'Escape' });
+      expect(within(row('m')).queryByRole('alert')).toBeNull();
+      // Held past the repeat delay, with the question gone: mpv would leave fullscreen.
+      expect(press('Escape', { code: 'Escape', repeat: true })).toBe(false);
+      expect(fireEvent.keyUp(document.body, { key: 'Escape', code: 'Escape' })).toBe(false);
+      expect(forwarded()).toEqual([]);
+      // Released: Esc is mpv's again.
+      press('Escape', { code: 'Escape' });
+      expect(forwarded()).toHaveLength(1);
+      expect(calls('settings_rebind')).toEqual([]);
+    } finally {
+      detach();
+    }
+  });
+
   test('a conflict dropped from the keyboard gives the focus to the row\'s Change', async () => {
     await open();
     act(() => {

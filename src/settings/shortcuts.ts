@@ -179,9 +179,10 @@ export function groupBindings(bindings: readonly Binding[]): BindingGroup[] {
 }
 
 /**
- * The bindings that match `query`: every word of it has to occur in the key, the command, the
- * description or the name of the group (as `sourceLabel` says it), ignoring case and accents. A
- * query with no words matches everything.
+ * The bindings that match `query`: every word of it has to occur in the key, the command as the page
+ * shows it (`displayCommand`: a prefix mpv added is not shown, so it finds nothing), the description
+ * or the name of the group (as `sourceLabel` says it), ignoring case and accents. A query with no
+ * words matches everything.
  */
 export function filterBindings(
   bindings: readonly Binding[],
@@ -194,7 +195,7 @@ export function filterBindings(
   if (words.length === 0) return [...bindings];
   return bindings.filter((binding) => {
     const haystack = normalizeText(
-      [binding.key, binding.command, binding.comment ?? '', sourceLabel(binding.source)].join(' '),
+      [binding.key, displayCommand(binding.command), binding.comment ?? '', sourceLabel(binding.source)].join(' '),
     );
     return words.every((word) => haystack.includes(word));
   });

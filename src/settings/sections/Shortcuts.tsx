@@ -432,8 +432,10 @@ export default function Shortcuts() {
                       data-binding={key}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape' && asked !== null) {
-                          // Handled: the question is dropped, and Esc does not go on to mpv.
+                          // Handled: the question is dropped, and Esc does not go on to mpv; held,
+                          // it would once the question is gone (and leave fullscreen).
                           e.preventDefault();
+                          swallowUntilReleased(e.code || e.key);
                           dropConflict(key);
                         }
                       }}

@@ -158,6 +158,19 @@ describe('filterBindings', () => {
     expect(keys(filterBindings(all, 'mpv fullscreen', label))).toEqual(['f']);
     expect(filterBindings(all, 'fullscreen stats', label)).toEqual([]);
   });
+
+  test('searches the command as the page shows it, without the prefix mpv put in front', () => {
+    // mpv lists a plugin's key as `nonscalable script-binding …`; the page shows no "nonscalable",
+    // so a search for it must not find every plugin row.
+    const plugins = [
+      ...all,
+      binding('x', 'nonscalable script-binding testbind/test-x', { type: 'plugin', name: 'testbind' }),
+      binding('y', 'nonscalable script-binding testbind/test-y', { type: 'plugin', name: 'testbind' }),
+    ];
+    expect(filterBindings(plugins, 'nonscalable', label)).toEqual([]);
+    expect(keys(filterBindings(plugins, 'script-binding testbind/test-x', label))).toEqual(['x']);
+    expect(keys(filterBindings(plugins, 'testbind', label))).toEqual(['x', 'y']);
+  });
 });
 
 describe('readCapture', () => {
