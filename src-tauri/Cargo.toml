@@ -28,6 +28,9 @@ anyhow = "1"
 mpv-ffi = { path = "../crates/mpv-ffi" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# SHA-256 of the files Kaleido pins by checksum (the essentials' scripts, plugins/essentials.rs).
+# Already in the build through tauri.
+sha2 = "0.10"
 # The system's language for the "system" language setting (system_locale in commands.rs).
 sys-locale = "0.3.2"
 # The dates of the archived mpv logs; tracing-appender uses it too.

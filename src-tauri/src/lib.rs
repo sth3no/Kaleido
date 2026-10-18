@@ -6,6 +6,7 @@ pub mod input;
 pub mod job;
 pub mod paths;
 pub mod player;
+pub mod plugins;
 pub mod settings;
 pub mod surface;
 pub mod system;

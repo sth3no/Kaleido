@@ -15,11 +15,11 @@ drop, paste), playback controls, panels, error cards, the mini player, settings 
 | `src/` | The UI: React 19, TypeScript, Zustand, i18next (`src/i18n/locales/cs.json`, `en.json`). It talks to Rust only through typed commands and events (`src/ipc/`). |
 | `src-tauri/` | The app (crate `kaleido`, binary `Kaleido.exe`): the mpv engine, the video surface, glass, thumbnails, settings, opening and the single instance, logs and diagnostics. |
 | `crates/` | `mpv-ffi` (libmpv bindings) and `kaleido-mpv` (the headless mpv command line that thumbfast starts). |
-| `resources/` | Bundled defaults (`mpv.conf`, `input.conf`) and the licence lists for the About page. |
-| `scripts/` | Pinned libmpv and thumbfast downloads, the licence generator, the local install, performance measurement, association diagnostics. |
+| `resources/` | Bundled defaults (`mpv.conf`, `input.conf`), the pinned essentials (`essentials/essentials.json`) and the licence lists for the About page. |
+| `scripts/` | Pinned libmpv and essentials downloads, the licence generator, the local install, performance measurement, association diagnostics. |
 | `e2e/` | The smoke E2E test (WebdriverIO, tauri-driver, Microsoft Edge WebDriver). |
 | `docs/` | The specification, the plans, the M0 report and the manual checklists. |
-| `vendor/` | Pinned libmpv and thumbfast (downloaded, not in git). |
+| `vendor/` | Pinned libmpv and the essentials: thumbfast, sub-select, reload (downloaded, not in git). |
 
 ## Build and run
 
@@ -27,7 +27,7 @@ Needs Rust 1.90 or newer, Node 24 with npm, and the WebView2 runtime.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-libmpv.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-thumbfast.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-essentials.ps1
 npm ci
 npm run tauri dev
 ```

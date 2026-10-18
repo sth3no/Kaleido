@@ -88,7 +88,11 @@ fn thumbfast_helper(paths: &AppPaths) -> PathBuf {
 
 /// The bundled thumbfast script (plan decision 4).
 fn thumbfast_script(paths: &AppPaths) -> PathBuf {
-    paths.resource_dir.join("essentials").join("thumbfast.lua")
+    paths
+        .resource_dir
+        .join("essentials")
+        .join("thumbfast")
+        .join("thumbfast.lua")
 }
 
 /// The mpv commands that load thumbfast, to run after `initialize`: its script options, then the
@@ -396,7 +400,11 @@ mod tests {
         );
         let command = |args: &[&str]| args.iter().map(|&arg| arg.to_owned()).collect::<Vec<_>>();
         let helper = paths.exe_dir.join("kaleido-mpv.exe");
-        let script = paths.resource_dir.join("essentials").join("thumbfast.lua");
+        let script = paths
+            .resource_dir
+            .join("essentials")
+            .join("thumbfast")
+            .join("thumbfast.lua");
         assert_eq!(
             thumbfast_commands(&paths),
             [

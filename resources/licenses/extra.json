@@ -10,5 +10,29 @@
     "version": "0f711de",
     "license": "MPL-2.0",
     "url": "https://github.com/po5/thumbfast/tree/0f711de3138c9bd6718209d819ac54022c23ded2"
+  },
+  {
+    "name": "sub-select",
+    "version": "26d24a0",
+    "license": "MIT",
+    "url": "https://github.com/CogentRedTester/mpv-sub-select/tree/26d24a0fd1d69988eaedda6056a2c87d0a55b6cb"
+  },
+  {
+    "name": "reload",
+    "version": "fb7a26e",
+    "license": "MIT",
+    "url": "https://github.com/4e6/mpv-reload/tree/fb7a26e21e581fcac4eeee9291de0ff788dc1a47"
+  },
+  {
+    "name": "yt-dlp",
+    "version": "managed",
+    "license": "Unlicense",
+    "url": "https://github.com/yt-dlp/yt-dlp"
+  },
+  {
+    "name": "Deno",
+    "version": "managed",
+    "license": "MIT",
+    "url": "https://github.com/denoland/deno"
   }
 ]

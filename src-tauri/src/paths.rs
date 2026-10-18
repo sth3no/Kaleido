@@ -25,7 +25,7 @@ pub struct AppPaths {
     pub cache_dir: PathBuf,
     /// `<local_dir>\crash`.
     pub crash_dir: PathBuf,
-    /// `resources\` of the installation: `defaults\`, `essentials\thumbfast.lua`, ...
+    /// `resources\` of the installation: `defaults\`, `essentials\<name>\<file>`, ...
     pub resource_dir: PathBuf,
     /// The user's Desktop: mpv `screenshot-dir`.
     pub desktop_dir: PathBuf,

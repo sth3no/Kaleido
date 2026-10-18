@@ -1,0 +1,93 @@
+[
+  {
+    "name": "thumbfast",
+    "scriptName": "thumbfast",
+    "optsName": "thumbfast",
+    "repo": "po5/thumbfast",
+    "commit": "0f711de3138c9bd6718209d819ac54022c23ded2",
+    "version": "0f711de",
+    "license": "MPL-2.0",
+    "summary": {
+      "en": "Timeline previews: shows a thumbnail of the video when you point at the seek bar.",
+      "cs": "Náhledy na časové ose: ukáže náhled videa, když najedete na posuvník."
+    },
+    "files": [
+      {
+        "src": "thumbfast.lua",
+        "dest": "scripts/thumbfast/main.lua",
+        "sha256": "a3d08e71eae8b892f6cd39f9593ea219768e709312d176bca883841b156448bf"
+      }
+    ],
+    "settings": [
+      { "key": "max_height", "type": "int", "default": 200, "min": 50, "max": 600,
+        "label": { "en": "Largest preview height (px)", "cs": "Největší výška náhledu (px)" } },
+      { "key": "max_width", "type": "int", "default": 200, "min": 50, "max": 600,
+        "label": { "en": "Largest preview width (px)", "cs": "Největší šířka náhledu (px)" } },
+      { "key": "spawn_first", "type": "bool", "default": false,
+        "label": { "en": "Start the preview helper when a file opens", "cs": "Spustit pomocníka náhledů při otevření souboru" } },
+      { "key": "hwdec", "type": "bool", "default": false,
+        "label": { "en": "Hardware decoding for previews", "cs": "Hardwarové dekódování náhledů" } }
+    ],
+    "managed": { "mpv_path": "{helper}", "network": "no", "tone_mapping": "mobius" }
+  },
+  {
+    "name": "sub-select",
+    "scriptName": "sub_select",
+    "optsName": "sub_select",
+    "repo": "CogentRedTester/mpv-sub-select",
+    "commit": "26d24a0fd1d69988eaedda6056a2c87d0a55b6cb",
+    "version": "26d24a0",
+    "license": "MIT",
+    "summary": {
+      "en": "Picks the subtitle track by your language preferences and the audio track playing.",
+      "cs": "Vybírá titulky podle vašich jazykových preferencí a podle zvukové stopy, která hraje."
+    },
+    "files": [
+      {
+        "src": "sub-select.lua",
+        "dest": "scripts/sub-select/main.lua",
+        "sha256": "16f16b199f5273b9306f9cc48c4c710eb22ba37f6eeefbac074bcc533ade2271"
+      }
+    ],
+    "settings": [
+      { "key": "select_audio", "type": "bool", "default": false,
+        "label": { "en": "Also pick the audio track by your preferences", "cs": "Vybírat i zvukovou stopu podle preferencí" } },
+      { "key": "observe_audio_switches", "type": "bool", "default": false,
+        "label": { "en": "Pick the subtitles again when the audio track changes", "cs": "Znovu vybrat titulky při změně zvukové stopy" } },
+      { "key": "explicit_forced_subs", "type": "bool", "default": false,
+        "label": { "en": "Pick forced subtitles only when the preferences list them", "cs": "Vybírat vynucené titulky jen tehdy, když je preference uvádějí" } }
+    ]
+  },
+  {
+    "name": "reload",
+    "scriptName": "reload",
+    "optsName": "reload",
+    "repo": "4e6/mpv-reload",
+    "commit": "fb7a26e21e581fcac4eeee9291de0ff788dc1a47",
+    "version": "fb7a26e",
+    "license": "MIT",
+    "summary": {
+      "en": "Reloads a stream that stalls or stops buffering and carries on from the same place; Ctrl+R does it by hand.",
+      "cs": "Znovu načte stream, který se zasekne nebo přestane načítat, a naváže na stejném místě; Ctrl+R to udělá ručně."
+    },
+    "files": [
+      {
+        "src": "main.lua",
+        "dest": "scripts/reload/main.lua",
+        "sha256": "a8949ffe64dc557c60ea24c06f8b5593716463fae6235480b77713bfe786c806"
+      }
+    ],
+    "settings": [
+      { "key": "paused_for_cache_timer_enabled", "type": "bool", "default": true,
+        "label": { "en": "Reload when playback waits for the cache for too long", "cs": "Znovu načíst, když přehrávání příliš dlouho čeká na cache" } },
+      { "key": "paused_for_cache_timer_timeout", "type": "int", "default": 10, "min": 3, "max": 120,
+        "label": { "en": "Seconds to wait for the cache before reloading", "cs": "Sekundy čekání na cache před novým načtením" } },
+      { "key": "demuxer_cache_timer_enabled", "type": "bool", "default": true,
+        "label": { "en": "Reload when the cache stops growing", "cs": "Znovu načíst, když přestane přibývat cache" } },
+      { "key": "demuxer_cache_timer_timeout", "type": "int", "default": 20, "min": 5, "max": 300,
+        "label": { "en": "Seconds without new data before reloading", "cs": "Sekundy bez nových dat před novým načtením" } },
+      { "key": "reload_eof_enabled", "type": "bool", "default": false,
+        "label": { "en": "Reload at the end of the file, for streams that keep growing", "cs": "Znovu načíst na konci souboru, pro streamy, které stále rostou" } }
+    ]
+  }
+]

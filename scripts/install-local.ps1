@@ -168,20 +168,30 @@ if ($Unregister) {
     # tauri-build puts them in the build folder as bundle.resources in src-tauri\tauri.conf.json
     # maps them, so they are the ones of that build.
     $Bundled = @(
-        'resources\essentials\thumbfast.lua',
+        'resources\essentials\essentials.json',
         'resources\defaults\mpv.conf',
         'resources\defaults\input.conf',
         'resources\licenses\extra.json',
         'resources\licenses\third-party.json'
     )
+    # The essentials are the whole resources\essentials folder of the build: the manifest and a
+    # folder with the files of each script (bundle.resources maps vendor\essentials into it).
+    $BuildRoot = [IO.Path]::GetFullPath($BuildDir).TrimEnd('\') + '\'
+    $EssentialsDir = Join-Path $BuildRoot 'resources\essentials'
+    if (Test-Path -LiteralPath $EssentialsDir -PathType Container) {
+        $Bundled += @(Get-ChildItem -LiteralPath $EssentialsDir -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($BuildRoot.Length) })
+    }
     $Files = @(
         @{ Source = Join-Path $BuildDir 'Kaleido.exe'; Destination = 'Kaleido.exe' },
         @{ Source = Join-Path $BuildDir 'kaleido-mpv.exe'; Destination = 'kaleido-mpv.exe' },
         @{ Source = Join-Path $RepoRoot 'vendor\libmpv\libmpv-2.dll'; Destination = 'libmpv-2.dll' },
         @{ Source = Join-Path $RepoRoot 'LICENSE'; Destination = 'LICENSE' }
-    ) + @($Bundled | ForEach-Object { @{ Source = Join-Path $BuildDir $_; Destination = $_ } })
-    # What the M0 build had there and M1 reads from elsewhere (resources\essentials) or not at all.
-    $Retired = @('resources\thumbfast.lua', 'resources\click-target.lua')
+    ) + @($Bundled | Select-Object -Unique | ForEach-Object { @{ Source = Join-Path $BuildDir $_; Destination = $_ } })
+    # What earlier builds had there and are read from elsewhere now, or not at all: the M0
+    # thumbfast and click-target, and the M1 single-file thumbfast (resources\essentials\<name>\
+    # holds it now).
+    $Retired = @('resources\thumbfast.lua', 'resources\click-target.lua', 'resources\essentials\thumbfast.lua')
     foreach ($File in $Files) {
         if (-not (Test-Path -LiteralPath $File.Source -PathType Leaf)) {
             throw "Missing $($File.Source). Build the release app and kaleido-mpv first (or pass -BuildDir)."

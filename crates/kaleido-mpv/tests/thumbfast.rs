@@ -1,5 +1,5 @@
 //! End-to-end: pinned thumbfast inside libmpv spawns kaleido-mpv and reports a thumbnail
-//! via `thumbfast-render` (spec 5.4 #7). Needs `scripts/fetch-thumbfast.ps1`.
+//! via `thumbfast-render` (spec 5.4 #7). Needs `scripts/fetch-essentials.ps1`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -8,9 +8,12 @@ use mpv_ffi::{Event, Mpv, load_api, locate_libmpv};
 
 #[test]
 fn thumbfast_renders_through_kaleido_mpv() {
-    let thumbfast =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/thumbfast/thumbfast.lua");
-    assert!(thumbfast.is_file(), "run scripts/fetch-thumbfast.ps1 first");
+    let thumbfast = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../vendor/essentials/thumbfast/thumbfast.lua");
+    assert!(
+        thumbfast.is_file(),
+        "run scripts/fetch-essentials.ps1 first"
+    );
     let dir = tempfile::tempdir().unwrap();
     let clip = dir.path().join("clip.y4m");
     mpv_ffi::testing::write_y4m(&clip, 320, 180, 90).unwrap();
