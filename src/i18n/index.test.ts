@@ -38,7 +38,8 @@ describe('the i18next instance', () => {
   });
 
   test('is ready at once after initI18n, in the language it is given', () => {
-    expect(i18next.isInitialized).toBe(false);
+    // Not initialised yet: i18next has no isInitialized at all until its init sets it to true.
+    expect(i18next.isInitialized).toBeFalsy();
 
     initI18n('cs');
 
