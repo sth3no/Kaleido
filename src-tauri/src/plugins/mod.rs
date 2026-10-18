@@ -29,6 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -59,10 +60,12 @@ pub const ERROR_EVENT: &str = "plugins:error";
 pub struct PluginInfo {
     /// What the commands call it, one for each script that is found:
     /// - a plugin in `plugins.json` (one Kaleido installed): its key there, which is its folder
-    ///   (or, for a record of a single file, the file's name without its extension);
+    ///   (or, for a record that lists a single file, never an essential's, the file's name
+    ///   without its extension);
     /// - any other folder: the folder's name;
     /// - any other file: the file's name with its extension (`my-plugin.lua`), so that the folder
-    ///   `x` and the file `x.lua` are two plugins.
+    ///   `x` and the file `x.lua` are two plugins. A user's `thumbfast.lua` where Kaleido's
+    ///   `thumbfast\` was is the user's: manual, with `copy_of`, and thumbfast is missing.
     ///
     /// Where that is taken already (the same folder in `scripts\` and in `scripts-disabled\`),
     /// ` (2)`, ` (3)`, … follows, in the order mpv loads them.
@@ -574,7 +577,8 @@ impl Plugins {
 
     /// "Použít" (spec 6.3): restarts the core with `restart`, which plays on where it was and loads
     /// the plugins that are on now (the app's is `restart_engine`). `emit` hears the state twice:
-    /// with `applying` before the restart, and after it, also when it failed. Once the new core
+    /// with `applying` before the restart, and without it after the restart, also when it failed
+    /// or panicked (the panic then goes on to the caller, after `applying` ended). Once the new core
     /// runs, the plugins that are on are the ones that run and no change waits; a core that did not
     /// start is `Unavailable`, and the changes still wait for the next Apply. Another change while
     /// it runs, Apply too, is `Busy`.
@@ -591,31 +595,37 @@ impl Plugins {
             inner.applying = true;
             self.state(&inner)
         };
-        // Whatever happens in the restart, a panic too, Apply ends.
-        let mut guard = Applying {
-            plugins: self,
-            armed: true,
-        };
-        emit(&before);
-        let restarted = restart();
-        guard.armed = false;
+        // Whatever happens in the restart, a panic too, Apply ends, and the UI hears so.
+        let restarted = panic::catch_unwind(AssertUnwindSafe(|| {
+            emit(&before);
+            restart()
+        }));
         let mut inner = lock(&self.inner);
         inner.applying = false;
+        let mut panicked = None;
         let outcome = match restarted {
-            Ok(()) | Err(RestartError::Quit) => {
+            Ok(Ok(()) | Err(RestartError::Quit)) => {
                 let running = self.enabled(&inner.registry);
                 self.set_running(&mut inner, running);
                 inner.pending_settings.clear();
                 Ok(())
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 tracing::error!("the plugins are not applied: {error}");
+                Err(PluginError::Unavailable)
+            }
+            // The panic hook has logged it; the changes still wait.
+            Err(payload) => {
+                panicked = Some(payload);
                 Err(PluginError::Unavailable)
             }
         };
         let after = self.state(&inner);
         drop(inner);
         emit(&after);
+        if let Some(payload) = panicked {
+            panic::resume_unwind(payload);
+        }
         outcome.map(|()| after)
     }
 
@@ -835,20 +845,6 @@ impl Plugins {
     }
 }
 
-/// Ends Apply when the restart did not return (it panicked).
-struct Applying<'a> {
-    plugins: &'a Plugins,
-    armed: bool,
-}
-
-impl Drop for Applying<'_> {
-    fn drop(&mut self) {
-        if self.armed {
-            lock(&self.plugins.inner).applying = false;
-        }
-    }
-}
-
 /// Tells the UI the plugins' state (`plugins:changed`).
 pub fn emit_changed(app: &AppHandle, state: &PluginsState) {
     if let Err(error) = app.emit(CHANGED_EVENT, state) {
@@ -942,10 +938,23 @@ fn read_options(dir: &Path, file: &str) -> Result<String, PluginError> {
     }
 }
 
+/// Whether `record` is of the single file `entry` (its name in `scripts\`, with the extension):
+/// its files list `scripts/<entry>`. Never an essential's record: essentials are folders, and a
+/// file of an essential's name where its folder was is the user's own copy.
+fn records_file(record: &PluginRecord, entry: &str) -> bool {
+    let path = format!("scripts/{entry}");
+    record.source != PluginSource::Bundled
+        && record
+            .files
+            .iter()
+            .any(|file| file.path.replace('\\', "/").eq_ignore_ascii_case(&path))
+}
+
 /// Names the scripts `found` (in [`scan::scan`]'s order) as [`PluginInfo::name`] says:
-/// 1. each record of `registry` is the folder of its name, or else the file whose name without
-///    its extension it is; of two such, the one that is on or off as the record says, or else the
-///    first;
+/// 1. each record of `registry` is the folder of its name, or else a file whose name without its
+///    extension it is and which the record lists ([`records_file`]); of two such, the one that is
+///    on or off as the record says, or else the first. A record that none is (its files are gone)
+///    names nothing;
 /// 2. every other script is its folder or its file with the extension, and one whose name is
 ///    taken gets the first ` (n)` from 2 that is nobody's.
 fn identify(found: Vec<Found>, registry: &Registry) -> Vec<Script> {
@@ -954,7 +963,12 @@ fn identify(found: Vec<Found>, registry: &Registry) -> Vec<Script> {
     for (key, record) in &registry.plugins {
         let matching = |layout: Layout| -> Vec<usize> {
             (0..found.len())
-                .filter(|&index| found[index].layout == layout && found[index].name == *key)
+                .filter(|&index| {
+                    let script = &found[index];
+                    script.layout == layout
+                        && script.name == *key
+                        && (layout == Layout::Folder || records_file(record, &script.entry_name()))
+                })
                 .collect()
         };
         let mut candidates = matching(Layout::Folder);
@@ -1046,7 +1060,6 @@ pub(crate) mod testing {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
-    use std::panic::{self, AssertUnwindSafe};
 
     use serde_json::{Value, json};
 
@@ -1132,8 +1145,9 @@ mod tests {
         Registry::load(paths.config_dir.join(registry::FILE))
     }
 
-    /// Writes a record of `name` into `plugins.json`, as an install would.
-    fn register(paths: &AppPaths, name: &str, source: PluginSource, enabled: bool) {
+    /// Writes a record of `name` with `files` (paths under the config folder, with `/`) into
+    /// `plugins.json`, as an install would.
+    fn register(paths: &AppPaths, name: &str, source: PluginSource, enabled: bool, files: &[&str]) {
         let mut registry = registry_on_disk(paths);
         registry.plugins.insert(
             name.to_owned(),
@@ -1143,7 +1157,13 @@ mod tests {
                 version: Some("1.2.0".to_owned()),
                 repo: None,
                 commit: None,
-                files: Vec::new(),
+                files: files
+                    .iter()
+                    .map(|path| registry::FileRecord {
+                        path: (*path).to_owned(),
+                        sha256: sha256_hex(path.as_bytes()),
+                    })
+                    .collect(),
                 enabled,
                 installed_at: "2026-10-19T12:00:00Z".to_owned(),
             },
@@ -1179,7 +1199,13 @@ mod tests {
             &paths.scripts_dir.join("fancy").join("main.lua"),
             "-- fancy\n",
         );
-        register(&paths, "fancy", PluginSource::Store, true);
+        register(
+            &paths,
+            "fancy",
+            PluginSource::Store,
+            true,
+            &["scripts/fancy/main.lua"],
+        );
         let plugins = Plugins::start(&paths, UiLanguage::En);
         let loads = Loads::default();
 
@@ -1465,6 +1491,75 @@ mod tests {
         assert!(settings.managed.is_empty());
     }
 
+    /// Review of Task 7: the user deleted Kaleido's `scripts\thumbfast\` and dropped in their own
+    /// `thumbfast.lua`. The file is theirs: manual, a copy of thumbfast, with their own options
+    /// (no schema, no managed keys, nothing written for it at a start); thumbfast is missing and
+    /// offered by Restore; uninstalling the file leaves thumbfast's record alone. Uses the real
+    /// Recycle Bin once (the user's stand-in file).
+    #[test]
+    fn a_users_file_where_an_essentials_folder_was_is_the_users() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        bundle(&paths);
+        let plugins = Plugins::start(&paths, UiLanguage::En);
+        fs::remove_dir_all(paths.scripts_dir.join("thumbfast")).unwrap();
+        put(
+            &paths.scripts_dir.join("thumbfast.lua"),
+            "-- my thumbfast\n",
+        );
+        let conf = paths.script_opts_dir.join("thumbfast.conf");
+        put(&conf, "max_height=300\n");
+
+        let state = plugins.list();
+
+        assert_eq!(names(&state), ["reload", "sub-select", "thumbfast.lua"]);
+        let copy = info(&state, "thumbfast.lua");
+        assert_eq!(copy.source, PluginSource::Manual);
+        assert_eq!(copy.copy_of.as_deref(), Some("thumbfast"));
+        assert_eq!(copy.settings, SettingsForm::KeyValue);
+        assert_eq!(copy.version, None);
+        assert_eq!(state.removed_essentials, ["thumbfast"]);
+        let settings = plugins.settings("thumbfast.lua").unwrap();
+        assert_eq!(settings.schema, None);
+        assert!(settings.managed.is_empty());
+        assert_eq!(
+            settings.entries,
+            [OptEntry {
+                key: "max_height".to_owned(),
+                value: "300".to_owned()
+            }]
+        );
+        // mpv_path is the user's to set for their copy.
+        plugins
+            .set_setting("thumbfast.lua", "mpv_path", Some("mpv"))
+            .unwrap();
+        assert_eq!(read(&conf), "max_height=300\nmpv_path=mpv\n");
+
+        // Neither before a restart nor at the next start does Kaleido write its options there.
+        plugins.write_managed();
+        drop(Plugins::start(&paths, UiLanguage::En));
+        assert_eq!(read(&conf), "max_height=300\nmpv_path=mpv\n");
+
+        // Uninstalled, the user's file goes; thumbfast's record and the removed list stay as
+        // they were.
+        let state = plugins.uninstall("thumbfast.lua").unwrap();
+        assert!(!paths.scripts_dir.join("thumbfast.lua").exists());
+        let on_disk = registry_on_disk(&paths);
+        assert!(on_disk.plugins.contains_key("thumbfast"));
+        assert!(on_disk.removed.is_empty());
+        assert_eq!(state.removed_essentials, ["thumbfast"]);
+
+        // Restore brings Kaleido's back, with its options.
+        let state = plugins.restore_essentials(&Loads::default()).unwrap();
+        assert_eq!(
+            read(&paths.scripts_dir.join("thumbfast").join("main.lua")),
+            stand_in("thumbfast")
+        );
+        assert_eq!(info(&state, "thumbfast").source, PluginSource::Bundled);
+        assert!(state.removed_essentials.is_empty());
+        assert!(read(&conf).contains("network=no\n"), "{}", read(&conf));
+    }
+
     /// The carry of Task 3: every script is listed once under a name of its own, which every
     /// command takes, and only scripts that are on count as duplicates.
     #[test]
@@ -1487,9 +1582,26 @@ mod tests {
                 .join("main.lua"),
             "-- another\n",
         );
-        // A file plugins.json has a record of, by its name without the extension.
+        // A file plugins.json has a record of, by its name without the extension: the record
+        // lists the file.
         put(&paths.scripts_dir.join("mine.js"), "// mine\n");
-        register(&paths, "mine", PluginSource::Manual, true);
+        register(
+            &paths,
+            "mine",
+            PluginSource::Manual,
+            true,
+            &["scripts/mine.js"],
+        );
+        // A file of a record's name that the record does not list (it lists a folder, gone): the
+        // user's, by its name with the extension.
+        put(&paths.scripts_dir.join("other.lua"), "-- mine too\n");
+        register(
+            &paths,
+            "other",
+            PluginSource::Store,
+            true,
+            &["scripts/other/main.lua"],
+        );
         let plugins = Plugins::start(&paths, UiLanguage::En);
         let loads = Loads::default();
 
@@ -1497,13 +1609,24 @@ mod tests {
 
         assert_eq!(
             names(&state),
-            ["mine", "twice", "twice (3)", "twice (2)", "x", "x.lua"]
+            [
+                "mine",
+                "other.lua",
+                "twice",
+                "twice (3)",
+                "twice (2)",
+                "x",
+                "x.lua"
+            ]
         );
         assert!(info(&state, "x").duplicate && info(&state, "x.lua").duplicate);
         for name in ["mine", "twice", "twice (3)", "twice (2)"] {
             assert!(!info(&state, name).duplicate, "{name}");
         }
         assert_eq!(info(&state, "mine").version.as_deref(), Some("1.2.0"));
+        assert_eq!(info(&state, "mine").source, PluginSource::Manual);
+        assert_eq!(info(&state, "other.lua").source, PluginSource::Manual);
+        assert_eq!(info(&state, "other.lua").version, None);
         assert!(!info(&state, "twice (3)").enabled);
 
         // The second "twice" cannot be turned on beside the first, and can be uninstalled.
@@ -1516,7 +1639,10 @@ mod tests {
             read(&paths.scripts_dir.join("twice").join("main.lua")),
             "-- on\n"
         );
-        assert_eq!(names(&state), ["mine", "twice", "twice (2)", "x", "x.lua"]);
+        assert_eq!(
+            names(&state),
+            ["mine", "other.lua", "twice", "twice (2)", "x", "x.lua"]
+        );
 
         // Off, the file is no duplicate any more.
         let state = plugins.set_enabled("x.lua", false, &loads).unwrap();
@@ -1734,24 +1860,36 @@ mod tests {
         );
     }
 
-    /// A restart that panics (on its blocking thread in the app) does not leave Apply running.
+    /// A restart that panics (on its blocking thread in the app) does not leave Apply running, and
+    /// the UI hears that it ended: the second `plugins:changed`, without `applying`, comes before
+    /// the panic goes on.
     #[test]
     fn apply_ends_when_the_restart_panics() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = temp_paths(tmp.path());
         put(&paths.scripts_dir.join("x").join("main.lua"), "-- x\n");
         let plugins = Plugins::start(&paths, UiLanguage::En);
+        let heard = Mutex::new(Vec::new());
 
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            plugins.apply(|| panic!("a deliberate panic in the restart"), |_| {})
+            plugins.apply(
+                || panic!("a deliberate panic in the restart"),
+                |state| heard.lock().unwrap().push(state.applying),
+            )
         }));
 
-        assert!(result.is_err());
+        assert!(result.is_err(), "the panic goes on to the caller");
+        assert_eq!(*heard.lock().unwrap(), [true, false]);
         assert!(!plugins.list().applying);
         assert!(plugins.set_enabled("x", false, &Loads::default()).is_ok());
-        // A restart that started no core: the changes still wait.
-        let failed = plugins.apply(|| Err(RestartError::Start("mpv failed".to_owned())), |_| {});
+        // A restart that started no core: the changes still wait, and the UI hears both states.
+        heard.lock().unwrap().clear();
+        let failed = plugins.apply(
+            || Err(RestartError::Start("mpv failed".to_owned())),
+            |state| heard.lock().unwrap().push(state.applying),
+        );
         assert_eq!(failed, Err(PluginError::Unavailable));
+        assert_eq!(*heard.lock().unwrap(), [true, false]);
         let state = plugins.list();
         assert!(state.restart_needed && !state.applying);
     }

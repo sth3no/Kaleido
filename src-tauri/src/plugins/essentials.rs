@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use super::install::{self, FileSource, InstallPlan, PlannedFile};
 use super::registry::{self, PluginRecord, PluginSource, Registry};
-use super::scan::{self, Found};
+use super::scan::{self, Found, Layout};
 use super::schema::{Localized, SettingSpec};
 use super::script_opts::ScriptOpts;
 use crate::paths::AppPaths;
@@ -247,27 +247,38 @@ fn write_sub_select_prefs(paths: &AppPaths, language: UiLanguage) {
     }
 }
 
-/// Before every start of the core: for each essential of `manifest` that `registry` has (on or
-/// off), sets its `managed` options in `script-opts\<opts_name>.conf`, gently ([`ScriptOpts`]: the
-/// user's other lines stay as they are) and atomically, and only when something changes. `{helper}`
-/// in a value is `kaleido-mpv.exe` next to the app. The scripts read the file when they load, so
-/// a value the user changed is Kaleido's again at the next start. What fails is logged.
+/// Before every start of the core: for each essential of `manifest` that is installed (on or off:
+/// `registry` has it, and its folder is in `scripts\` or in `scripts-disabled\`), sets its
+/// `managed` options in `script-opts\<opts_name>.conf`, gently ([`ScriptOpts`]: the user's other
+/// lines stay as they are) and atomically, and only when something changes. `{helper}` in a value
+/// is `kaleido-mpv.exe` next to the app. The scripts read the file when they load, so a value the
+/// user changed is Kaleido's again at the next start. What fails is logged.
 ///
-/// And when `registry` has sub-select (on or off) and `script-opts\sub-select.json` is missing
-/// (a write that failed, a file the user deleted), it is written for `language`, as [`seed`]
-/// does: sub-select does not start without it. One that is there is never replaced.
+/// An essential whose folder is gone gets nothing, also when a script of the user's runs under its
+/// name (their own `thumbfast.lua` where `thumbfast\` was): that copy keeps the user's options.
+///
+/// And when sub-select is installed (on or off) and `script-opts\sub-select.json` is missing (a
+/// write that failed, a file the user deleted), it is written for `language`, as [`seed`] does:
+/// sub-select does not start without it. One that is there is never replaced.
 pub fn write_managed(
     paths: &AppPaths,
     manifest: &[Essential],
     registry: &Registry,
     language: UiLanguage,
 ) {
-    if registry.plugins.contains_key(SUB_SELECT) {
+    let found = scan::scan(paths);
+    let installed = |name: &str| {
+        registry.plugins.contains_key(name)
+            && found
+                .iter()
+                .any(|script| script.layout == Layout::Folder && script.name == name)
+    };
+    if installed(SUB_SELECT) {
         write_sub_select_prefs(paths, language);
     }
     let helper = paths.exe_dir.join(HELPER_EXE);
     for essential in manifest {
-        if essential.managed.is_empty() || !registry.plugins.contains_key(&essential.name) {
+        if essential.managed.is_empty() || !installed(&essential.name) {
             continue;
         }
         if essential
@@ -890,6 +901,50 @@ mod tests {
         fs::write(&conf, &latin1).unwrap();
         write_managed(&paths, &manifest, &registry, UiLanguage::En);
         assert_eq!(fs::read(&conf).unwrap(), latin1);
+    }
+
+    /// The managed options are for Kaleido's own copy: an essential whose folder the user deleted
+    /// gets none, also when their own script of its name runs in its place, and neither does
+    /// sub-select get its preferences back then. One that is off is still Kaleido's.
+    #[test]
+    fn managed_options_are_written_only_for_kaleidos_own_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let manifest = bundled(&paths);
+        let mut registry = Registry::default();
+        seed(&paths, &mut registry, &manifest, UiLanguage::En);
+        let conf = paths.script_opts_dir.join("thumbfast.conf");
+        let prefs = paths.script_opts_dir.join(SUB_SELECT_PREFS);
+        // Off: moved to scripts-disabled\, written to.
+        fs::create_dir_all(&paths.scripts_disabled_dir).unwrap();
+        fs::rename(
+            paths.scripts_dir.join("thumbfast"),
+            paths.scripts_disabled_dir.join("thumbfast"),
+        )
+        .unwrap();
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
+        assert!(read(&conf).contains("network=no\n"));
+
+        // The folders gone by hand, the user's own thumbfast in its place; the records stay.
+        fs::remove_dir_all(paths.scripts_disabled_dir.join("thumbfast")).unwrap();
+        fs::remove_dir_all(paths.scripts_dir.join(SUB_SELECT)).unwrap();
+        put(
+            &paths.scripts_dir.join("thumbfast.lua"),
+            "-- my thumbfast\n",
+        );
+        fs::write(&conf, "network=yes\n").unwrap();
+        fs::remove_file(&prefs).unwrap();
+        assert!(registry.plugins.contains_key("thumbfast"));
+        assert!(registry.plugins.contains_key(SUB_SELECT));
+
+        write_managed(&paths, &manifest, &registry, UiLanguage::En);
+
+        assert_eq!(
+            read(&conf),
+            "network=yes\n",
+            "the user's copy, the user's options"
+        );
+        assert!(!prefs.exists(), "no sub-select of Kaleido's is there");
     }
 
     #[test]

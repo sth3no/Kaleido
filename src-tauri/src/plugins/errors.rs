@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use super::names;
 use crate::player::LogLine;
 
 /// How many lines of each plugin are kept for its log in the UI: the last ones.
@@ -64,23 +65,29 @@ impl PluginErrors {
 }
 
 /// The client names mpv gives the running plugins, to the plugins' names. `running` is
-/// `(name, script_name)` in the order the scripts were loaded: the first script of a name gets the
-/// name, the next ones `<name>2`, `<name>3`, … as `mp_new_client` numbers them (see
-/// [`super::names`]). mpv's own clients (`stats`, `console`, …) are not known here: a plugin
-/// named like one of them is `stats2` to mpv, so its own lines are missed and the built-in
-/// script's errors are counted as the plugin's.
+/// `(name, script_name)` in the order the scripts were loaded. As `mp_new_client` does it (see
+/// [`super::names`]), a script gets its name if no client has it yet, and else the first of
+/// `<name>2`, `<name>3`, … that none has; mpv's own clients ([`names::BUILT_IN_CLIENTS`]) come
+/// first, so a plugin named like one of them (`stats.lua`) is `stats2`, and the built-in script's
+/// errors are not the plugin's.
 pub fn clients<'a>(
     running: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> BTreeMap<String, String> {
-    let mut seen: BTreeMap<&str, u32> = BTreeMap::new();
+    let mut taken: BTreeSet<String> = names::BUILT_IN_CLIENTS
+        .iter()
+        .map(|&client| client.to_owned())
+        .collect();
     let mut clients = BTreeMap::new();
     for (name, script_name) in running {
-        let count = seen.entry(script_name).or_default();
-        *count += 1;
-        let client = match *count {
-            1 => script_name.to_owned(),
-            number => format!("{script_name}{number}"),
+        let client = if taken.contains(script_name) {
+            (2..)
+                .map(|number| format!("{script_name}{number}"))
+                .find(|candidate| !taken.contains(candidate))
+                .unwrap_or_default()
+        } else {
+            script_name.to_owned()
         };
+        taken.insert(client.clone());
         clients.insert(client, name.to_owned());
     }
     clients
@@ -198,5 +205,53 @@ mod tests {
         errors.note(&line("error", "thumbfast2", "x\n"), &by_script_name);
         assert_eq!(errors.count("thumbfast.lua"), 1);
         assert_eq!(errors.count("thumbfast"), 0);
+    }
+
+    /// mpv's own scripts are clients before any plugin: a plugin named like one is numbered after
+    /// it, and the built-in's errors are not the plugin's (no false badge, no notice).
+    #[test]
+    fn a_plugin_named_like_one_of_mpvs_own_scripts_is_numbered_after_it() {
+        let by_script_name = clients([
+            ("stats.lua", "stats"),
+            ("console", "console"),
+            // Its own name is the one the first plugin took: the next free one, as mpv does.
+            ("stats2.lua", "stats2"),
+            ("main.lua", "main"),
+        ]);
+        assert_eq!(
+            by_script_name,
+            BTreeMap::from(
+                [
+                    ("stats2", "stats.lua"),
+                    ("console2", "console"),
+                    ("stats22", "stats2.lua"),
+                    ("main2", "main.lua"),
+                ]
+                .map(|(client, name)| (client.to_owned(), name.to_owned()))
+            )
+        );
+        for client in names::BUILT_IN_CLIENTS {
+            assert!(!by_script_name.contains_key(*client), "{client}");
+        }
+
+        let mut errors = PluginErrors::default();
+        // The built-in stats and console fail: nobody's.
+        for prefix in ["stats", "console", "main"] {
+            assert_eq!(
+                errors.note(&line("error", prefix, "x\n"), &by_script_name),
+                None,
+                "{prefix}"
+            );
+        }
+        assert_eq!(errors.count("stats.lua"), 0);
+        // The plugin's own line, under the name mpv gave it.
+        assert_eq!(
+            errors
+                .note(&line("error", "stats2", "x\n"), &by_script_name)
+                .as_deref(),
+            Some("stats.lua")
+        );
+        assert_eq!(errors.count("stats.lua"), 1);
+        assert_eq!(errors.count("stats2.lua"), 0);
     }
 }

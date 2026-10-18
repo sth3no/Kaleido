@@ -146,10 +146,10 @@ fn found_at(path: &Path, entry_name: &str, enabled: bool) -> Option<Found> {
 /// soon as one of them is turned on, and are reported with them. Hand it only the enabled ones to
 /// see what collides in mpv now.
 ///
-/// It does not know mpv's own clients: the built-in scripts (`select`, `commands`, `positioning`,
-/// `context_menu`, `console`, `stats`, `ytdl_hook`, `auto_profiles`) and the main handle
-/// (`main`). A manual script named like one of them is numbered by mpv (`stats2`) without being
-/// reported here.
+/// It does not know mpv's own clients ([`names::BUILT_IN_CLIENTS`]: the built-in scripts
+/// `select`, `commands`, `positioning`, `context_menu`, `console`, `stats`, `ytdl_hook`,
+/// `auto_profiles`, and the main handle `main`). A manual script named like one of them is
+/// numbered by mpv (`stats2`) without being reported here.
 pub fn duplicates(found: &[Found]) -> Vec<(String, Vec<String>)> {
     let mut by_name: BTreeMap<&str, Vec<String>> = BTreeMap::new();
     for script in found {

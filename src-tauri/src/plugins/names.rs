@@ -28,6 +28,21 @@ pub const EXTENSIONS: &[&str] = &["lua", "js"];
 /// (M3) says it per plugin, this is the list.
 pub const INCOMPATIBLE: &[&str] = &["uosc", "modernz"];
 
+/// The clients mpv makes in Kaleido's core before it loads the scripts in `scripts\`: the main
+/// handle and the built-in scripts (`mp_load_builtin_scripts` runs first; the OSC is off in
+/// Kaleido). A user's script of one of these names is numbered by mpv (`stats.lua` is `stats2`).
+pub const BUILT_IN_CLIENTS: &[&str] = &[
+    "main",
+    "select",
+    "commands",
+    "positioning",
+    "context_menu",
+    "console",
+    "stats",
+    "ytdl_hook",
+    "auto_profiles",
+];
+
 /// `MAX_CLIENT_NAME` (64) of mpv, less the room `mp_new_client` keeps for the number of a second
 /// client of the same name (up to three digits) and the terminating zero.
 const MAX_NAME: usize = 60;
