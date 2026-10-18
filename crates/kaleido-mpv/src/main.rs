@@ -5,7 +5,7 @@
 mod args;
 mod thumbnail;
 
-use mpv_ffi::{Event, Mpv, load_api, locate_libmpv};
+use mpv_ffi::{Event, Mpv, PropertyValue, load_api, locate_libmpv};
 
 fn main() {
     let code = match run() {
@@ -33,9 +33,26 @@ fn run() -> mpv_ffi::Result<()> {
         }
     }
     mpv.initialize()?;
+    // thumbfast changes its filter chain later with `vf set`, which the rewrite at start misses.
+    if let Err(e) = thumbnail::watch_vf(&mpv, &invocation) {
+        eprintln!("kaleido-mpv: not watching the filter chain: {e}");
+    }
     for file in &invocation.files {
         mpv.command(&["loadfile", file, "append-play"])?;
     }
-    while mpv.wait_event(-1.0) != Event::Shutdown {}
-    Ok(())
+    loop {
+        match mpv.wait_event(-1.0) {
+            Event::Shutdown => return Ok(()),
+            Event::PropertyChange {
+                id: thumbnail::VF_WATCH,
+                value: PropertyValue::String(vf),
+                ..
+            } => {
+                if let Err(e) = thumbnail::rewrite_runtime_vf(&mpv, &vf) {
+                    eprintln!("kaleido-mpv: keeping the filter chain as it is: {e}");
+                }
+            }
+            _ => {}
+        }
+    }
 }
