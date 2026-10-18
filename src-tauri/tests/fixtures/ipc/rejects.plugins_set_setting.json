@@ -1,0 +1,10 @@
+[
+  { "type": "notFound", "name": "gone.lua" },
+  { "type": "invalid", "key": "max_height", "reason": "must be at most 600" },
+  { "type": "busy" },
+  {
+    "type": "io",
+    "message": "cannot write script-opts\\thumbfast.conf: Access is denied. (os error 5)"
+  },
+  { "type": "unavailable" }
+]

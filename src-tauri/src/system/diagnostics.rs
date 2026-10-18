@@ -12,14 +12,10 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 
-use crate::paths::AppPaths;
 use crate::player::Engine;
 
 /// Shown where a value cannot be found out.
 const UNKNOWN: &str = "unknown";
-
-/// The folder of mpv scripts in the config folder.
-const SCRIPTS_DIR: &str = "scripts";
 
 /// What a bug report needs to know about the installation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,12 +31,14 @@ pub struct Diagnostics {
     pub windows: String,
     /// The graphics adapters, joined by `; `. Software adapters (WARP) are left out.
     pub gpu: String,
-    /// The names of the folders in the config folder's `scripts`: the user's plugins.
-    pub scripts: Vec<String>,
+    /// The plugins, on and off, as `<name> <version or -> (<source>)`
+    /// (`plugins::Plugins::diagnostics`): names as the plugins page shows them, no paths.
+    pub plugins: Vec<String>,
 }
 
-/// Collects the diagnostics. Waits for mpv, so never on the main thread.
-pub fn collect(engine: &Engine, paths: &AppPaths) -> Diagnostics {
+/// Collects the diagnostics, with `plugins` as [`Diagnostics::plugins`] has them. Waits for mpv,
+/// so never on the main thread.
+pub fn collect(engine: &Engine, plugins: Vec<String>) -> Diagnostics {
     let (libmpv, ffmpeg) = engine.call(|mpv| {
         let read = |name| {
             mpv.get_string(name).unwrap_or_else(|error| {
@@ -56,33 +54,33 @@ pub fn collect(engine: &Engine, paths: &AppPaths) -> Diagnostics {
         ffmpeg,
         windows: windows_version(),
         gpu: gpu_names(),
-        scripts: script_folders(&paths.config_dir),
+        plugins,
     }
 }
 
 /// The text of the diagnostics, line by line. In English whatever the UI language: it goes into
 /// a bug report.
 pub fn render(diagnostics: &Diagnostics) -> String {
-    let scripts = if diagnostics.scripts.is_empty() {
+    let plugins = if diagnostics.plugins.is_empty() {
         "none".to_owned()
     } else {
-        diagnostics.scripts.join(", ")
+        diagnostics.plugins.join(", ")
     };
     format!(
-        "Kaleido: {}\nlibmpv: {}\nFFmpeg: {}\nWindows: {}\nGPU: {}\nScripts: {}\n",
+        "Kaleido: {}\nlibmpv: {}\nFFmpeg: {}\nWindows: {}\nGPU: {}\nPlugins: {}\n",
         diagnostics.kaleido,
         diagnostics.libmpv,
         diagnostics.ffmpeg,
         diagnostics.windows,
         diagnostics.gpu,
-        scripts
+        plugins
     )
 }
 
 /// The diagnostics as the user sees and copies them: collected, rendered and cleaned of paths
 /// and URLs. Waits for mpv, so never on the main thread.
-pub fn report(engine: &Engine, paths: &AppPaths) -> String {
-    sanitize(&render(&collect(engine, paths)))
+pub fn report(engine: &Engine, plugins: Vec<String>) -> String {
+    sanitize(&render(&collect(engine, plugins)))
 }
 
 fn windows_version() -> String {
@@ -156,29 +154,6 @@ fn hardware_adapters() -> windows::core::Result<Vec<String>> {
         }
         Ok(names)
     }
-}
-
-/// The folders in `<config>\scripts`, by name. Single script files are not listed: plugins
-/// are folders. A folder that is a link (a junction or a symbolic link to a plugin kept
-/// elsewhere) counts, as mpv loads it: the type is read from where the link points, which
-/// `DirEntry::file_type` does not do.
-fn script_folders(config_dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(config_dir.join(SCRIPTS_DIR)) else {
-        return Vec::new();
-    };
-    let mut names = Vec::new();
-    for entry in entries.flatten() {
-        if !fs::metadata(entry.path()).is_ok_and(|meta| meta.is_dir()) {
-            continue;
-        }
-        match entry.file_name().into_string() {
-            Ok(name) => names.push(name),
-            // Windows names are UTF-16 and may hold a lone surrogate; the text cannot show it.
-            Err(name) => tracing::warn!("a script folder is not in the diagnostics: {name:?}"),
-        }
-    }
-    names.sort_unstable();
-    names
 }
 
 /// Replaces the file paths and URLs in `text` by `<path>` and `<url>`:
@@ -399,7 +374,7 @@ mod tests {
             "libmpv: mpv v0.40.0-123-gaccb7b2821",
             "FFmpeg: N-123456-gabcdef0123",
             "GPU: NVIDIA GeForce RTX 4070; Intel(R) UHD Graphics 770",
-            "Scripts: thumbfast, uosc",
+            "Plugins: thumbfast 0f711de (bundled), uosc - (manual), Žluť kůň.lua - (manual)",
             "C: is a drive",
             "12:30:45",
             "key:value",
@@ -411,19 +386,19 @@ mod tests {
         }
     }
 
+    /// Needs a real libmpv. The plugins are the service's list (`plugins::tests`,
+    /// `diagnostics_list_plugins_without_paths`), passed on as they are.
     #[test]
     fn diagnostics_report_versions() {
         let tmp = tempfile::tempdir().unwrap();
         let paths = temp_paths(tmp.path());
-        let scripts = paths.config_dir.join("scripts");
-        for folder in ["uosc", "evafast"] {
-            fs::create_dir_all(scripts.join(folder)).unwrap();
-        }
-        // A single file is not a plugin folder.
-        fs::write(scripts.join("single.lua"), "").unwrap();
-        let engine = Engine::start(headless(paths.clone()), NoEvents).unwrap();
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        let plugins = vec![
+            "thumbfast 0f711de (bundled)".to_owned(),
+            "uosc - (manual)".to_owned(),
+        ];
 
-        let diagnostics = collect(&engine, &paths);
+        let diagnostics = collect(&engine, plugins.clone());
 
         // The real libmpv.
         assert!(diagnostics.libmpv.starts_with("mpv "), "{diagnostics:?}");
@@ -435,12 +410,15 @@ mod tests {
         assert!(build.parse::<u32>().is_ok(), "{}", diagnostics.windows);
         // No hardware adapter (a runner with WARP only) is "unknown", never empty.
         assert!(!diagnostics.gpu.is_empty());
-        assert_eq!(diagnostics.scripts, ["evafast", "uosc"]);
+        assert_eq!(diagnostics.plugins, plugins);
 
         let text = render(&diagnostics);
         assert!(text.starts_with("Kaleido: "), "{text}");
         assert!(text.contains(&format!("libmpv: {}\n", diagnostics.libmpv)));
-        assert!(text.ends_with("Scripts: evafast, uosc\n"), "{text}");
+        assert!(
+            text.ends_with("Plugins: thumbfast 0f711de (bundled), uosc - (manual)\n"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -451,14 +429,14 @@ mod tests {
             ffmpeg: r"7.1 built in C:\build\ffmpeg".to_owned(),
             windows: "10.0.26200".to_owned(),
             gpu: "Some GPU".to_owned(),
-            scripts: Vec::new(),
+            plugins: Vec::new(),
         };
 
         let text = sanitize(&render(&diagnostics));
 
         assert_eq!(
             text,
-            "Kaleido: 0.1.0\nlibmpv: mpv v0.40.0\nFFmpeg: 7.1 built in <path>\nWindows: 10.0.26200\nGPU: Some GPU\nScripts: none\n"
+            "Kaleido: 0.1.0\nlibmpv: mpv v0.40.0\nFFmpeg: 7.1 built in <path>\nWindows: 10.0.26200\nGPU: Some GPU\nPlugins: none\n"
         );
     }
 
@@ -491,55 +469,6 @@ mod tests {
         fs::remove_file(dir.join("third-party.json")).unwrap();
         fs::remove_file(dir.join("extra.json")).unwrap();
         assert!(licenses(dir).is_empty());
-    }
-
-    /// A plugin kept elsewhere and linked into `scripts` is a plugin folder to mpv, but
-    /// `DirEntry::file_type` calls it a link. A junction needs no privilege to make.
-    #[test]
-    fn a_linked_plugin_folder_is_listed_and_a_single_file_is_not() {
-        use std::os::windows::process::CommandExt;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let scripts = tmp.path().join(SCRIPTS_DIR);
-        let kept_elsewhere = tmp.path().join("kept-elsewhere");
-        fs::create_dir_all(scripts.join("plain")).unwrap();
-        fs::create_dir(&kept_elsewhere).unwrap();
-        fs::write(scripts.join("single.lua"), "").unwrap();
-        let made = std::process::Command::new("cmd")
-            .raw_arg(format!(
-                "/C mklink /J \"{}\" \"{}\"",
-                scripts.join("linked").display(),
-                kept_elsewhere.display()
-            ))
-            // CREATE_NO_WINDOW
-            .creation_flags(0x0800_0000)
-            .output()
-            .unwrap();
-        assert!(
-            made.status.success(),
-            "{}",
-            String::from_utf8_lossy(&made.stdout)
-        );
-
-        assert_eq!(script_folders(tmp.path()), ["linked", "plain"]);
-    }
-
-    /// A Windows name is UTF-16 and may hold a lone surrogate. Such a folder is left out (and
-    /// logged) instead of being listed wrongly or stopping the list.
-    #[test]
-    fn a_folder_name_that_is_not_unicode_is_left_out() {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let scripts = tmp.path().join(SCRIPTS_DIR);
-        fs::create_dir_all(scripts.join("uosc")).unwrap();
-        // "a" and a lone surrogate.
-        let odd = OsString::from_wide(&[0x61, 0xD800]);
-        assert!(odd.to_str().is_none());
-        fs::create_dir(scripts.join(&odd)).unwrap();
-
-        assert_eq!(script_folders(tmp.path()), ["uosc"]);
     }
 
     /// The lists in the repository are what the installation holds (`bundle.resources`).

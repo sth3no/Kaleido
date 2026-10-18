@@ -4,10 +4,10 @@
 //! from it, Tauri bundles them as `resources\essentials\<name>\<src>` next to the manifest, and
 //! the license list holds the same commits.
 //!
-//! Before the player core starts ([`super::Startup`]), [`seed`] copies every essential that is
-//! not installed yet and that the user has not removed, and [`write_managed`] writes the options
-//! Kaleido sets for them into their `script-opts` files; mpv then loads them from `scripts\` with
-//! the user's other scripts (plan decision 2).
+//! Before the player core starts ([`super::Plugins::start`]), [`seed`] copies every essential
+//! that is not installed yet and that the user has not removed, and [`write_managed`] writes the
+//! options Kaleido sets for them into their `script-opts` files; mpv then loads them from
+//! `scripts\` with the user's other scripts (plan decision 2).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -337,7 +337,7 @@ mod tests {
     use super::*;
     use crate::player::Engine;
     use crate::player::testing::{NoEvents, clip, eventually, headless, temp_paths};
-    use crate::plugins::Startup;
+    use crate::plugins::Plugins;
     use crate::plugins::install::sha256_hex;
     use crate::plugins::registry::{FILE, FileRecord};
     use crate::plugins::scan::{Layout, scan};
@@ -1106,7 +1106,7 @@ mod tests {
         });
     }
 
-    /// The whole start (`Startup::prepare`): an essential from the installation's manifest is
+    /// The whole start (`Plugins::start`): an essential from the installation's manifest is
     /// copied into `scripts\`, gets its managed options in its `script-opts` file over what the
     /// user wrote there, and mpv runs it with them. Needs a real libmpv.
     #[test]
@@ -1136,10 +1136,13 @@ mod tests {
         put(&manifest_path(&paths), &manifest.to_string());
         put(&paths.script_opts_dir.join("probe.conf"), "greeting=mine\n");
 
-        let startup = Startup::prepare(&paths, UiLanguage::En);
+        let plugins = Plugins::start(&paths, UiLanguage::En);
 
-        assert_eq!(startup.manifest.len(), 1);
-        assert!(startup.registry.plugins.contains_key("probe"));
+        let state = plugins.list();
+        assert_eq!(state.plugins.len(), 1);
+        assert_eq!(state.plugins[0].name, "probe");
+        assert_eq!(state.plugins[0].source, PluginSource::Bundled);
+        assert!(state.plugins[0].running);
         assert_eq!(
             read(&paths.scripts_dir.join("probe").join("main.lua")),
             probe

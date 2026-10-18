@@ -11,7 +11,8 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
-use crate::player::{self, Engine, LoadIssue, LoadMode, PlayerCommand};
+use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand};
+use crate::plugins::{self, PluginError, PluginSettings, Plugins, PluginsState};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
 use crate::system::diagnostics::{self, License};
@@ -378,11 +379,14 @@ pub async fn system_copy_diagnostics(app: AppHandle) -> Result<(), String> {
 
 async fn diagnostics_text(app: AppHandle) -> String {
     on_blocking_thread(move || {
-        let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
-        else {
+        let Some(engine) = app.try_state::<Engine>() else {
             return String::new();
         };
-        diagnostics::report(&engine, &paths)
+        let plugins = app
+            .try_state::<Plugins>()
+            .map(|plugins| plugins.diagnostics())
+            .unwrap_or_default();
+        diagnostics::report(&engine, plugins)
     })
     .await
     .unwrap_or_default()
@@ -445,6 +449,130 @@ pub async fn system_licenses(app: AppHandle) -> Vec<License> {
     })
     .await
     .unwrap_or_default()
+}
+
+// --- Plugins (spec 6.3, 7.3, 10.4) -----------------------------------------------------------
+//
+// Thin glue over `plugins::Plugins` (controller Ruling R2). Every one reads the config folder (and
+// a change may wait for the Recycle Bin), so all are asynchronous and on a blocking thread; none
+// waits for mpv: `load-script` is queued, and Apply's restart runs on its own blocking thread.
+// Every change that went through sends the new state as `plugins:changed`.
+
+/// The plugins in the config folder, whether each runs, and whether a change waits for Apply.
+#[tauri::command]
+pub async fn plugins_list(app: AppHandle) -> PluginsState {
+    on_blocking_thread(move || {
+        app.try_state::<Plugins>()
+            .map(|plugins| plugins.list())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Runs `change` with the plugins service and sends the state it returns as `plugins:changed`.
+async fn plugins_change(
+    app: AppHandle,
+    change: impl FnOnce(&AppHandle, &Plugins) -> Result<PluginsState, PluginError> + Send + 'static,
+) -> Result<PluginsState, PluginError> {
+    on_blocking_thread(move || {
+        let plugins = app.try_state::<Plugins>().ok_or(PluginError::Unavailable)?;
+        let state = change(&app, &plugins)?;
+        plugins::emit_changed(&app, &state);
+        Ok(state)
+    })
+    .await
+    .unwrap_or(Err(PluginError::Unavailable))
+}
+
+/// Turns the plugin `name` (as `PluginInfo::name` has it) on or off. One that does not run is
+/// loaded at once; turning off one that runs waits for Apply.
+#[tauri::command]
+pub async fn plugins_set_enabled(
+    app: AppHandle,
+    name: String,
+    enabled: bool,
+) -> Result<PluginsState, PluginError> {
+    plugins_change(app, move |app, plugins| {
+        let engine = app.try_state::<Engine>().ok_or(PluginError::Unavailable)?;
+        plugins.set_enabled(&name, enabled, &*engine)
+    })
+    .await
+}
+
+/// Moves the plugin `name` to the Recycle Bin; one that runs keeps running until Apply.
+#[tauri::command]
+pub async fn plugins_uninstall(app: AppHandle, name: String) -> Result<PluginsState, PluginError> {
+    plugins_change(app, move |_, plugins| plugins.uninstall(&name)).await
+}
+
+/// "Obnovit essentials": installs the removed essentials again and loads them.
+#[tauri::command]
+pub async fn plugins_restore_essentials(app: AppHandle) -> Result<PluginsState, PluginError> {
+    plugins_change(app, |app, plugins| {
+        let engine = app.try_state::<Engine>().ok_or(PluginError::Unavailable)?;
+        plugins.restore_essentials(&*engine)
+    })
+    .await
+}
+
+/// The settings of the plugin `name`: its schema, or its `script-opts` as keys and values.
+#[tauri::command]
+pub async fn plugins_settings(app: AppHandle, name: String) -> Result<PluginSettings, PluginError> {
+    on_blocking_thread(move || {
+        app.try_state::<Plugins>()
+            .ok_or(PluginError::Unavailable)?
+            .settings(&name)
+    })
+    .await
+    .unwrap_or(Err(PluginError::Unavailable))
+}
+
+/// Sets `key` of the plugin `name` (`None` takes it out: the script's default). A plugin that runs
+/// gets it at Apply, which the new state (`plugins:changed`) says.
+#[tauri::command]
+pub async fn plugins_set_setting(
+    app: AppHandle,
+    name: String,
+    key: String,
+    value: Option<String>,
+) -> Result<PluginSettings, PluginError> {
+    on_blocking_thread(move || {
+        let plugins = app.try_state::<Plugins>().ok_or(PluginError::Unavailable)?;
+        let settings = plugins.set_setting(&name, &key, value.as_deref())?;
+        plugins::emit_changed(&app, &plugins.list());
+        Ok(settings)
+    })
+    .await
+    .unwrap_or(Err(PluginError::Unavailable))
+}
+
+/// The last errors the plugin `name` logged in this run, the oldest first.
+#[tauri::command]
+pub async fn plugins_log(app: AppHandle, name: String) -> Vec<LogLine> {
+    on_blocking_thread(move || {
+        app.try_state::<Plugins>()
+            .map(|plugins| plugins.log(&name))
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// "Použít": restarts the player core, which plays on where it was, with the plugins that are on.
+/// The UI hears `plugins:changed` with `applying` at the start and again at the end. Waits for the
+/// restart, on a blocking thread (never the main thread, which the restart needs).
+#[tauri::command]
+pub async fn plugins_apply(app: AppHandle) -> Result<PluginsState, PluginError> {
+    on_blocking_thread(move || {
+        let plugins = app.try_state::<Plugins>().ok_or(PluginError::Unavailable)?;
+        plugins.apply(
+            || crate::restart_engine(&app),
+            |state| plugins::emit_changed(&app, state),
+        )
+    })
+    .await
+    .unwrap_or(Err(PluginError::Unavailable))
 }
 
 #[cfg(test)]

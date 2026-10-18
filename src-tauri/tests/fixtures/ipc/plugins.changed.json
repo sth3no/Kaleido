@@ -1,0 +1,113 @@
+[
+  {
+    "plugins": [
+      {
+        "name": "thumbfast",
+        "scriptName": "thumbfast",
+        "source": "bundled",
+        "version": "0f711de",
+        "summary": { "en": "Timeline previews.", "cs": "Náhledy na časové ose." },
+        "enabled": true,
+        "running": true,
+        "incompatible": false,
+        "duplicate": true,
+        "errors": 0,
+        "settings": "schema",
+        "copyOf": null
+      },
+      {
+        "name": "sub-select",
+        "scriptName": "sub_select",
+        "source": "bundled",
+        "version": "26d24a0",
+        "summary": { "en": "Picks the subtitle track." },
+        "enabled": false,
+        "running": true,
+        "incompatible": false,
+        "duplicate": false,
+        "errors": 3,
+        "settings": "schema",
+        "copyOf": null
+      },
+      {
+        "name": "fancy",
+        "scriptName": "fancy",
+        "source": "store",
+        "version": "1.2.0",
+        "summary": null,
+        "enabled": true,
+        "running": true,
+        "incompatible": false,
+        "duplicate": false,
+        "errors": 0,
+        "settings": "keyValue",
+        "copyOf": null
+      },
+      {
+        "name": "from-a-link",
+        "scriptName": "from_a_link",
+        "source": "url",
+        "version": null,
+        "summary": null,
+        "enabled": true,
+        "running": true,
+        "incompatible": false,
+        "duplicate": false,
+        "errors": 0,
+        "settings": "keyValue",
+        "copyOf": null
+      },
+      {
+        "name": "thumbfast.lua",
+        "scriptName": "thumbfast",
+        "source": "manual",
+        "version": null,
+        "summary": null,
+        "enabled": true,
+        "running": true,
+        "incompatible": false,
+        "duplicate": true,
+        "errors": 0,
+        "settings": "keyValue",
+        "copyOf": "thumbfast"
+      },
+      {
+        "name": "uosc",
+        "scriptName": "uosc",
+        "source": "manual",
+        "version": null,
+        "summary": null,
+        "enabled": false,
+        "running": false,
+        "incompatible": true,
+        "duplicate": false,
+        "errors": 0,
+        "settings": "keyValue",
+        "copyOf": null
+      },
+      {
+        "name": "Žluť kůň.lua",
+        "scriptName": "__lu___k____",
+        "source": "manual",
+        "version": null,
+        "summary": null,
+        "enabled": true,
+        "running": true,
+        "incompatible": false,
+        "duplicate": false,
+        "errors": 0,
+        "settings": "keyValue",
+        "copyOf": null
+      }
+    ],
+    "restartNeeded": true,
+    "removedEssentials": ["reload"],
+    "applying": false
+  },
+  {
+    "plugins": [],
+    "restartNeeded": false,
+    "removedEssentials": [],
+    "applying": true
+  }
+]

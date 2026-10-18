@@ -16,8 +16,9 @@
 //! `folder\`, its other new files in `files\`, and the previous version of the plugin's folder in
 //! `old\scripts\<name>` or `old\scripts-disabled\<name>`, named by where it came from. When the
 //! app ends in the middle of an install, or a rollback cannot put the previous version back, the
-//! next install sweeps what is left (`sweep`): a previous version goes back to its place when
-//! nothing has taken it since, and is kept otherwise; only the staged new files are deleted.
+//! next start and the next install sweep what is left (`sweep`): a previous version goes back to
+//! its place when nothing has taken it since, and is kept otherwise; only the staged new files are
+//! deleted.
 //!
 //! Installs run one at a time: the registry they write is borrowed for the whole install.
 
@@ -468,6 +469,38 @@ fn write_file(path: &Path, bytes: &[u8]) -> Result<(), InstallError> {
         file.sync_all()
     })();
     written.map_err(|error| io_error(format_args!("cannot write {}", path.display()), error))
+}
+
+/// [`sweep`] of the config folder's staging folder, which goes too once it is empty: what the
+/// start of the plugins runs before the essentials are seeded, so that a previous version an
+/// install left there when the app ended is back in its place before mpv loads the scripts.
+pub(crate) fn sweep_staging(paths: &AppPaths) -> Vec<PathBuf> {
+    let staging_root = paths.config_dir.join(STAGING_DIR);
+    let kept = sweep(paths, &staging_root);
+    // Only when it is empty: a leftover the sweep kept stays in it.
+    let _ = fs::remove_dir(&staging_root);
+    kept
+}
+
+/// The previous versions of the plugin folder `name` that installs left in the staging folder
+/// (`<leftover>\old\scripts\<name>`, `<leftover>\old\scripts-disabled\<name>`): what the next
+/// sweep would put back. An uninstall takes them with the plugin, so that the plugin does not come
+/// back from there.
+pub(crate) fn leftovers_of(paths: &AppPaths, name: &str) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(paths.config_dir.join(STAGING_DIR)) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for leftover in entries.flatten() {
+        for (kind, _) in homes(paths) {
+            let aside = leftover.path().join(STAGED_OLD).join(kind).join(name);
+            if aside.symlink_metadata().is_ok() {
+                found.push(aside);
+            }
+        }
+    }
+    found.sort();
+    found
 }
 
 /// Clears what installs that did not finish left in the staging folder (the app ended in the

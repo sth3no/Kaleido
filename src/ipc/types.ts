@@ -274,6 +274,112 @@ export type License = {
 };
 
 // ---------------------------------------------------------------------------------------------
+// Plugins (src-tauri/src/plugins/mod.rs, registry.rs, schema.rs)
+
+/** Where a plugin came from; `manual` for a script `plugins.json` does not know. */
+export type PluginSource = 'bundled' | 'store' | 'url' | 'manual';
+
+/** How a plugin's settings are edited: a form from its schema, or its keys and values. */
+export type SettingsForm = 'schema' | 'keyValue';
+
+/** A text in English and, where there is one, in Czech; show `en` where `cs` is missing. */
+export type Localized = { en: string; cs?: string };
+
+type SettingBase = { key: string; label: Localized; description?: Localized };
+
+/**
+ * One setting of a plugin's schema (spec 7.2). `default` is what the script uses while its
+ * `script-opts` file does not set the key; the bounds of a number are inclusive.
+ */
+export type SettingSpec =
+  | (SettingBase & { type: 'bool'; default: boolean })
+  | (SettingBase & { type: 'int'; default: number; min?: number; max?: number })
+  | (SettingBase & { type: 'float'; default: number; min?: number; max?: number })
+  | (SettingBase & { type: 'string'; default: string })
+  | (SettingBase & { type: 'enum'; default: string; values: string[] })
+  /** `#RRGGBB` or `#AARRGGBB`. */
+  | (SettingBase & { type: 'color'; default: string });
+
+export type SettingKind = SettingSpec['type'];
+
+/** One script in the config folder, as the plugins page lists it. */
+export type PluginInfo = {
+  /**
+   * What every plugin command takes as `name`: a plugin Kaleido installed by its folder, any other
+   * folder by its name, any other file by its name with the extension (`my-plugin.lua`); ` (2)`
+   * and up where that is taken already. Show it as it is.
+   */
+  name: string;
+  /** What mpv calls its client (the prefix of its log lines). */
+  scriptName: string;
+  source: PluginSource;
+  version: string | null;
+  /** What an essential does; `null` for the others. */
+  summary: Localized | null;
+  /** In `scripts\`: mpv loads it at the next start of the player core. */
+  enabled: boolean;
+  /** In the core that runs now. Off but running: the change waits for Apply. */
+  running: boolean;
+  /** Draws its own interface over the video (uosc, ModernZ): label it, with the reason. */
+  incompatible: boolean;
+  /** On, and another script that is on has its name to mpv: both run, one numbered. */
+  duplicate: boolean;
+  /** Errors it logged in this run; above 0, the "reports errors" badge, with `pluginsLog`. */
+  errors: number;
+  settings: SettingsForm;
+  /**
+   * The essential this is the user's own copy of: Kaleido writes no options for it, so it works
+   * with the user's own settings (for thumbfast: its previews depend on them).
+   */
+  copyOf: string | null;
+};
+
+/** What `plugins_list` (and every plugin change) returns and `plugins:changed` carries. */
+export type PluginsState = {
+  /** In the order mpv loads them. */
+  plugins: PluginInfo[];
+  /** A change waits for Apply: show the apply bar. */
+  restartNeeded: boolean;
+  /** Essentials "Restore essentials" brings back; the button shows while there are any. */
+  removedEssentials: string[];
+  /**
+   * Apply runs, until the new core plays on. The player's state meanwhile (an empty playlist, an
+   * idle player) is the restart, not the player having stopped.
+   */
+  applying: boolean;
+};
+
+/** A key and its value in a plugin's `script-opts` file. */
+export type OptEntry = { key: string; value: string };
+
+/** What `plugins_settings` and `plugins_set_setting` return. */
+export type PluginSettings = {
+  name: string;
+  /** The form's settings; `null` for a plugin edited as keys and values. */
+  schema: SettingSpec[] | null;
+  /** What the file sets, in its order; never a managed key. */
+  entries: OptEntry[];
+  /** Keys Kaleido sets itself; never offer them. */
+  managed: string[];
+};
+
+/** Why a plugin change did not happen; in every case nothing changed. */
+export type PluginError =
+  /** No plugin of that name (any more): list again. */
+  | { type: 'notFound'; name: string }
+  /** A setting's value or key that cannot be set; show `reason` at the field. */
+  | { type: 'invalid'; key: string; reason: string }
+  /** Apply runs; try again when it is done. */
+  | { type: 'busy' }
+  /** A file could not be moved, read or written, or plugins.json is left alone. */
+  | { type: 'io'; message: string }
+  /** The player is not running, or Apply could not start a new core. */
+  | { type: 'unavailable' };
+
+/** The payload of `plugins:error`: the plugin logged its first error of the run. */
+export type PluginErrorEvent = { name: string };
+
+// ---------------------------------------------------------------------------------------------
 // The player's state (src-tauri/src/player/state.rs)
 
 /** The properties that changed, or all of them (`system_ui_ready`): mpv's property name → value. */
@@ -394,6 +500,8 @@ export interface EventTable {
   'glass:state': GlassState;
   'settings:changed': Settings;
   'system:appearance-changed': SystemAppearance;
+  'plugins:changed': PluginsState;
+  'plugins:error': PluginErrorEvent;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -444,6 +552,19 @@ export interface CommandTable {
   system_appearance: { args: undefined; result: SystemAppearance };
   /** The system's language as a BCP 47 tag (`cs-CZ`); `en-US` where the system names none. */
   system_locale: { args: undefined; result: string };
+  plugins_list: { args: undefined; result: PluginsState };
+  plugins_set_enabled: { args: { name: string; enabled: boolean }; result: PluginsState };
+  plugins_uninstall: { args: { name: string }; result: PluginsState };
+  plugins_restore_essentials: { args: undefined; result: PluginsState };
+  plugins_settings: { args: { name: string }; result: PluginSettings };
+  /** `value: null` takes the key out: the script's default. */
+  plugins_set_setting: {
+    args: { name: string; key: string; value: string | null };
+    result: PluginSettings;
+  };
+  /** The plugin's last errors of this run, the oldest first. */
+  plugins_log: { args: { name: string }; result: LogLine[] };
+  plugins_apply: { args: undefined; result: PluginsState };
 }
 
 /**
@@ -459,4 +580,10 @@ export interface CommandErrors {
   settings_rebind: SettingsError;
   settings_reset_binding: SettingsError;
   system_copy_diagnostics: string;
+  plugins_set_enabled: PluginError;
+  plugins_uninstall: PluginError;
+  plugins_restore_essentials: PluginError;
+  plugins_settings: PluginError;
+  plugins_set_setting: PluginError;
+  plugins_apply: PluginError;
 }

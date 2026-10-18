@@ -101,6 +101,14 @@ pub fn run() {
             commands::system_licenses,
             commands::system_appearance,
             commands::system_locale,
+            commands::plugins_list,
+            commands::plugins_set_enabled,
+            commands::plugins_uninstall,
+            commands::plugins_restore_essentials,
+            commands::plugins_settings,
+            commands::plugins_set_setting,
+            commands::plugins_log,
+            commands::plugins_apply,
         ])
         // A failed start is logged with its whole chain of causes and shown in a message box
         // before Tauri turns it into a panic, whose message has nowhere to go (Ruling R53).
@@ -205,8 +213,9 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
         tracing::warn!("cannot archive the last mpv log: {error}");
     }
     // Before the engine: mpv loads the scripts in scripts\ as it starts, so the essentials are
-    // copied by then and have Kaleido's options in their script-opts (plan decision 2).
-    app.manage(plugins::Startup::prepare(&paths, language));
+    // copied by then and have Kaleido's options in their script-opts (plan decision 2), and what
+    // the service says runs is what the core loads.
+    app.manage(plugins::Plugins::start(&paths, language));
     let engine = Engine::start(
         EngineConfig {
             paths: paths.clone(),
@@ -258,22 +267,18 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 
 /// Restarts the player core and plays on where it was ("Použít" for plugins, spec 6.3; see
 /// [`Engine::restart`]). Blocks until the new core runs: call it on a thread of its own or a
-/// blocking task, never on the main thread (it is refused there). The essentials get Kaleido's
-/// options first (plan decision 2: the scripts read them when the new core loads them), the new
-/// core gets what every core gets ([`prepare_core`]), and the UI hears `player:engine-restarted`
-/// once it runs (also when the old core did not end in time: `RestartError::Quit`).
+/// blocking task, never on the main thread (it is refused there), and never while holding the
+/// plugins' state (`plugins::Plugins::apply` lets it go). The essentials get Kaleido's options
+/// first (plan decision 2: the scripts read them when the new core loads them), the new core gets
+/// what every core gets ([`prepare_core`]), and the UI hears `player:engine-restarted` once it
+/// runs (also when the old core did not end in time: `RestartError::Quit`).
 pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
     let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
     else {
         return Err(RestartError::Start("the player is not running".to_owned()));
     };
-    if let Some(startup) = app.try_state::<plugins::Startup>() {
-        plugins::essentials::write_managed(
-            &paths,
-            &startup.manifest,
-            &startup.registry,
-            startup.language,
-        );
+    if let Some(plugins) = app.try_state::<plugins::Plugins>() {
+        plugins.write_managed();
     }
     let logs_dir = paths.logs_dir.clone();
     let restart = Restart {
@@ -378,10 +383,16 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
             }
             false
         }
-        // The shader failed: the glass goes off (spec 10.6). The UI hears the line too.
+        // The shader failed: the glass goes off (spec 10.6). A plugin's first error of the run is
+        // told once (spec 10.4). The UI hears the line too.
         PlayerEvent::Log(line) => {
             if let Some(glass) = app.try_state::<GlassController>() {
                 glass.on_log(line);
+            }
+            if let Some(plugins) = app.try_state::<plugins::Plugins>()
+                && let Some(name) = plugins.note_log(line)
+            {
+                plugins::told_error(app, name);
             }
             false
         }

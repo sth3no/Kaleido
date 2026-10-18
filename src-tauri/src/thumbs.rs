@@ -258,7 +258,8 @@ mod tests {
     use super::*;
     use crate::player::testing::{Recorded, headless, temp_paths};
     use crate::plugins::install::sha256_hex;
-    use crate::plugins::{Startup, essentials};
+    use crate::plugins::registry::PluginSource;
+    use crate::plugins::{Plugins, essentials};
     use crate::settings::UiLanguage;
 
     fn payload(width: u32, height: u32, thumbnail: &Path) -> String {
@@ -546,7 +547,7 @@ end)
 "#;
 
     /// Real libmpv: thumbfast is an essential like the others (plan decision 2). The start
-    /// (`plugins::Startup::prepare`, with the shipped manifest's thumbfast and the stand-in as
+    /// (`plugins::Plugins::start`, with the shipped manifest's thumbfast and the stand-in as
     /// its file) copies it to `scripts\thumbfast\main.lua` and writes Kaleido's options into
     /// `script-opts\thumbfast.conf` over the user's, leaving the user's other options; mpv loads it
     /// under the name `thumbfast`, and a request makes it answer the client that asked, with the
@@ -589,8 +590,14 @@ end)
         )
         .unwrap();
 
-        let startup = Startup::prepare(&paths, UiLanguage::En);
-        assert!(startup.registry.plugins.contains_key("thumbfast"));
+        let plugins = Plugins::start(&paths, UiLanguage::En);
+        assert!(
+            plugins
+                .list()
+                .plugins
+                .iter()
+                .any(|plugin| plugin.name == "thumbfast" && plugin.source == PluginSource::Bundled)
+        );
 
         let events = Recorded::default();
         let engine = Engine::start(headless(paths.clone()), events.clone()).unwrap();

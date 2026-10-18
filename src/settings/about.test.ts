@@ -10,7 +10,7 @@ describe('parseVersions', () => {
     'FFmpeg: N-118000-g1234567',
     'Windows: 10.0.26200',
     'GPU: NVIDIA GeForce RTX 4070',
-    'Scripts: none',
+    'Plugins: thumbfast 0f711de (bundled), uosc - (manual)',
     '',
   ].join('\n');
 
@@ -37,7 +37,7 @@ describe('parseVersions', () => {
     expect(parseVersions('')).toEqual({ libmpv: null, ffmpeg: null });
     expect(parseVersions('Kaleido: 0.1.0\nGPU: none\n')).toEqual({ libmpv: null, ffmpeg: null });
     // Only the line of the name counts, not a line that mentions it.
-    expect(parseVersions('Scripts: libmpv: 1\n')).toEqual({ libmpv: null, ffmpeg: null });
+    expect(parseVersions('Plugins: libmpv: 1\n')).toEqual({ libmpv: null, ffmpeg: null });
   });
 
   test('a version may hold colons', () => {

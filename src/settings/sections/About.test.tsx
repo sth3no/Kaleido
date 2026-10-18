@@ -17,7 +17,7 @@ const DIAGNOSTICS = [
   'FFmpeg: N-118000-g1234567',
   'Windows: 10.0.26200',
   'GPU: NVIDIA GeForce RTX 4070',
-  'Scripts: none',
+  'Plugins: thumbfast 0f711de (bundled), uosc - (manual)',
   '',
 ].join('\n');
 

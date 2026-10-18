@@ -40,6 +40,12 @@ use crate::player::load::SourceError;
 use crate::player::{
     self, CommandError, EndReason, LoadIssue, LoadMode, LogLine, PlayerCommand, PlayerEvent,
 };
+use crate::plugins::registry::PluginSource;
+use crate::plugins::schema::{Localized, SettingKind, SettingSpec};
+use crate::plugins::{
+    self, OptEntry, PluginError, PluginErrorEvent, PluginInfo, PluginSettings, PluginsState,
+    SettingsForm,
+};
 use crate::settings::{
     self, Appearance, AudioDevice, Binding, BindingSource, Language, Playback, ReduceTransparency,
     Settings, SettingsError, SettingsStore, ThemeMode,
@@ -188,6 +194,38 @@ where
     values
 }
 
+/// The three arguments `names` of every call, read and written again like [`column`].
+fn triples<A, B, C>(command: &str, calls: &[Value], names: [&str; 3]) -> Vec<(A, B, C)>
+where
+    A: DeserializeOwned + Serialize,
+    B: DeserializeOwned + Serialize,
+    C: DeserializeOwned + Serialize,
+{
+    let values: Vec<(A, B, C)> = calls
+        .iter()
+        .map(|call| {
+            let given = arguments(command, call, &names);
+            (
+                argument(command, given, names[0]),
+                argument(command, given, names[1]),
+                argument(command, given, names[2]),
+            )
+        })
+        .collect();
+    let again: Vec<Value> = values
+        .iter()
+        .map(|(first, second, third)| {
+            call_of(&[
+                (names[0], written(first)),
+                (names[1], written(second)),
+                (names[2], written(third)),
+            ])
+        })
+        .collect();
+    assert_same(&format!("{command}, written again"), &again, calls);
+    values
+}
+
 /// A glass rectangle may leave out `a`; serde then fills in 1 (fully).
 fn with_default_opacity(call: &Value) -> Value {
     let mut call = call.clone();
@@ -218,7 +256,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 18] = [
+const WITHOUT_ARGUMENTS: [&str; 21] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -237,6 +275,9 @@ const WITHOUT_ARGUMENTS: [&str; 18] = [
     "system_licenses",
     "system_appearance",
     "system_locale",
+    "plugins_list",
+    "plugins_restore_essentials",
+    "plugins_apply",
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -368,6 +409,31 @@ variants!(reduce_transparency_name, REDUCE_TRANSPARENCY_NAMES: ReduceTransparenc
     ReduceTransparency::Auto => "auto",
     ReduceTransparency::On => "on",
     ReduceTransparency::Off => "off",
+});
+variants!(plugin_error_name, PLUGIN_ERROR_NAMES: PluginError {
+    PluginError::NotFound { .. } => "notFound",
+    PluginError::Invalid { .. } => "invalid",
+    PluginError::Busy => "busy",
+    PluginError::Io { .. } => "io",
+    PluginError::Unavailable => "unavailable",
+});
+variants!(plugin_source_name, PLUGIN_SOURCE_NAMES: PluginSource {
+    PluginSource::Bundled => "bundled",
+    PluginSource::Store => "store",
+    PluginSource::Url => "url",
+    PluginSource::Manual => "manual",
+});
+variants!(settings_form_name, SETTINGS_FORM_NAMES: SettingsForm {
+    SettingsForm::Schema => "schema",
+    SettingsForm::KeyValue => "keyValue",
+});
+variants!(setting_kind_name, SETTING_KIND_NAMES: SettingKind {
+    SettingKind::Bool => "bool",
+    SettingKind::Int { .. } => "int",
+    SettingKind::Float { .. } => "float",
+    SettingKind::String => "string",
+    SettingKind::Enum { .. } => "enum",
+    SettingKind::Color => "color",
 });
 // The player's events are untagged, so their names are only these; two of them never reach the UI.
 variants!(event_name, EVENT_NAMES: PlayerEvent {
@@ -729,6 +795,34 @@ fn check_command(command: &str, calls: &[Value]) {
         "settings_reset_binding" => {
             assert_eq!(column::<String>(command, calls, "key"), ["Ctrl+f"]);
         }
+        // The plugins are named as `PluginInfo::name` has them: a folder, a file with its
+        // extension, with diacritics and spaces.
+        "plugins_set_enabled" => assert_eq!(
+            pairs::<String, bool>(command, calls, ["name", "enabled"]),
+            [
+                ("sub-select".to_owned(), false),
+                ("Žluť kůň.lua".to_owned(), true),
+            ]
+        ),
+        "plugins_uninstall" => {
+            assert_eq!(column::<String>(command, calls, "name"), ["reload"]);
+        }
+        "plugins_settings" => assert_eq!(
+            column::<String>(command, calls, "name"),
+            ["thumbfast", "my-plugin.lua"]
+        ),
+        "plugins_set_setting" => assert_eq!(
+            triples::<String, String, Option<String>>(command, calls, ["name", "key", "value"]),
+            [
+                (
+                    "thumbfast".to_owned(),
+                    "max_height".to_owned(),
+                    Some("300".to_owned())
+                ),
+                ("my-plugin.lua".to_owned(), "font_size".to_owned(), None),
+            ]
+        ),
+        "plugins_log" => assert_eq!(column::<String>(command, calls, "name"), ["sub-select"]),
         other => panic!("{other} is registered, but has no check here: add its fixture"),
     }
 }
@@ -1105,6 +1199,259 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     );
     for error in &settings_errors {
         serialized(out, "rejects.settings_set", error);
+    }
+
+    // The plugins: their state (what `plugins_list` and the other changes return, and what
+    // `plugins:changed` carries), a plugin's settings, its log, and what a change rejects with.
+    let text = |en: &str, cs: Option<&str>| Localized {
+        en: en.to_owned(),
+        cs: cs.map(str::to_owned),
+    };
+    let plugin = |name: &str, script_name: &str, source| PluginInfo {
+        name: name.to_owned(),
+        script_name: script_name.to_owned(),
+        source,
+        version: None,
+        summary: None,
+        enabled: true,
+        running: true,
+        incompatible: false,
+        duplicate: false,
+        errors: 0,
+        settings: SettingsForm::KeyValue,
+        copy_of: None,
+    };
+    let plugin_states = [
+        PluginsState {
+            plugins: vec![
+                // Kaleido's thumbfast and the user's own copy beside it: both run, one as
+                // thumbfast2.
+                PluginInfo {
+                    version: Some("0f711de".to_owned()),
+                    summary: Some(text("Timeline previews.", Some("Náhledy na časové ose."))),
+                    duplicate: true,
+                    settings: SettingsForm::Schema,
+                    ..plugin("thumbfast", "thumbfast", PluginSource::Bundled)
+                },
+                // Off, and still running until Apply; it has logged errors.
+                PluginInfo {
+                    version: Some("26d24a0".to_owned()),
+                    summary: Some(text("Picks the subtitle track.", None)),
+                    enabled: false,
+                    errors: 3,
+                    settings: SettingsForm::Schema,
+                    ..plugin("sub-select", "sub_select", PluginSource::Bundled)
+                },
+                PluginInfo {
+                    version: Some("1.2.0".to_owned()),
+                    ..plugin("fancy", "fancy", PluginSource::Store)
+                },
+                plugin("from-a-link", "from_a_link", PluginSource::Url),
+                PluginInfo {
+                    duplicate: true,
+                    copy_of: Some("thumbfast".to_owned()),
+                    ..plugin("thumbfast.lua", "thumbfast", PluginSource::Manual)
+                },
+                PluginInfo {
+                    enabled: false,
+                    running: false,
+                    incompatible: true,
+                    ..plugin("uosc", "uosc", PluginSource::Manual)
+                },
+                plugin("Žluť kůň.lua", "__lu___k____", PluginSource::Manual),
+            ],
+            restart_needed: true,
+            removed_essentials: vec!["reload".to_owned()],
+            applying: false,
+        },
+        // Apply runs.
+        PluginsState {
+            plugins: Vec::new(),
+            restart_needed: false,
+            removed_essentials: Vec::new(),
+            applying: true,
+        },
+    ];
+    let listed: Vec<&PluginInfo> = plugin_states
+        .iter()
+        .flat_map(|state| &state.plugins)
+        .collect();
+    let sources: Vec<PluginSource> = listed.iter().map(|plugin| plugin.source).collect();
+    covers(
+        "PluginSource",
+        &sources,
+        plugin_source_name,
+        PLUGIN_SOURCE_NAMES,
+        None,
+    );
+    let forms: Vec<SettingsForm> = listed.iter().map(|plugin| plugin.settings).collect();
+    covers(
+        "SettingsForm",
+        &forms,
+        settings_form_name,
+        SETTINGS_FORM_NAMES,
+        None,
+    );
+    for state in &plugin_states {
+        serialized(out, &fixture_name(plugins::CHANGED_EVENT), state);
+        serialized(out, "returns.plugins_list", state);
+    }
+    // Each kind of setting twice: with all it may have (its bounds, a Czech label, a description)
+    // and with nothing it may leave out.
+    let spec = |key: &str, kind, default: Value, full: bool| SettingSpec {
+        key: key.to_owned(),
+        kind,
+        default,
+        label: if full {
+            text(
+                &format!("The {key}"),
+                Some(format!("Hodnota {key}").as_str()),
+            )
+        } else {
+            text(&format!("The {key}"), None)
+        },
+        description: full.then(|| text("What it does.", None)),
+    };
+    let schema = vec![
+        spec("subtitles", SettingKind::Bool, json!(true), true),
+        spec("osd", SettingKind::Bool, json!(false), false),
+        spec(
+            "max_height",
+            SettingKind::Int {
+                min: Some(50),
+                max: Some(600),
+            },
+            json!(200),
+            true,
+        ),
+        spec(
+            "count",
+            SettingKind::Int {
+                min: None,
+                max: None,
+            },
+            json!(3),
+            false,
+        ),
+        spec(
+            "scale",
+            SettingKind::Float {
+                min: Some(0.5),
+                max: Some(2.5),
+            },
+            json!(1.5),
+            true,
+        ),
+        spec(
+            "ratio",
+            SettingKind::Float {
+                min: None,
+                max: None,
+            },
+            json!(0.75),
+            false,
+        ),
+        spec("title", SettingKind::String, json!("Kaleido"), true),
+        spec("prefix", SettingKind::String, json!(""), false),
+        spec(
+            "position",
+            SettingKind::Enum {
+                values: vec!["top-left".to_owned(), "bottom".to_owned()],
+            },
+            json!("top-left"),
+            true,
+        ),
+        spec(
+            "mode",
+            SettingKind::Enum {
+                values: vec!["auto".to_owned(), "never".to_owned()],
+            },
+            json!("auto"),
+            false,
+        ),
+        spec("color", SettingKind::Color, json!("#FFFFFF"), true),
+        spec("border", SettingKind::Color, json!("#80000000"), false),
+    ];
+    let kinds: Vec<SettingKind> = schema.iter().map(|spec| spec.kind.clone()).collect();
+    covers(
+        "SettingKind",
+        &kinds,
+        setting_kind_name,
+        SETTING_KIND_NAMES,
+        Some("type"),
+    );
+    let entry = |key: &str, value: &str| OptEntry {
+        key: key.to_owned(),
+        value: value.to_owned(),
+    };
+    let plugin_settings = [
+        PluginSettings {
+            name: "thumbfast".to_owned(),
+            schema: Some(schema),
+            entries: vec![entry("max_height", "300")],
+            managed: ["mpv_path", "network", "tone_mapping"]
+                .map(str::to_owned)
+                .to_vec(),
+        },
+        PluginSettings {
+            name: "my-plugin.lua".to_owned(),
+            schema: None,
+            entries: vec![entry("font_size", "20"), entry("title", "")],
+            managed: Vec::new(),
+        },
+    ];
+    for settings in &plugin_settings {
+        serialized(out, "returns.plugins_settings", settings);
+    }
+    let log_line = |level: &str, text: &str| LogLine {
+        level: level.to_owned(),
+        prefix: "sub_select".to_owned(),
+        text: text.to_owned(),
+    };
+    serialized(
+        out,
+        "returns.plugins_log",
+        &vec![
+            log_line(
+                "error",
+                "Lua error: main.lua:12: attempt to index a nil value\n",
+            ),
+            log_line("fatal", "cannot start\n"),
+        ],
+    );
+    let plugin_errors = [
+        PluginError::NotFound {
+            name: "gone.lua".to_owned(),
+        },
+        PluginError::Invalid {
+            key: "max_height".to_owned(),
+            reason: "must be at most 600".to_owned(),
+        },
+        PluginError::Busy,
+        PluginError::Io {
+            message: "cannot write script-opts\\thumbfast.conf: Access is denied. (os error 5)"
+                .to_owned(),
+        },
+        PluginError::Unavailable,
+    ];
+    covers(
+        "PluginError",
+        &plugin_errors,
+        plugin_error_name,
+        PLUGIN_ERROR_NAMES,
+        Some("type"),
+    );
+    for error in &plugin_errors {
+        serialized(out, "rejects.plugins_set_setting", error);
+    }
+    for name in ["sub-select", "Žluť kůň.lua"] {
+        serialized(
+            out,
+            &fixture_name(plugins::ERROR_EVENT),
+            &PluginErrorEvent {
+                name: name.to_owned(),
+            },
+        );
     }
     sent
 }

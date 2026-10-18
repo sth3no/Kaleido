@@ -1,0 +1,4 @@
+[
+  { "name": "thumbfast", "key": "max_height", "value": "300" },
+  { "name": "my-plugin.lua", "key": "font_size", "value": null }
+]

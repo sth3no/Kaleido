@@ -191,3 +191,39 @@ export const systemAppearance = () => call('system_appearance');
  * (`resolveLanguage`). `en-US` where Windows names none.
  */
 export const systemLocale = () => call('system_locale');
+
+// --- Plugins ---------------------------------------------------------------------------------
+// Every change resolves with the new state and sends it as `plugins:changed` too; it rejects with
+// a `PluginError`, and then nothing changed. `name` is always `PluginInfo.name`.
+
+/** The plugins in the config folder, whether each runs, and whether a change waits for Apply. */
+export const pluginsList = () => call('plugins_list');
+
+/** Turns a plugin on (one that does not run starts at once) or off (it runs until Apply). */
+export const pluginsSetEnabled = (name: string, enabled: boolean) =>
+  call('plugins_set_enabled', { name, enabled });
+
+/** Moves a plugin to the Recycle Bin; its settings stay. One that runs, runs until Apply. */
+export const pluginsUninstall = (name: string) => call('plugins_uninstall', { name });
+
+/** Installs the removed essentials again (`PluginsState.removedEssentials`). */
+export const pluginsRestoreEssentials = () => call('plugins_restore_essentials');
+
+/** A plugin's settings: its schema and what its file sets. */
+export const pluginsSettings = (name: string) => call('plugins_settings', { name });
+
+/**
+ * Sets a key of a plugin's settings; `null` takes it out (the script's default). Resolves with the
+ * settings as they are now; a plugin that runs gets the change at Apply.
+ */
+export const pluginsSetSetting = (name: string, key: string, value: string | null) =>
+  call('plugins_set_setting', { name, key, value });
+
+/** A plugin's last errors of this run, the oldest first. */
+export const pluginsLog = (name: string) => call('plugins_log', { name });
+
+/**
+ * "Apply": restarts the player core, which plays on where it was, with the plugins that are on.
+ * `plugins:changed` says `applying` at the start and again when it is done.
+ */
+export const pluginsApply = () => call('plugins_apply');

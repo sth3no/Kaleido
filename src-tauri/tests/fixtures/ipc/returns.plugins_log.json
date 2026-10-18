@@ -1,0 +1,10 @@
+[
+  [
+    {
+      "level": "error",
+      "prefix": "sub_select",
+      "text": "Lua error: main.lua:12: attempt to index a nil value\n"
+    },
+    { "level": "fatal", "prefix": "sub_select", "text": "cannot start\n" }
+  ]
+]

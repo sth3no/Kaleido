@@ -30,9 +30,23 @@ import playerLogEventJson from '../../src-tauri/tests/fixtures/ipc/player.log.js
 import playerMessageEventJson from '../../src-tauri/tests/fixtures/ipc/player.message.json';
 import playerStateEventJson from '../../src-tauri/tests/fixtures/ipc/player.state.json';
 import playerThumbEventJson from '../../src-tauri/tests/fixtures/ipc/player.thumb.json';
+import pluginsApplyJson from '../../src-tauri/tests/fixtures/ipc/plugins_apply.json';
+import pluginsChangedEventJson from '../../src-tauri/tests/fixtures/ipc/plugins.changed.json';
+import pluginsErrorEventJson from '../../src-tauri/tests/fixtures/ipc/plugins.error.json';
+import pluginsListJson from '../../src-tauri/tests/fixtures/ipc/plugins_list.json';
+import pluginsLogJson from '../../src-tauri/tests/fixtures/ipc/plugins_log.json';
+import pluginsRestoreEssentialsJson from '../../src-tauri/tests/fixtures/ipc/plugins_restore_essentials.json';
+import pluginsSetEnabledJson from '../../src-tauri/tests/fixtures/ipc/plugins_set_enabled.json';
+import pluginsSetSettingJson from '../../src-tauri/tests/fixtures/ipc/plugins_set_setting.json';
+import pluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/plugins_settings.json';
+import pluginsUninstallJson from '../../src-tauri/tests/fixtures/ipc/plugins_uninstall.json';
 import rejectsPlayerLoadJson from '../../src-tauri/tests/fixtures/ipc/rejects.player_load.json';
+import rejectsPluginsSetSettingJson from '../../src-tauri/tests/fixtures/ipc/rejects.plugins_set_setting.json';
 import rejectsSettingsSetJson from '../../src-tauri/tests/fixtures/ipc/rejects.settings_set.json';
 import rejectsSystemOpenTextJson from '../../src-tauri/tests/fixtures/ipc/rejects.system_open_text.json';
+import returnsPluginsListJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_list.json';
+import returnsPluginsLogJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_log.json';
+import returnsPluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_settings.json';
 import returnsSettingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_audio_devices.json';
 import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_bindings.json';
 import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
@@ -94,18 +108,29 @@ import type {
   License,
   LoadIssue,
   LoadMode,
+  Localized,
   LogLine,
   OpenRequest,
+  OptEntry,
   PasteOutcome,
   Playback,
   PlayerCommand,
   PlayerMessage,
   PlayerStateBatch,
+  PluginError,
+  PluginErrorEvent,
+  PluginInfo,
+  PluginSettings,
+  PluginSource,
+  PluginsState,
   ReduceTransparency,
   ScreenshotMode,
   SeekMode,
+  SettingKind,
+  SettingSpec,
   Settings,
   SettingsError,
+  SettingsForm,
   SourceError,
   SourcePage,
   SystemAppearance,
@@ -147,6 +172,14 @@ const commandFixtures = {
   player_command: playerCommandJson,
   player_input: playerInputJson,
   player_load: playerLoadJson,
+  plugins_apply: pluginsApplyJson,
+  plugins_list: pluginsListJson,
+  plugins_log: pluginsLogJson,
+  plugins_restore_essentials: pluginsRestoreEssentialsJson,
+  plugins_set_enabled: pluginsSetEnabledJson,
+  plugins_set_setting: pluginsSetSettingJson,
+  plugins_settings: pluginsSettingsJson,
+  plugins_uninstall: pluginsUninstallJson,
   settings_audio_devices: settingsAudioDevicesJson,
   settings_bindings: settingsBindingsJson,
   settings_get: settingsGetJson,
@@ -187,6 +220,8 @@ const eventFixtures = {
   'player:message': playerMessageEventJson,
   'player:state': playerStateEventJson,
   'player:thumb': playerThumbEventJson,
+  'plugins:changed': pluginsChangedEventJson,
+  'plugins:error': pluginsErrorEventJson,
   'settings:changed': settingsChangedEventJson,
   'system:appearance-changed': systemAppearanceEventJson,
   'system:error': systemErrorEventJson,
@@ -196,6 +231,9 @@ const eventFixtures = {
 
 /** What a command resolves with, where that is more than a number or a string. */
 const returnFixtures = {
+  plugins_list: returnsPluginsListJson,
+  plugins_log: returnsPluginsLogJson,
+  plugins_settings: returnsPluginsSettingsJson,
   settings_audio_devices: returnsSettingsAudioDevicesJson,
   settings_bindings: returnsSettingsBindingsJson,
   system_appearance: returnsSystemAppearanceJson,
@@ -203,6 +241,9 @@ const returnFixtures = {
   system_paste: returnsSystemPasteJson,
 } satisfies {
   [K in
+    | 'plugins_list'
+    | 'plugins_log'
+    | 'plugins_settings'
     | 'settings_audio_devices'
     | 'settings_bindings'
     | 'system_appearance'
@@ -213,9 +254,12 @@ const returnFixtures = {
 /** What a command rejects with (the `Err` of its `Result`). */
 const rejectFixtures = {
   player_load: rejectsPlayerLoadJson,
+  plugins_set_setting: rejectsPluginsSetSettingJson,
   settings_set: rejectsSettingsSetJson,
   system_open_text: rejectsSystemOpenTextJson,
-} satisfies { [K in 'player_load' | 'settings_set' | 'system_open_text']: Fixture<CommandErrors[K]> };
+} satisfies {
+  [K in 'player_load' | 'plugins_set_setting' | 'settings_set' | 'system_open_text']: Fixture<CommandErrors[K]>;
+};
 
 // --- The names of the types --------------------------------------------------------------------
 
@@ -276,6 +320,13 @@ const BINDING_SOURCE_SHAPES: Shapes<BindingSource, 'type'> = {
 const SETTINGS_ERROR_SHAPES: Shapes<SettingsError, 'type'> = {
   notAllowed: { type: true, key: true },
   invalid: { type: true, key: true, reason: true },
+  io: { type: true, message: true },
+  unavailable: { type: true },
+};
+const PLUGIN_ERROR_SHAPES: Shapes<PluginError, 'type'> = {
+  notFound: { type: true, name: true },
+  invalid: { type: true, key: true, reason: true },
+  busy: { type: true },
   io: { type: true, message: true },
   unavailable: { type: true },
 };
@@ -344,6 +395,85 @@ const LICENSE: Shape<License> = {
   fields: { name: 'required', version: 'required', license: 'required', url: 'required' },
 };
 const LOAD_ISSUE: Shape<LoadIssue> = { fields: { source: 'required', kind: 'required' } };
+const LOCALIZED: Shape<Localized> = { fields: { en: 'required', cs: 'optional' } };
+const PLUGIN_INFO: Shape<PluginInfo> = {
+  fields: {
+    name: 'required',
+    scriptName: 'required',
+    source: 'required',
+    version: 'required',
+    summary: 'required',
+    enabled: 'required',
+    running: 'required',
+    incompatible: 'required',
+    duplicate: 'required',
+    errors: 'required',
+    settings: 'required',
+    copyOf: 'required',
+  },
+  inside: { summary: LOCALIZED },
+};
+// The `plugins` of a state are a list: see `PLUGIN_INFO`.
+const PLUGINS_STATE: Shape<PluginsState> = {
+  fields: { plugins: 'required', restartNeeded: 'required', removedEssentials: 'required', applying: 'required' },
+};
+const OPT_ENTRY: Shape<OptEntry> = { fields: { key: 'required', value: 'required' } };
+// The `schema` is a list of `SettingSpec`s and the `entries` of `OptEntry`s: see those.
+const PLUGIN_SETTINGS: Shape<PluginSettings> = {
+  fields: { name: 'required', schema: 'required', entries: 'required', managed: 'required' },
+};
+const PLUGIN_ERROR_EVENT: Shape<PluginErrorEvent> = { fields: { name: 'required' } };
+
+/** The setting of one kind. */
+type SpecOf<K extends SettingKind> = Extract<SettingSpec, { type: K }>;
+/**
+ * The keys of each kind of setting, a struct tagged by `type` whose optional keys are left out
+ * when absent: `expectVariants` wants every key in every sample, so each kind is checked as a
+ * struct of its own. The texts inside (`label`, `description`) are checked as `Localized`.
+ */
+const SETTING_SPEC_SHAPES: { [K in SettingKind]: Shape<SpecOf<K>> } = {
+  bool: {
+    fields: { key: 'required', type: 'required', default: 'required', label: 'required', description: 'optional' },
+  },
+  int: {
+    fields: {
+      key: 'required',
+      type: 'required',
+      default: 'required',
+      label: 'required',
+      description: 'optional',
+      min: 'optional',
+      max: 'optional',
+    },
+  },
+  float: {
+    fields: {
+      key: 'required',
+      type: 'required',
+      default: 'required',
+      label: 'required',
+      description: 'optional',
+      min: 'optional',
+      max: 'optional',
+    },
+  },
+  string: {
+    fields: { key: 'required', type: 'required', default: 'required', label: 'required', description: 'optional' },
+  },
+  enum: {
+    fields: {
+      key: 'required',
+      type: 'required',
+      default: 'required',
+      label: 'required',
+      description: 'optional',
+      values: 'required',
+    },
+  },
+  color: {
+    fields: { key: 'required', type: 'required', default: 'required', label: 'required', description: 'optional' },
+  },
+};
 
 /** What `expectShape` reads a `Shape<T>` as. */
 type LooseShape = {
@@ -414,6 +544,16 @@ const SOURCE_ERRORS = names<SourceError>({ notFound: true, protocol: true, inval
 const LANGUAGES = names<Language>({ system: true, cs: true, en: true });
 const THEME_MODES = names<ThemeMode>({ system: true, dark: true, light: true });
 const REDUCE_TRANSPARENCY = names<ReduceTransparency>({ auto: true, on: true, off: true });
+const PLUGIN_SOURCES = names<PluginSource>({ bundled: true, store: true, url: true, manual: true });
+const SETTINGS_FORMS = names<SettingsForm>({ schema: true, keyValue: true });
+const SETTING_KINDS = names<SettingKind>({
+  bool: true,
+  int: true,
+  float: true,
+  string: true,
+  enum: true,
+  color: true,
+});
 
 /** The `field` of the samples whose `tag` is `value`. */
 const fieldOf = (samples: object[], tag: string, value: string, field: string): string[] =>
@@ -554,7 +694,22 @@ describe('fixtures type-check against the IPC types', () => {
     ] as const) {
       for (const payload of eventFixtures[channel]) expect(Object.keys(payload), channel).toEqual([]);
     }
+    expectShape(eventFixtures['plugins:changed'], PLUGINS_STATE, 'PluginsState');
+    expectShape(
+      eventFixtures['plugins:changed'].flatMap(({ plugins }) => plugins),
+      PLUGIN_INFO,
+      'PluginInfo',
+    );
+    expectShape(eventFixtures['plugins:error'], PLUGIN_ERROR_EVENT, 'PluginErrorEvent');
     // What commands resolve or reject with.
+    expectShape(returnFixtures.plugins_list, PLUGINS_STATE, 'PluginsState');
+    expectShape(returnFixtures.plugins_settings, PLUGIN_SETTINGS, 'PluginSettings');
+    expectShape(
+      returnFixtures.plugins_settings.flatMap(({ entries }) => entries),
+      OPT_ENTRY,
+      'OptEntry',
+    );
+    expectShape(returnFixtures.plugins_log.flat(), LOG_LINE, 'LogLine');
     expectShape(returnFixtures.settings_bindings.flat(), BINDING, 'Binding');
     expectShape(returnFixtures.settings_audio_devices.flat(), AUDIO_DEVICE, 'AudioDevice');
     expectShape(returnFixtures.system_appearance, SYSTEM_APPEARANCE, 'SystemAppearance');
@@ -585,6 +740,41 @@ describe('fixtures type-check against the IPC types', () => {
       'source error',
     );
     expectVariants(rejectFixtures.settings_set, 'type', SETTINGS_ERROR_SHAPES, 'settings error');
+    expectVariants(rejectFixtures.plugins_set_setting, 'type', PLUGIN_ERROR_SHAPES, 'plugin error');
+  });
+
+  test('the plugins', () => {
+    // The list and the event carry the same state.
+    expect(returnFixtures.plugins_list).toEqual(eventFixtures['plugins:changed']);
+    const plugins = eventFixtures['plugins:changed'].flatMap(({ plugins }) => plugins);
+    expectAll(plugins.map(({ source }) => source), PLUGIN_SOURCES, 'plugin source');
+    expectAll(plugins.map(({ settings }) => settings), SETTINGS_FORMS, 'settings form');
+    // Each kind of setting, with exactly its keys.
+    const specs = returnFixtures.plugins_settings.flatMap(({ schema }) => schema ?? []);
+    expectAll(specs.map(({ type }) => type), SETTING_KINDS, 'setting kind');
+    for (const [kind, shape] of Object.entries(SETTING_SPEC_SHAPES)) {
+      expectShape(
+        specs.filter(({ type }) => type === kind),
+        shape,
+        `SettingSpec ${kind}`,
+      );
+    }
+    // Every text, a summary, a label or a description, has its Czech or leaves it out.
+    const texts: object[] = [
+      ...plugins.flatMap(({ summary }) => (summary === null ? [] : [summary])),
+      ...specs.flatMap(({ label, description }) => (description === undefined ? [label] : [label, description])),
+    ];
+    expectShape(texts, LOCALIZED, 'Localized');
+    // A form or keys and values; managed keys are never among the entries.
+    for (const { schema, entries, managed } of returnFixtures.plugins_settings) {
+      expect(schema === null || Array.isArray(schema)).toBe(true);
+      for (const { key } of entries) expect(managed).not.toContain(key);
+    }
+    expectKnown(
+      returnFixtures.plugins_log.flat().map(({ level }) => level),
+      LOG_LEVELS,
+      'plugin log level',
+    );
   });
 });
 
@@ -602,6 +792,14 @@ const wrappers = {
   player_command: ({ cmd }) => commands.playerCommand(cmd),
   player_input: ({ event }) => commands.playerInput(event),
   player_load: ({ sources, mode }) => commands.playerLoad(sources, mode),
+  plugins_apply: () => commands.pluginsApply(),
+  plugins_list: () => commands.pluginsList(),
+  plugins_log: ({ name }) => commands.pluginsLog(name),
+  plugins_restore_essentials: () => commands.pluginsRestoreEssentials(),
+  plugins_set_enabled: ({ name, enabled }) => commands.pluginsSetEnabled(name, enabled),
+  plugins_set_setting: ({ name, key, value }) => commands.pluginsSetSetting(name, key, value),
+  plugins_settings: ({ name }) => commands.pluginsSettings(name),
+  plugins_uninstall: ({ name }) => commands.pluginsUninstall(name),
   settings_audio_devices: () => commands.settingsAudioDevices(),
   settings_bindings: () => commands.settingsBindings(),
   settings_get: () => commands.settingsGet(),
@@ -642,6 +840,8 @@ const subscribers = {
   'player:message': events.onMessage,
   'player:state': events.onPlayerState,
   'player:thumb': events.onThumb,
+  'plugins:changed': events.onPluginsChanged,
+  'plugins:error': events.onPluginsError,
   'settings:changed': events.onSettingsChanged,
   'system:appearance-changed': events.onSystemAppearanceChanged,
   'system:error': events.onSystemError,

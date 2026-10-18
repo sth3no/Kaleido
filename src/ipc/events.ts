@@ -15,6 +15,8 @@ import type {
   OpenRequest,
   PlayerMessage,
   PlayerStateBatch,
+  PluginErrorEvent,
+  PluginsState,
   Settings,
   SystemAppearance,
   ThumbReady,
@@ -82,3 +84,11 @@ export const onSettingsChanged = (callback: (payload: Settings) => void) =>
 /** Windows' transparency effects, high contrast or build changed. Comes only on a change: ask with `systemAppearance` at start. */
 export const onSystemAppearanceChanged = (callback: (payload: SystemAppearance) => void) =>
   on('system:appearance-changed', callback);
+
+/** The plugins changed (a change, Apply starting or done, a plugin's first error); the payload is all of them. */
+export const onPluginsChanged = (callback: (payload: PluginsState) => void) =>
+  on('plugins:changed', callback);
+
+/** A plugin logged its first error of this run: show the one quiet notice with "Turn off". */
+export const onPluginsError = (callback: (payload: PluginErrorEvent) => void) =>
+  on('plugins:error', callback);

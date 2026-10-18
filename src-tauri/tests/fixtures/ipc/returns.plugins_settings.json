@@ -1,0 +1,77 @@
+[
+  {
+    "name": "thumbfast",
+    "schema": [
+      {
+        "key": "subtitles",
+        "type": "bool",
+        "default": true,
+        "label": { "en": "The subtitles", "cs": "Hodnota subtitles" },
+        "description": { "en": "What it does." }
+      },
+      { "key": "osd", "type": "bool", "default": false, "label": { "en": "The osd" } },
+      {
+        "key": "max_height",
+        "type": "int",
+        "min": 50,
+        "max": 600,
+        "default": 200,
+        "label": { "en": "The max_height", "cs": "Hodnota max_height" },
+        "description": { "en": "What it does." }
+      },
+      { "key": "count", "type": "int", "default": 3, "label": { "en": "The count" } },
+      {
+        "key": "scale",
+        "type": "float",
+        "min": 0.5,
+        "max": 2.5,
+        "default": 1.5,
+        "label": { "en": "The scale", "cs": "Hodnota scale" },
+        "description": { "en": "What it does." }
+      },
+      { "key": "ratio", "type": "float", "default": 0.75, "label": { "en": "The ratio" } },
+      {
+        "key": "title",
+        "type": "string",
+        "default": "Kaleido",
+        "label": { "en": "The title", "cs": "Hodnota title" },
+        "description": { "en": "What it does." }
+      },
+      { "key": "prefix", "type": "string", "default": "", "label": { "en": "The prefix" } },
+      {
+        "key": "position",
+        "type": "enum",
+        "values": ["top-left", "bottom"],
+        "default": "top-left",
+        "label": { "en": "The position", "cs": "Hodnota position" },
+        "description": { "en": "What it does." }
+      },
+      {
+        "key": "mode",
+        "type": "enum",
+        "values": ["auto", "never"],
+        "default": "auto",
+        "label": { "en": "The mode" }
+      },
+      {
+        "key": "color",
+        "type": "color",
+        "default": "#FFFFFF",
+        "label": { "en": "The color", "cs": "Hodnota color" },
+        "description": { "en": "What it does." }
+      },
+      { "key": "border", "type": "color", "default": "#80000000", "label": { "en": "The border" } }
+    ],
+    "entries": [{ "key": "max_height", "value": "300" }],
+    "managed": ["mpv_path", "network", "tone_mapping"]
+  },
+  {
+    "name": "my-plugin.lua",
+    "schema": null,
+    "entries": [
+      { "key": "font_size", "value": "20" },
+      { "key": "title", "value": "" }
+    ],
+    "managed": []
+  }
+]
