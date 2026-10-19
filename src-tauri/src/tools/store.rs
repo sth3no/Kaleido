@@ -85,6 +85,16 @@ pub struct ToolRecord {
     /// After a failure: no check before this time, unless one is asked for (spec 10.7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_try: Option<String>,
+    /// The times in a row its file was found gone (controller Ruling R10): a virus scanner that
+    /// takes it away after every install. The backoff of the next vanishing counts them, so that
+    /// it climbs although the downloads that put the file back in between went through; over once
+    /// a check finds the file still in place at its start.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub vanished: u32,
+}
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 impl ToolRecord {
@@ -98,6 +108,7 @@ impl ToolRecord {
             checked_at: None,
             failures: 0,
             next_try: None,
+            vanished: 0,
         }
     }
 
@@ -255,7 +266,8 @@ mod tests {
                     "installedAt": "2026-10-19T12:00:00Z",
                     "checkedAt": "2026-10-19T13:00:00Z",
                     "failures": 2,
-                    "nextTry": "2026-10-19T13:05:00Z"
+                    "nextTry": "2026-10-19T13:05:00Z",
+                    "vanished": 1
                 },
                 "deno": {
                     "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
@@ -275,9 +287,11 @@ mod tests {
         assert_eq!(yt.channel, Some(Channel::Nightly));
         assert_eq!(yt.failures, 2);
         assert_eq!(yt.next_try.as_deref(), Some("2026-10-19T13:05:00Z"));
+        assert_eq!(yt.vanished, 1);
         let deno = &file.tools[&ToolId::Deno];
         assert_eq!(deno.channel, None);
         assert_eq!(deno.checked_at, None);
+        assert_eq!(deno.vanished, 0, "left out of the file while there is none");
         assert!(deno.is_installed());
         file.save(&path).unwrap();
         let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();

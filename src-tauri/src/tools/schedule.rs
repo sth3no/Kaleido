@@ -94,6 +94,7 @@ mod tests {
             checked_at: checked.map(str::to_owned),
             failures: 0,
             next_try: None,
+            vanished: 0,
         }
     }
 

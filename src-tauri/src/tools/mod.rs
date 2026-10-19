@@ -13,9 +13,11 @@
 //! 4. otherwise downloads the asset, verifies it against that checksum, puts the tool in place
 //!    beside the one that may run ([`replace`]), reads its version ([`Inspect`]) and records it;
 //! 5. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
-//!    A tool whose file is gone right after, or that says no version, is such an error too
+//!    A tool whose file is gone, or that says no version, is such an error too
 //!    ([`ToolError::Gone`], [`ToolError::Silent`]; controller Ruling R10): a virus scanner that
-//!    takes `yt-dlp.exe` away is not answered with a download at every round.
+//!    takes `yt-dlp.exe` away is not answered with a download at every round. A check that is not
+//!    forced and finds the file of a tool that was in place gone counts that as one failure and
+//!    downloads nothing; the next one, after the backoff, downloads it again.
 //!
 //! Nothing is ever put in place unverified: a download must have the checksum the release lists
 //! for it, and a bundled copy the one the installer's `tools.json` beside it names (the installer
@@ -221,11 +223,16 @@ pub enum ToolError {
     Archive(String),
     /// The tool could not be put in place, or the check stopped unexpectedly.
     Io(String),
-    /// The tool was put in place (or was there) and its file is gone right after: a virus
-    /// scanner that quarantines it, as some do with PyInstaller programs like `yt-dlp.exe`.
+    /// The tool's file is gone (Ruling R10): a virus scanner that quarantines it, as some do with
+    /// PyInstaller programs like `yt-dlp.exe`. Either a check that is not forced found it gone at
+    /// its start, of a tool that was in place and not backing off, and downloaded nothing (counted
+    /// once per vanishing: the next check, after the backoff or forced, downloads it again); or
+    /// it was gone right after a check put it in place. Its backoff climbs with the vanishings in
+    /// a row ([`ToolRecord::vanished`]).
     Gone(ToolId),
-    /// The tool is in place but its `--version` says nothing: it does not run (a virus scanner
-    /// that blocks it, a broken file).
+    /// The tool is in place after a check but its `--version` said nothing within its time
+    /// ([`run::VERSION_TIMEOUT`]): it does not run (a virus scanner that blocks it, a broken
+    /// file). It is asked again at every round ([`Tools::inspect_again`]).
     Silent(ToolId),
 }
 
@@ -486,15 +493,16 @@ impl Tools {
         };
         self.tell(&started);
 
-        let (record, result) =
-            panic::catch_unwind(AssertUnwindSafe(|| self.run(tool, channel, record.clone())))
-                .unwrap_or_else(|_| {
-                    tracing::error!("the check of {tool} panicked");
-                    (
-                        failed(record, OffsetDateTime::now_utc()),
-                        Err(ToolError::Io("the check stopped unexpectedly".to_owned())),
-                    )
-                });
+        let (record, result) = panic::catch_unwind(AssertUnwindSafe(|| {
+            self.run(tool, channel, record.clone(), force)
+        }))
+        .unwrap_or_else(|_| {
+            tracing::error!("the check of {tool} panicked");
+            (
+                failed(record, OffsetDateTime::now_utc()),
+                Err(ToolError::Io("the check stopped unexpectedly".to_owned())),
+            )
+        });
 
         let mut state = self.lock();
         state.file.tools.insert(tool, record);
@@ -527,32 +535,62 @@ impl Tools {
         tool: ToolId,
         channel: Channel,
         record: Option<ToolRecord>,
+        force: bool,
     ) -> (ToolRecord, Result<(), ToolError>) {
+        let now = OffsetDateTime::now_utc();
+        // The file of a tool that was in place is gone since (a virus scanner took it away after
+        // the last check): one failure, and nothing downloaded this time, so that a scanner that
+        // takes every copy away is not answered with a download at every round (Ruling R10). Once
+        // per vanishing: the next check, after the backoff (it has a failure then) or forced,
+        // downloads it again.
+        if !force
+            && let Some(found) = &record
+            && found.is_installed()
+            && found.failures == 0
+            && !self.exe(tool).is_file()
+        {
+            tracing::warn!("{} is gone since it was put in place", tool.exe_name());
+            return (
+                gone(found.clone(), Some(found), now),
+                Err(ToolError::Gone(tool)),
+            );
+        }
+        // Found in place at the start: a streak of vanishings is over.
+        let in_place = self.installed(tool, record.as_ref());
         let source = source(tool, channel);
         let mut record = record;
-        if !self.installed(tool, record.as_ref())
-            && let Some(taken) = self.take_bundled(tool, &source)
-        {
+        if !in_place && let Some(taken) = self.take_bundled(tool, &source) {
             record = Some(taken);
         }
         match self.update(tool, channel, &source, record.as_ref()) {
-            Ok(updated) => match self.unusable_after(tool, &updated) {
-                None => (updated, Ok(())),
-                // In place, but gone or silent: a failure like any other, which backs off (1 min,
-                // 5 min, 30 min, 2 h), so that a file a virus scanner takes away is not downloaded
-                // again at every round. The record keeps what was put in place, and the last check
-                // that went through.
-                Some(error) => {
-                    let mut after = updated;
-                    let (failures, next) =
-                        schedule::after_failure(record.as_ref(), OffsetDateTime::now_utc());
-                    after.failures = failures;
-                    after.next_try = Some(stamp(next));
-                    after.checked_at = record.and_then(|record| record.checked_at);
-                    (after, Err(error))
+            Ok(mut updated) => {
+                updated.vanished = if in_place {
+                    0
+                } else {
+                    record.as_ref().map_or(0, |record| record.vanished)
+                };
+                match self.unusable_after(tool, &updated) {
+                    None => (updated, Ok(())),
+                    // In place, but gone or silent: a failure like any other, which backs off (1
+                    // min, 5 min, 30 min, 2 h). The record keeps what was put in place, and the
+                    // last check that went through.
+                    Some(error) => {
+                        let mut after = if matches!(error, ToolError::Gone(_)) {
+                            gone(updated, record.as_ref(), now)
+                        } else {
+                            let (failures, next) = schedule::after_failure(record.as_ref(), now);
+                            ToolRecord {
+                                failures,
+                                next_try: Some(stamp(next)),
+                                ..updated
+                            }
+                        };
+                        after.checked_at = record.and_then(|record| record.checked_at);
+                        (after, Err(error))
+                    }
                 }
-            },
-            Err(error) => (failed(record, OffsetDateTime::now_utc()), Err(error)),
+            }
+            Err(error) => (failed(record, now), Err(error)),
         }
     }
 
@@ -617,6 +655,8 @@ impl Tools {
             checked_at: Some(now),
             failures: 0,
             next_try: None,
+            // `run` carries the vanishings over.
+            vanished: 0,
         })
     }
 
@@ -662,6 +702,7 @@ impl Tools {
             checked_at: None,
             failures: 0,
             next_try: None,
+            vanished: 0,
         })
     }
 
@@ -827,6 +868,25 @@ fn unusable(tool: ToolId, record: Option<&ToolRecord>) -> Option<String> {
 /// The channel a tool's record keeps: yt-dlp's, and none for Deno.
 fn channel_of(tool: ToolId, channel: Channel) -> Option<Channel> {
     (tool == ToolId::YtDlp).then_some(channel)
+}
+
+/// `record` once its file was found gone at `now` (Ruling R10), `previous` the record before the
+/// check: one more failure, and one more vanishing. Its backoff counts the vanishings in a row
+/// too, so that it climbs although the downloads that put the file back in between went through
+/// and ended the failures: a scanner that takes every copy away gets one download per 1 min,
+/// 5 min, 30 min, then 2 h.
+fn gone(mut record: ToolRecord, previous: Option<&ToolRecord>, now: OffsetDateTime) -> ToolRecord {
+    let basis = ToolRecord {
+        failures: previous.map_or(0, |previous| previous.failures.max(previous.vanished)),
+        ..ToolRecord::not_installed()
+    };
+    let (failures, next) = schedule::after_failure(Some(&basis), now);
+    record.failures = failures;
+    record.next_try = Some(stamp(next));
+    record.vanished = previous
+        .map_or(0, |previous| previous.vanished)
+        .saturating_add(1);
+    record
 }
 
 /// `record` (a never-installed one when there is none) after one more failed check at `now`.
@@ -1308,6 +1368,7 @@ mod tests {
             checked_at: Some(at.to_owned()),
             failures: 0,
             next_try: None,
+            vanished: 0,
         }
     }
 
@@ -2281,6 +2342,149 @@ mod tests {
         let recorded = setup.record(ToolId::YtDlp).unwrap();
         assert_eq!((recorded.failures, recorded.next_try), (0, None));
         assert_eq!(tools.installs(ToolId::YtDlp), 3);
+    }
+
+    /// The backoff of `tool` over: its `next_try` a second ago, as a later start of Kaleido reads
+    /// it, so that the test does not wait the minutes out.
+    fn backoff_over(setup: &Setup, tool: ToolId) -> Tools {
+        let path = setup.paths.tools_dir.join(store::FILE);
+        let mut file = ToolsFile::load(&path);
+        let record = file.tools.get_mut(&tool).expect("a record");
+        record.next_try = Some(stamp(now() - Duration::seconds(1)));
+        file.save(&path).unwrap();
+        setup.tools()
+    }
+
+    /// Ruling R10: a virus scanner that lets `--version` run and takes the file away seconds after
+    /// the check went through. The next check that is not forced counts it as a failure and
+    /// downloads nothing; after the backoff it downloads again, and a scanner that keeps taking
+    /// the file away makes the wait grow, although the downloads in between went through.
+    #[test]
+    fn a_tool_found_gone_at_the_start_of_a_check_is_a_failure_before_any_download() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let source = source(ToolId::YtDlp, Channel::Stable);
+        let tools = setup.tools();
+        assert_eq!(
+            tools
+                .check(ToolId::YtDlp, Channel::Stable, false)
+                .unwrap()
+                .state,
+            ToolState::Ready
+        );
+        assert_eq!(setup.web.count(&source.asset_url()), 1);
+
+        // Seconds later the scanner takes it away: the record says it is there, the file is not,
+        // and the scheduler sees it due at once.
+        fs::remove_file(setup.exe(ToolId::YtDlp)).unwrap();
+        assert_eq!(tools.next_due(ToolId::YtDlp, Channel::Stable, now()), None);
+        let calls = setup.web.calls().len();
+        let before = now();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, false),
+            Err(ToolError::Gone(ToolId::YtDlp))
+        );
+        let after = now();
+        assert_eq!(
+            setup.web.calls().len(),
+            calls,
+            "nothing asked of the network"
+        );
+        let status = tools.status(ToolId::YtDlp);
+        assert_eq!((status.state, status.version), (ToolState::Failed, None));
+        assert!(status.error.unwrap().contains("antivirus"));
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.vanished), (1, 1));
+        let next = time_of(&recorded.next_try);
+        assert!(
+            before + Duration::seconds(60) <= next && next <= after + Duration::seconds(60),
+            "{next}"
+        );
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Stable, now()),
+            Some(next)
+        );
+        // The next round asks nothing either.
+        tools.check(ToolId::YtDlp, Channel::Stable, false).unwrap();
+        assert_eq!(setup.web.calls().len(), calls);
+
+        // After the backoff: downloaded again, in place, its failures over, the vanishing kept.
+        let tools = backoff_over(&setup, ToolId::YtDlp);
+        assert_eq!(tools.next_due(ToolId::YtDlp, Channel::Stable, now()), None);
+        assert_eq!(
+            tools
+                .check(ToolId::YtDlp, Channel::Stable, false)
+                .unwrap()
+                .state,
+            ToolState::Ready
+        );
+        assert_eq!(setup.web.count(&source.asset_url()), 2);
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(
+            (recorded.failures, recorded.next_try, recorded.vanished),
+            (0, None, 1)
+        );
+
+        // Taken away again: the wait grows.
+        fs::remove_file(setup.exe(ToolId::YtDlp)).unwrap();
+        let before = now();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, false),
+            Err(ToolError::Gone(ToolId::YtDlp))
+        );
+        let after = now();
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.vanished), (2, 2));
+        let next = time_of(&recorded.next_try);
+        assert!(
+            before + Duration::seconds(300) <= next && next <= after + Duration::seconds(300),
+            "{next}"
+        );
+        assert_eq!(setup.web.count(&source.asset_url()), 2);
+        // And again after the next download: 30 minutes.
+        let tools = backoff_over(&setup, ToolId::YtDlp);
+        tools.check(ToolId::YtDlp, Channel::Stable, false).unwrap();
+        assert_eq!(setup.web.count(&source.asset_url()), 3);
+        fs::remove_file(setup.exe(ToolId::YtDlp)).unwrap();
+        let before = now();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, false),
+            Err(ToolError::Gone(ToolId::YtDlp))
+        );
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.vanished), (3, 3));
+        assert!(time_of(&recorded.next_try) >= before + Duration::seconds(1800));
+
+        // "Zkontrolovat" downloads at once, whatever the backoff says.
+        assert_eq!(
+            tools
+                .check(ToolId::YtDlp, Channel::Stable, true)
+                .unwrap()
+                .state,
+            ToolState::Ready
+        );
+        assert_eq!(setup.web.count(&source.asset_url()), 4);
+        assert_eq!(setup.record(ToolId::YtDlp).unwrap().vanished, 3);
+        // A check that finds it still in place at its start ends the streak, and downloads
+        // nothing; the next vanishing waits a minute again.
+        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        assert_eq!(setup.web.count(&source.asset_url()), 4);
+        assert_eq!(setup.record(ToolId::YtDlp).unwrap().vanished, 0);
+        fs::remove_file(setup.exe(ToolId::YtDlp)).unwrap();
+        let before = now();
+        tools
+            .check(ToolId::YtDlp, Channel::Stable, false)
+            .unwrap_err();
+        let after = now();
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.vanished), (1, 1));
+        let next = time_of(&recorded.next_try);
+        assert!(
+            before + Duration::seconds(60) <= next && next <= after + Duration::seconds(60),
+            "{next}"
+        );
     }
 
     /// Ruling R10 and the scheduler's rounds: a tool put in place whose `--version` does not

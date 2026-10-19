@@ -506,6 +506,7 @@ mod tests {
             checked_at: None,
             failures: 0,
             next_try: None,
+            vanished: 0,
         };
         // As checks leave it: yt-dlp in place, Deno recorded but its file gone.
         let mut file = ToolsFile::default();
