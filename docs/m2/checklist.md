@@ -203,7 +203,10 @@ nebo odkaz se nepodařilo otevřít…“ (pak řádky přišly pozdě; úryvek 
 - [ ] **Nahrazený nebo poškozený `yt-dlp.exe` (varianta B, závěrečná revize I-2):** Kaleido zavřít.
   Současný `tools\yt-dlp.exe` odložit (třeba přejmenovat na `yt-dlp.new`) a na jeho místo dát starý
   `yt-dlp.exe`; `tools.json` nechat, jak je. Kaleido spustit: Aktualizace pořád říkají „Aktuální“ se
-  zapsanou verzí, soubor se čte až při kontrole. Stisknout u yt-dlp „Zkontrolovat teď“: kontrola
+  zapsanou verzí, soubor se čte až při kontrole. To platí, jen když denní kontrola yt-dlp při startu
+  není splatná, tedy když `checkedAt` u `ytDlp` v `tools.json` je mladší než den. Je-li starší,
+  kontrola při startu soubor opraví ještě před stiskem („Stahuji novou verzi…“ hned po spuštění);
+  pak `checkedAt` před spuštěním přepsat na dnešní čas. Stisknout u yt-dlp „Zkontrolovat teď“: kontrola
   přečte SHA-256 souboru, pozná, že to není ten, který Kaleido dal na místo, a stáhne yt-dlp znovu
   („Stahuji novou verzi…“, pak „Aktuální“). `yt-dlp.exe` má nový čas změny a odkaz na YouTube
   hraje. Totéž s poškozeným souborem (na místo `yt-dlp.exe` dát třeba kopii `tools.json` pod tím
@@ -223,13 +226,18 @@ nebo odkaz se nepodařilo otevřít…“ (pak řádky přišly pozdě; úryvek 
   Stisknout: karta řekne „Aktualizuji yt-dlp, pak odkaz zkusím znovu…“, vynucená kontrola nic
   nestáhne („Zkontrolováno nyní“) a karta **zůstane** s větou „yt-dlp <verze> je už nejnovější. Web
   se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní. Kanál Nightly (Nastavení →
-  Aktualizace) ji často mívá dřív.“ Tlačítko aktualizace zmizí (fokus, který mělo, přejde na odkaz)
-  a místo něj je „Nastavení → Aktualizace“: zavře kartu a otevře Nastavení rovnou na Aktualizacích.
-  Odkaz se znovu nezkusí, takže nová karta nepřijde. Platí, jen dokud je nainstalovaný yt-dlp
-  nejnovější ve svém kanálu: vyjde-li mezitím nový, kontrola ho stáhne, odkaz se zkusí znovu, selže
-  kvůli formátu a přijde nová karta. Karta nepozná, že příčinou je tvůj formát (`mpv.conf` se tu
-  nečte). Řádek nech v `mpv.conf` pro kroky níže (Nightly, deset minut, dvě karty, bez Deno) a pak
-  ho odeber.
+  Aktualizace) ji často mívá dřív.“ Tlačítko aktualizace se změní na „Zkusit znovu“ (je to totéž
+  tlačítko, takže fokus, který mělo, na něm zůstane) a vedle něj je „Nastavení → Aktualizace“: zavře
+  kartu a otevře Nastavení rovnou na Aktualizacích. „Zkusit znovu“ otevře odkaz znovu **bez**
+  aktualizace (`stream_retry` s `update: false`; karta přitom drží a píše „Zkouším znovu…“, ne
+  „Aktualizuji…“). Selže-li odkaz stejně, což tu kvůli formátu v `mpv.conf` selže vždy, přijde
+  nová karta a ta má zase „Aktualizovat a zkusit znovu“. Přechodnou chybu (HTTP 403, nebo když
+  mezitím dorazí instalace) takové opakování přehraje; tu doma nevyvoláš, zapsat „nezkoušeno“
+  (pokrývá to test karty). Odmítne-li Rust odkaz, karta to řekne jako u jiných tlačítek a
+  „Zkusit znovu“ zůstane. Platí, jen dokud je nainstalovaný yt-dlp nejnovější ve svém kanálu:
+  vyjde-li mezitím nový, kontrola ho stáhne, odkaz se zkusí znovu, selže kvůli formátu a přijde
+  nová karta. Karta nepozná, že příčinou je tvůj formát (`mpv.conf` se tu nečte). Řádek nech v
+  `mpv.conf` pro kroky níže (Nightly, deset minut, dvě karty, bez Deno) a pak ho odeber.
 - [ ] **Totéž na Nightly:** Nastavení → Aktualizace → Kanál yt-dlp → Nightly (stáhne se nightly) a
   krok zopakovat: věta je stejná, jen bez věty o kanálu Nightly. Pak zpět na Stabilní.
 - [ ] **Kontrola při chybě nejvýš jednou za 10 minut (Ruling R11):** s řádkem v `mpv.conf`. Kaleido
@@ -488,7 +496,8 @@ dohraješ, v pořadí z [README.md](../../README.md) (`cargo fmt --all --check`,
 - Testy závěrečné opravy (taky nikdy neběžely):
   - nástroje (dočasná složka, falešný web): `a_file_that_is_not_the_one_put_in_place_is_downloaded_again`,
     `a_download_after_failed_checks_has_more_time`,
-    `a_link_update_says_what_was_put_in_place_since_the_link_failed`, `deno_is_needed_for_youtube_links`;
+    `a_link_update_says_what_was_put_in_place_since_the_link_failed`, `deno_is_needed_for_youtube_links`
+    a (oprava R19, dočasná složka, falešný web) `a_deno_that_works_is_ready_for_a_link_whatever_its_last_check_said`;
     upravené `the_same_checksum_downloads_nothing` (vynucená kontrola se ptá na verzi),
     `offline_keeps_the_installed_tool_and_backs_off`, `deno_comes_out_of_its_zip`; k tomu
     `tools_json_round_trips_and_keeps_unknown_keys` (`exeSha256`), `a_file_is_hashed_as_its_bytes`
@@ -508,7 +517,9 @@ dohraješ, v pořadí z [README.md](../../README.md) (`cargo fmt --all --check`,
     `restart_resumes_the_playlist_where_it_was`;
   - kontrakt: `ipc_fixtures_match_serde` a `src/ipc/contract.test.ts` (nové `returns.stream_retry.json`,
     formát HLS s neznámými kodeky);
-  - vitest: `StreamErrorCard.test.tsx` (blok „an update that finds nothing new“), `PluginNotice.test.tsx`
+  - vitest: `StreamErrorCard.test.tsx` (blok „an update that finds nothing new“; od opravy R19
+    testuje i „Zkusit znovu“ na kartě: seznamy tlačítek, fokus, `stream_retry` s `update: false`,
+    držení karty, odmítnutí), `PluginNotice.test.tsx`
     (blok „a plugin that broke before the UI listened“), `noticeStore.test.ts`, `uiStore.test.ts`,
     `SettingsPage.test.tsx` (sekce, o kterou požádá karta), `formats.test.ts`, `problem.test.ts`,
     `PluginsPage.test.tsx` a `PluginSettings.test.tsx` (Io s větou v jazyce UI), `ErrorCard.test.tsx` a

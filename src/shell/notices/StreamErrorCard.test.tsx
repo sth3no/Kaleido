@@ -432,7 +432,8 @@ describe('an update that finds nothing new (final review I-1)', () => {
     const said = within(card).getByText(/already the newest/);
     expect(said.textContent).toBe(`${NEWEST} The Nightly channel (Settings → Updates) often has it sooner.`);
     expect(said.getAttribute('role')).toBe('alert');
-    expect(buttonNames(card)).toEqual(['Close', 'Settings → Updates', 'Open file', 'Details']);
+    // The update would change nothing: "Try again" (R19) takes its place, first, as the action is.
+    expect(buttonNames(card)).toEqual(['Close', 'Try again', 'Settings → Updates', 'Open file', 'Details']);
     // Not at work any more: nothing says the update runs.
     expect(within(card).getByRole('status').textContent).toBe('');
 
@@ -511,10 +512,10 @@ describe('an update that finds nothing new (final review I-1)', () => {
       ),
     ).toBeTruthy();
     expect(within(card).queryByText(/already the newest/)).toBeNull();
-    expect(buttonNames(card)).toEqual(['Close', 'Settings → Updates', 'Open file', 'Details']);
+    expect(buttonNames(card)).toEqual(['Close', 'Try again', 'Settings → Updates', 'Open file', 'Details']);
   });
 
-  test('the focus the update’s button had goes to the link that takes its place', async () => {
+  test('the focus the update’s button had stays on it, which now reads Try again', async () => {
     rust({ stream_retry: () => found() });
     render(<ErrorCards />);
     failsLink('outdated');
@@ -525,7 +526,112 @@ describe('an update that finds nothing new (final review I-1)', () => {
     fireEvent.click(update);
     await settle();
 
-    expect(document.activeElement).toBe(button(card, 'Settings → Updates'));
+    // The same button with another word: the focus did not move, and the update is gone.
+    expect(button(card, 'Try again')).toBe(update);
+    expect(document.activeElement).toBe(update);
+    expect(within(card).queryByRole('button', { name: 'Update and try again' })).toBeNull();
+  });
+
+  /** What `stream_retry` answers: nothing new for the update, and Rust takes a plain retry. */
+  const nothingNew = (args: unknown) => ((args as { update: boolean }).update ? found() : null);
+
+  // The classes give the two findings: a yt-dlp that is the newest (outdated), and one that is
+  // there and current yet could not be started (missing).
+  test.each(['outdated', 'missing'] as const)(
+    'Try again after an update that found nothing opens the link without an update, and the card goes (%s, R19)',
+    async (error) => {
+      rust({ stream_retry: nothingNew });
+      const card = await updated(error);
+      expect(sent('stream_retry')).toEqual([['stream_retry', { url: LINK, update: true }]]);
+
+      fireEvent.click(button(card, 'Try again'));
+      await settle();
+
+      // Rust is asked for the link of the card once more, this time with no update.
+      expect(sent('stream_retry')).toEqual([
+        ['stream_retry', { url: LINK, update: true }],
+        ['stream_retry', { url: LINK, update: false }],
+      ]);
+      // Rust has the link: the card goes, and a new failure is a new card.
+      expect(cards()).toHaveLength(0);
+    },
+  );
+
+  test('Try again says what runs, holds the card and does nothing twice', async () => {
+    const answer = deferred<LinkUpdate | null>();
+    rust({ stream_retry: (args) => ((args as { update: boolean }).update ? found() : answer.promise) });
+    const card = await updated();
+    const again = button(card, 'Try again');
+    expect(again.getAttribute('aria-disabled')).toBe('false');
+
+    fireEvent.click(again);
+    await settle();
+
+    // The plain retry runs, and says so: not "Updating yt-dlp".
+    expect(button(card, 'Try again')).toBe(again);
+    expect(again.getAttribute('aria-disabled')).toBe('true');
+    expect(again.getAttribute('aria-busy')).toBe('true');
+    expect(again.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+    expect(within(card).getByRole('status').textContent).toBe('Trying again…');
+    expect(card.textContent).not.toContain('Updating yt-dlp');
+    fireEvent.click(again);
+    await settle();
+    expect(sent('stream_retry')).toHaveLength(2);
+
+    // Held while it runs, however long it takes (R14).
+    advance(NOTICE_MS * 3);
+    expect(cards()).toHaveLength(1);
+
+    answer.resolve(null);
+    await settle();
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('a refusal of Try again is said as for any action, and Try again is offered again', async () => {
+    rust({
+      stream_retry: (args) => {
+        if ((args as { update: boolean }).update) return found();
+        throw { source: LINK, kind: 'notFound' };
+      },
+    });
+    const card = await updated();
+
+    fireEvent.click(button(card, 'Try again'));
+    await settle();
+
+    expect(cards()).toHaveLength(1);
+    expect(within(card).getByText('The link could not be opened again.').getAttribute('role')).toBe('alert');
+    // The card does not forget that the update found nothing: not the update again.
+    expect(buttonNames(card)).toEqual(['Close', 'Try again', 'Open file', 'Details']);
+    expect(button(card, 'Try again').getAttribute('aria-disabled')).toBe('false');
+    expect(within(card).getByRole('status').textContent).toBe('');
+
+    // Rust takes it the second time.
+    rust();
+    fireEvent.click(button(card, 'Try again'));
+    await settle();
+    expect(sent('stream_retry').map(([, args]) => args)).toEqual([
+      { url: LINK, update: true },
+      { url: LINK, update: false },
+      { url: LINK, update: false },
+    ]);
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('the update stays while pressing it may help, and gives way to Try again once it would not', async () => {
+    const deno = status({ tool: 'deno', state: 'failed', version: null, checkedAt: null, error: 'the server cannot be reached' });
+    rust({ stream_retry: () => found({ deno }) });
+    const card = await updated();
+    expect(buttonNames(card)).toEqual(['Close', 'Update and try again', 'Settings → Updates', 'Open file', 'Details']);
+    expect(within(card).queryByRole('button', { name: 'Try again' })).toBeNull();
+
+    // Pressed again, Deno is fine and yt-dlp is the newest: there is nothing left to update.
+    rust({ stream_retry: () => found() });
+    fireEvent.click(button(card, 'Update and try again'));
+    await settle();
+
+    expect(buttonNames(card)).toEqual(['Close', 'Try again', 'Settings → Updates', 'Open file', 'Details']);
+    expect(within(card).getByText(/already the newest/)).toBeTruthy();
   });
 
   test('in Czech', async () => {
@@ -540,6 +646,7 @@ describe('an update that finds nothing new (final review I-1)', () => {
       'yt-dlp 2026.10.10 je už nejnovější. Web se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní. Kanál Nightly (Nastavení → Aktualizace) ji často mívá dřív.',
     );
     expect(button(card, 'Nastavení → Aktualizace')).toBeTruthy();
+    expect(button(card, 'Zkusit znovu')).toBeTruthy();
   });
 });
 

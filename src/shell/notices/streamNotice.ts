@@ -13,7 +13,8 @@
  * review I-1): pressed again and again on a yt-dlp that is already the newest, it would bring the
  * same card back for ever. When there was nothing new the card stays and says what the update found
  * (`findingOf`, `findingText`): Deno missing for a YouTube link, a check that failed, or a yt-dlp
- * that is the newest already, with Settings → Updates in place of the update.
+ * that is the newest already, with Settings → Updates beside the action: the update again where it
+ * may help, otherwise "Try again" (`retryFromNotice` without `update`, final fix wave R19).
  */
 
 import type { TFunction } from 'i18next';
@@ -107,7 +108,9 @@ export function findingText(
 
 /**
  * Whether the card still offers the update after `finding`: again for Deno and a check that
- * failed (the network may be back; the update checks Deno too), not when it would change nothing.
+ * failed (the network may be back; the update checks Deno too), not when it would change nothing
+ * (the newest already, a yt-dlp that could not be started). "Try again", a plain retry, takes its
+ * place then (`ErrorCard.tsx`): the link may still play on a second try.
  */
 export const offersUpdateAfter = (finding: UpdateFinding | null): boolean =>
   finding === null || finding.kind === 'deno' || finding.kind === 'failed';

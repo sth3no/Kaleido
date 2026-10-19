@@ -69,7 +69,8 @@ export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved' | 'unchanged
  * - `newest`: yt-dlp `version` is the newest of its channel already; `nightly`: the channel is the
  *   nightly one. The site may have changed after it.
  *
- * The last two offer Settings → Updates in place of the update, which would change nothing.
+ * The last two offer "Try again" (a retry without an update) and Settings → Updates in place of the
+ * update, which would change nothing.
  */
 export type UpdateFinding =
   | { kind: 'deno'; status: ToolStatus }

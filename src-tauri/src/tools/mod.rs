@@ -1181,15 +1181,21 @@ impl Service {
     /// "Update and try again" on the card of `link` (final review I-1), which failed when the
     /// tools had been put in place as `since` says ([`Service::installs`]; `None` counts from
     /// now): yt-dlp is checked now, due or not, and so is Deno for a link that needs it while it is
-    /// not one yt-dlp can use (missing, failed, too old: it would be due at once anyway, and the
-    /// user asks now). A Deno that is ready is left to its weekly check. Blocks for as long as the
-    /// downloads take: not for the main thread.
+    /// not one yt-dlp can use (missing, not verified, too old: it would be due at once anyway, and
+    /// the user asks now). A Deno yt-dlp can use ([`Tools::path`]) is left to its weekly check and
+    /// is reported ready whatever its last check says (a failed one that backs off) or the one that
+    /// runs now: it is in place and in use, and "not ready" would be wrong about it. Blocks for as
+    /// long as the downloads take: not for the main thread.
     pub fn update_for_link(&self, link: &str, since: Option<Installs>) -> LinkUpdate {
         let since = since.unwrap_or_else(|| self.installs());
         let yt_dlp = self.check_now(ToolId::YtDlp);
         let deno = needs_deno(link).then(|| {
             if self.shared.tools.path(ToolId::Deno).is_some() {
-                self.shared.tools.status(ToolId::Deno)
+                ToolStatus {
+                    state: ToolState::Ready,
+                    error: None,
+                    ..self.shared.tools.status(ToolId::Deno)
+                }
             } else {
                 self.check_now(ToolId::Deno)
             }
@@ -2792,6 +2798,79 @@ mod tests {
         assert_eq!(value["deno"], serde_json::Value::Null);
         assert_eq!(value["channel"], "nightly");
         assert_eq!(value["updated"], true);
+    }
+
+    /// Final fix wave, residual R19: a Deno that works is ready for a YouTube link, whatever its
+    /// last weekly check said. Its check failed and backs off, yet `deno.exe` is in place, verified
+    /// and in use by yt-dlp: the card must not say "Deno is not ready", and a press does not break
+    /// the backoff to ask the release. Needs a temp folder.
+    #[test]
+    fn a_deno_that_works_is_ready_for_a_link_whatever_its_last_check_said() {
+        let setup = Setup::new();
+        let v1 = b"yt-dlp 2026.08.19";
+        let recent = stamp(now() - Duration::hours(1));
+        setup.installed(ToolId::YtDlp, v1, record(v1, "2026.08.19", &recent));
+        setup.release(Channel::Stable, &sha256_hex(v1), b"never fetched");
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let deno = b"deno 2.9.7";
+        let zip = zip_of(Some(deno));
+        setup.installed(
+            ToolId::Deno,
+            deno,
+            ToolRecord {
+                failures: 1,
+                next_try: Some(stamp(now() + Duration::hours(1))),
+                ..deno_record(&zip, deno, "2.9.7", &recent)
+            },
+        );
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host);
+        let youtube = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+        let deno_source = source(ToolId::Deno, Channel::Stable);
+
+        // The state is what the last check left: failed. The file is the one yt-dlp uses.
+        assert_eq!(
+            service.tools().status(ToolId::Deno).state,
+            ToolState::Failed
+        );
+        assert_eq!(
+            service.tools().path(ToolId::Deno),
+            Some(setup.exe(ToolId::Deno))
+        );
+
+        let found = service.update_for_link(youtube, None);
+
+        let status = found.deno.expect("Deno for YouTube");
+        assert_eq!(
+            (
+                status.tool,
+                status.state,
+                status.version.as_deref(),
+                status.error
+            ),
+            (ToolId::Deno, ToolState::Ready, Some("2.9.7"), None)
+        );
+        assert!(!found.updated);
+        // Left to its backoff: not asked.
+        assert_eq!(setup.web.count(&deno_source.sums_url()), 0);
+        assert_eq!(setup.web.count(&deno_source.asset_url()), 0);
+
+        // One that yt-dlp cannot use (too old) is not rescued by this: it is checked, and fails.
+        let old = b"deno 2.2.0";
+        let old_zip = zip_of(Some(old));
+        setup.installed(
+            ToolId::Deno,
+            old,
+            deno_record(&old_zip, old, "2.2.0", &recent),
+        );
+        let service = Service::new(setup.tools(), &setup.paths, Arc::new(FakeHost::default()));
+        setup
+            .web
+            .answer(&deno_source.sums_url(), Err(FetchError::Offline));
+        let found = service.update_for_link(youtube, None);
+        let status = found.deno.expect("Deno for YouTube");
+        assert_eq!(status.state, ToolState::Failed);
+        assert_eq!(setup.web.count(&deno_source.sums_url()), 1);
     }
 
     #[test]

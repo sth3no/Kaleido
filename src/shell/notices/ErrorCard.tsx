@@ -24,8 +24,12 @@
  * - "Update and try again" that found nothing new (final review I-1) leaves the card up with what
  *   it found (`streamNotice.ts`: Deno missing for a YouTube link, a check that failed, a yt-dlp
  *   that is the newest already) and a link to Settings → Updates, which closes the card and opens
- *   that page. The update stays only where pressing it again may help; where it goes, the focus it
- *   had goes to the link.
+ *   that page. The update stays only where pressing it again may help (Deno, a check that failed).
+ *   Where it would change nothing (the newest already, a yt-dlp that could not be started) "Try
+ *   again" takes its place, first, as the card's action is: a plain retry (`update: false`) of a
+ *   failure that passes on a second try (final fix wave, R19). It is the same button with another
+ *   word, so the focus stays on it, and it keeps that word for the rest of the card, also after a
+ *   refusal.
  * - It goes by itself after 8 s. The clock is held while someone is dealing with the card: the
  *   pointer is over it, the focus is in it, or its details are open (a card that is being read, or
  *   copied from, must not vanish), or its action runs (Disable, Try again); the 8 s start anew when
@@ -122,10 +126,6 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   const openButton = useRef<HTMLButtonElement>(null);
   /** The button of a link's action: it opens the chooser, and the focus goes back to it from there. */
   const actionButton = useRef<HTMLButtonElement>(null);
-  /** Settings → Updates, after an update that found nothing new. */
-  const updatesLink = useRef<HTMLButtonElement>(null);
-  /** The update's button had the focus when it was pressed: if the button goes, the focus goes to the link. */
-  const refocus = useRef(false);
   const chooserBox = useRef<HTMLDivElement>(null);
   /** What had the focus before it came into the card. */
   const cameFrom = useRef<HTMLElement | null>(null);
@@ -136,20 +136,19 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   // A link's action: the one of its class, and only for a link Rust named.
   const stream = playback?.stream ?? null;
   const url = playback?.url ?? null;
-  const action = stream !== null && url !== null ? streamErrorAction(stream) : null;
+  const classAction = stream !== null && url !== null ? streamErrorAction(stream) : null;
   const retrying = playback?.retry === 'working';
   // What "Update and try again" found when it found nothing new: said in place of the problem, with
-  // Settings → Updates, and the update itself only where pressing it again may help.
+  // Settings → Updates beside the action.
   const finding = playback?.retry === 'unchanged' ? playback.finding : null;
-  const offered = action !== null && (action !== 'update' || offersUpdateAfter(finding));
-
-  // The update's button went (it would change nothing now): the focus it had goes to the link that
-  // took its place, not to the page.
-  useEffect(() => {
-    if (finding === null || offersUpdateAfter(finding) || !refocus.current) return;
-    refocus.current = false;
-    updatesLink.current?.focus();
-  }, [finding]);
+  // Where pressing the update again would change nothing (the newest already, a yt-dlp that could
+  // not be started), "Try again" takes its place for the rest of the card (final fix wave, R19): a
+  // plain retry still helps with a failure that passes on a second try (HTTP 403, a format that is
+  // not offered just now), or when an install landed after mpv failed. It is the same button, so
+  // the focus it had stays, and the busy state and the refusals are the ones of any action.
+  const [plain, setPlain] = useState(false);
+  if (finding !== null && !offersUpdateAfter(finding) && !plain) setPlain(true);
+  const action = classAction === 'update' && plain ? 'retry' : classAction;
 
   // A card stays while its action runs (Disable, Try again). An open chooser holds it no more than
   // anything else: the pointer over it or the focus in it does (Ruling R14).
@@ -208,7 +207,6 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       else closeChooser();
       return;
     }
-    refocus.current = document.activeElement === e.currentTarget;
     void retryFromNotice(id, url, action === 'update').then((taken) => {
       if (taken) close();
     });
@@ -320,7 +318,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       </div>
       {playback && (
         <div className={styles.actions}>
-          {action !== null && offered && (
+          {action !== null && (
             // Not `disabled`: the button keeps the focus while the action runs.
             <button
               ref={actionButton}
@@ -339,7 +337,6 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
           )}
           {finding !== null && (
             <button
-              ref={updatesLink}
               type="button"
               className={styles.action}
               onClick={openUpdates}
