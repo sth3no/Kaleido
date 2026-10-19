@@ -11,9 +11,28 @@
  */
 
 import { settingsSet, streamRetry } from '../../ipc/commands';
+import type { SourceError } from '../../ipc/types';
 import { useSettingsStore } from '../../settings/store';
-import { useNoticeStore } from '../../state/noticeStore';
+import { useNoticeStore, type PlaybackNotice } from '../../state/noticeStore';
 import { useUiStore } from '../../state/uiStore';
+
+/**
+ * The keys of the sentences a link's card says when its action did not go through, in the order
+ * they are read; none while it did not fail. A link Rust refused is told in the words of the paste
+ * field (`home.paste.errors.*`), and a choice of the browser that was saved before says so.
+ */
+export function problemKeys(notice: PlaybackNotice): string[] {
+  if (notice.retry === 'unsaved') return ['errors.streamAction.unsaved'];
+  if (notice.retry !== 'refused') return [];
+  const kind = notice.refusal?.kind ?? null;
+  const why =
+    kind === 'invalid'
+      ? 'home.paste.errors.invalid'
+      : kind === 'protocol'
+        ? 'home.paste.errors.protocol'
+        : 'errors.streamAction.refused';
+  return notice.refusal?.saved === true ? [why, 'errors.streamAction.saved'] : [why];
+}
 
 /** Whether the card `id` is there and is no busy one: the actions do nothing twice. */
 function canStart(id: number): boolean {
@@ -21,13 +40,23 @@ function canStart(id: number): boolean {
   return card?.kind === 'playback' && card.retry !== 'working';
 }
 
-/** Opens `url` again; `true` once Rust has taken it, `false` (and the card says so) if it refused. */
-async function openAgain(id: number, url: string, update: boolean): Promise<boolean> {
+/** What Rust said about the link when it refused it (a `LoadIssue`); `null` for any other failure. */
+function refusalKind(error: unknown): SourceError | null {
+  if (typeof error !== 'object' || error === null || !('kind' in error)) return null;
+  const { kind } = error;
+  return kind === 'invalid' || kind === 'protocol' || kind === 'notFound' ? kind : null;
+}
+
+/**
+ * Opens `url` again; `true` once Rust has taken it, `false` (and the card says why) if it refused.
+ * `saved`: the choice of the browser went in before, which the card then says.
+ */
+async function openAgain(id: number, url: string, update: boolean, saved: boolean): Promise<boolean> {
   try {
     await streamRetry(url, update);
   } catch (error) {
     console.warn('cannot try the link again', error);
-    useNoticeStore.getState().setRetryPhase(id, 'refused');
+    useNoticeStore.getState().setRetryPhase(id, 'refused', { kind: refusalKind(error), saved });
     return false;
   }
   return true;
@@ -42,7 +71,7 @@ async function openAgain(id: number, url: string, update: boolean): Promise<bool
 export async function retryFromNotice(id: number, url: string, update: boolean): Promise<boolean> {
   if (!canStart(id)) return false;
   useNoticeStore.getState().setRetryPhase(id, 'working');
-  const taken = await openAgain(id, url, update);
+  const taken = await openAgain(id, url, update, false);
   // The card whose link was taken is the caller's to close; one that was refused says so (set above).
   if (taken) useNoticeStore.getState().setRetryPhase(id, 'idle');
   return taken;
@@ -68,12 +97,15 @@ export async function saveCookiesAndRetry(
     useNoticeStore.getState().setRetryPhase(id, 'unsaved');
     return false;
   }
-  const taken = await openAgain(id, url, false);
+  const taken = await openAgain(id, url, false, true);
   if (taken) useNoticeStore.getState().setRetryPhase(id, 'idle');
   return taken;
 }
 
-/** The link of the chooser that found no browser: to Settings, which opens on Playback. */
+/**
+ * The link of the chooser that found no browser: to Settings, which opens on Playback. The card has
+ * done its job by then and closes first (`ErrorCard.tsx`), so that it does not stay over the page.
+ */
 export function openPlaybackSettings(): void {
   useUiStore.getState().setPage('settings');
 }

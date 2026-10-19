@@ -88,6 +88,7 @@ function useNoticeFeed(): void {
           // `file` is the link that failed (Rust names a class only for an http(s) link): what "Try again" opens.
           url: end.streamError !== null ? end.file : null,
           retry: 'idle',
+          refusal: null,
         });
         following = { id, until: Date.now() + LOG_FOLLOW_MS };
         return;

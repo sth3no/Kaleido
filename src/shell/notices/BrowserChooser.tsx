@@ -13,7 +13,8 @@
  * - With `offerNone` the list ends with "Do not use cookies" (`null`), the way out of a choice yt-dlp
  *   cannot read (the class `cookies`).
  * - No browser found, or a list that could not be read: a sentence and a link to Settings → Playback,
- *   where the same choice is made by hand. "Do not use cookies" is still offered where it applies.
+ *   where the same choice is made by hand (`onOpenSettings`: the card closes and the page opens, so
+ *   the card does not stay over it). "Do not use cookies" is still offered where it applies.
  * - A radio group: the arrows, Home and End move the focus and say so with `preventDefault` (mpv does
  *   not also get them); Enter and Space choose, as a click does. Nothing is chosen at first, and "Use
  *   and try again" waits for a choice. Where the focus goes when the list is there is the caller's
@@ -31,7 +32,6 @@ import panel from '../../panels/Panel.module.css';
 import Icon, { CHECK } from '../Icon';
 import styles from './BrowserChooser.module.css';
 import card from './ErrorCards.module.css';
-import { openPlaybackSettings } from './streamNotice';
 
 /** An entry with nothing to save: yt-dlp knows no profile of it. */
 const isUnusable = (browser: Browser): boolean =>
@@ -92,9 +92,17 @@ export interface BrowserChooserProps {
   focusOnReady: boolean;
   /** "Use and try again" with the choice: a `Browser.spec`, `null` for no cookies. */
   onUse: (spec: string | null) => void;
+  /** The link to Settings → Playback: the owner of the chooser closes the card and opens the page. */
+  onOpenSettings: () => void;
 }
 
-export default function BrowserChooser({ offerNone, busy, focusOnReady, onUse }: BrowserChooserProps) {
+export default function BrowserChooser({
+  offerNone,
+  busy,
+  focusOnReady,
+  onUse,
+  onOpenSettings,
+}: BrowserChooserProps) {
   const { t } = useTranslation();
   const labelId = useId();
   const rowId = useId();
@@ -254,7 +262,7 @@ export default function BrowserChooser({ offerNone, busy, focusOnReady, onUse }:
               type="button"
               className={card.action}
               data-autofocus={choices.length === 0 ? '' : undefined}
-              onClick={openPlaybackSettings}
+              onClick={onOpenSettings}
               {...blurAfterPointer}
             >
               {t('errors.browser.openSettings')}

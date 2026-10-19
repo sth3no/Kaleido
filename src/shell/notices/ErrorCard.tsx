@@ -19,15 +19,20 @@
  * - A link's action (`streamNotice.ts`) is the card's busy state: a spinner on the button, a line
  *   that says what runs (also in a live region that is always there), and the button does nothing
  *   twice. When Rust has taken the link the card goes (a new failure is a new card); when it refused
- *   it, or the choice of the browser could not be saved, the card says so and offers the action again.
+ *   it (in the words of the paste field, and with whether the browser was saved before), or the
+ *   choice of the browser could not be saved, the card says so and offers the action again.
  * - It goes by itself after 8 s. The clock is held while someone is dealing with the card: the
- *   pointer is over it, the focus is in it, its details or the browser chooser are open (a card that
- *   is being read, or copied from, must not vanish), or its action runs (Disable, Try again); the 8 s
- *   start anew when that ends.
- * - It never takes the focus: it can be reached with Tab. Esc on a focused card closes it, and the
- *   key is handled here (`preventDefault`), so it does not go on to mpv, where it would leave
+ *   pointer is over it, the focus is in it, or its details are open (a card that is being read, or
+ *   copied from, must not vanish), or its action runs (Disable, Try again); the 8 s start anew when
+ *   that ends. An open browser chooser holds nothing of its own (Ruling R14): it is part of the card,
+ *   so the pointer or the focus in it holds the card, and left alone it goes with the card. The
+ *   stack does not push out a card the focus is in either (`noticeStore.ts`).
+ * - A new card never takes the focus: it can be reached with Tab. (A browser chooser opened with the
+ *   keyboard does move it into the list: its owner asked for it.) Esc on a focused card closes it,
+ *   and the key is handled here (`preventDefault`), so it does not go on to mpv, where it would leave
  *   fullscreen. Esc closes the browser chooser first, if it is open, and then the card. When a card
- *   that holds the focus closes, the focus goes back to where it came from.
+ *   that holds the focus closes, the focus goes back to where it came from. The chooser's link to
+ *   Settings → Playback closes the card and opens the page.
  * - What a failure says is `role="alert"` (assertive): a failed file is an interruption of what the
  *   user asked for ("play this"), so it is read at once, and so is a plugin that could not be
  *   turned off. A hint (Ctrl+V without a link) and the card of a plugin that reports errors are
@@ -61,7 +66,12 @@ import BrowserChooser from './BrowserChooser';
 import styles from './ErrorCards.module.css';
 import { disableFromNotice, openPlugins } from './pluginNotice';
 import { streamErrorAction, type StreamAction } from './streamError';
-import { retryFromNotice, saveCookiesAndRetry } from './streamNotice';
+import {
+  openPlaybackSettings,
+  problemKeys,
+  retryFromNotice,
+  saveCookiesAndRetry,
+} from './streamNotice';
 
 export interface ErrorCardProps {
   notice: Notice;
@@ -92,6 +102,7 @@ const within = (card: HTMLElement, target: EventTarget | null): boolean =>
 export default function ErrorCard({ notice }: ErrorCardProps) {
   const { t } = useTranslation();
   const dismiss = useNoticeStore((state) => state.dismiss);
+  const setCardFocus = useNoticeStore((state) => state.setFocusInside);
   const playback = notice.kind === 'playback' ? notice : null;
   const plugin = notice.kind === 'plugin' ? notice : null;
   const [expanded, setExpanded] = useState(false);
@@ -116,8 +127,9 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   const action = stream !== null && url !== null ? streamErrorAction(stream) : null;
   const retrying = playback?.retry === 'working';
 
-  // A card stays while its action runs (Disable, Try again) and while its chooser is open.
-  const held = expanded || chooser !== null || pointerOver || focusInside || isWorking(notice);
+  // A card stays while its action runs (Disable, Try again). An open chooser holds it no more than
+  // anything else: the pointer over it or the focus in it does (Ruling R14).
+  const held = expanded || pointerOver || focusInside || isWorking(notice);
   useEffect(() => {
     if (held) return undefined;
     const timer = setTimeout(() => {
@@ -177,6 +189,12 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
     });
   };
 
+  // The chooser's link to Settings → Playback: the card is done, and does not stay over the page.
+  const openSettings = () => {
+    dismiss(id);
+    openPlaybackSettings();
+  };
+
   const saveBrowser = (spec: string | null) => {
     if (url === null) return;
     void saveCookiesAndRetry(id, url, spec).then((taken) => {
@@ -198,10 +216,14 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       cameFrom.current = e.relatedTarget instanceof HTMLElement ? e.relatedTarget : null;
     }
     setFocusInside(true);
+    // The stack does not push out the card the focus is in.
+    setCardFocus(id, true);
   };
 
   const onBlur = (e: FocusEvent<HTMLLIElement>) => {
-    if (!within(e.currentTarget, e.relatedTarget)) setFocusInside(false);
+    if (within(e.currentTarget, e.relatedTarget)) return;
+    setFocusInside(false);
+    setCardFocus(id, false);
   };
 
   const tone =
@@ -214,11 +236,9 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       ? t('errors.plugin.title', { name: plugin.name })
       : null;
   const lines = playback ? detailLines(playback) : [];
-  // Why the action did not go through: Rust refused the link, or the browser was not saved.
-  const problem =
-    playback !== null && (playback.retry === 'refused' || playback.retry === 'unsaved')
-      ? playback.retry
-      : null;
+  // Why the action did not go through: Rust refused the link (and whether the browser was saved
+  // before), or the browser could not be saved.
+  const problem = playback ? problemKeys(playback).map((key) => t(key)).join(' ') : '';
 
   return (
     <li
@@ -318,9 +338,9 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
           {t(progressKey(action))}
         </p>
       )}
-      {problem !== null && (
+      {problem !== '' && (
         <p className={styles.problem} role="alert">
-          {t(`errors.streamAction.${problem}`)}
+          {problem}
         </p>
       )}
       {playback && action === 'cookies' && chooser !== null && (
@@ -330,6 +350,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
             busy={retrying}
             focusOnReady={chooser.keyboard}
             onUse={saveBrowser}
+            onOpenSettings={openSettings}
           />
         </div>
       )}

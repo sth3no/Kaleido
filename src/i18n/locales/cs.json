@@ -567,6 +567,7 @@
       "retrying": "Zkouším znovu…",
       "saving": "Ukládám volbu, pak odkaz zkusím znovu…",
       "refused": "Odkaz se nepodařilo znovu otevřít.",
+      "saved": "Volba je uložená.",
       "unsaved": "Volbu se nepodařilo uložit, nic se nezměnilo. Zkus to znovu."
     },
     "browser": {

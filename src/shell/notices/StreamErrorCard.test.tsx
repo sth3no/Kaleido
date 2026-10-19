@@ -324,7 +324,7 @@ describe('update and try again', () => {
   test('Rust refusing the retry is said in the card, which stays and offers the action again', async () => {
     rust({
       stream_retry: () => {
-        throw { source: LINK, kind: 'invalid' };
+        throw { source: LINK, kind: 'notFound' };
       },
     });
     render(<ErrorCards />);
@@ -349,6 +349,39 @@ describe('update and try again', () => {
     await settle();
     expect(sent('stream_retry')).toHaveLength(2);
     expect(cards()).toHaveLength(0);
+  });
+
+  // What Rust says about the link is told in the words of the paste field.
+  const REFUSALS: [rejection: unknown, sentence: string][] = [
+    [
+      { source: LINK, kind: 'invalid' },
+      'That is not a link. Paste one web address that starts with http:// or https://.',
+    ],
+    [
+      { source: LINK, kind: 'protocol' },
+      'Only web links (http or https) can be pasted here. To play a file, use Open file or drop it on the window.',
+    ],
+    [{ source: LINK, kind: 'notFound' }, 'The link could not be opened again.'],
+    ['the command could not run', 'The link could not be opened again.'],
+  ];
+
+  test.each(REFUSALS)('a link Rust refuses (%j) is told as Rust says it', async (rejection, sentence) => {
+    rust({
+      stream_retry: () => {
+        throw rejection;
+      },
+    });
+    render(<ErrorCards />);
+    failsLink('network');
+    const [card] = cards();
+
+    fireEvent.click(button(card, 'Try again'));
+    await settle();
+
+    const refused = within(card).getByText(sentence);
+    expect(refused.getAttribute('role')).toBe('alert');
+    // The choice of a browser was not part of it: nothing is said about one being saved.
+    expect(within(card).queryByText(/The choice was saved/)).toBeNull();
   });
 });
 
@@ -599,7 +632,7 @@ describe('use cookies from a browser', () => {
     expect(cards()).toHaveLength(0);
   });
 
-  test('a saved choice whose retry Rust refuses is said in the card', async () => {
+  test('a saved choice whose retry Rust refuses is said in the card, with the word that it was saved', async () => {
     rust({
       stream_retry: () => {
         throw { source: LINK, kind: 'invalid' };
@@ -613,11 +646,22 @@ describe('use cookies from a browser', () => {
     await settle();
 
     expect(cards()).toHaveLength(1);
-    expect(within(card).getByText('The link could not be opened again.')).toBeTruthy();
+    // What Rust said about the link, then that the browser stays chosen (the failure itself is an alert too).
+    const refused = within(card)
+      .getAllByRole('alert')
+      .find((alert) => (alert.textContent ?? '').includes('The choice was saved'));
+    expect(refused?.textContent).toBe(
+      'That is not a link. Paste one web address that starts with http:// or https://. The choice was saved.',
+    );
     expect(sent('settings_set')).toHaveLength(1);
+    // Rust takes the link at the next try: the card goes.
+    rust();
+    fireEvent.click(button(card, 'Use and try again'));
+    await settle();
+    expect(cards()).toHaveLength(0);
   });
 
-  test('no browser found: a sentence and the way to Settings → Playback, from the card', async () => {
+  test('no browser found: a sentence and the way to Settings → Playback, which closes the card', async () => {
     rust({ system_browsers: () => [] });
     render(<ErrorCards />);
     const card = await openChooser();
@@ -625,6 +669,8 @@ describe('use cookies from a browser', () => {
     expect(within(card).getByText('No browser was found whose cookies can be used.')).toBeTruthy();
     fireEvent.click(button(card, 'Settings → Playback'));
 
+    // The card does not stay over the page it sent the user to.
+    expect(cards()).toHaveLength(0);
     expect(useUiStore.getState().page).toBe('settings');
   });
 });
@@ -756,7 +802,7 @@ describe('time', () => {
     expect(cards()).toHaveLength(0);
   });
 
-  test('a card with its chooser open does not go away, even when the pointer and the focus are elsewhere', async () => {
+  test('a chooser that is open holds nothing of its own: with the pointer and the focus elsewhere the card goes after 8 s', async () => {
     render(<ErrorCards />);
     failsLink('signIn');
     const [card] = cards();
@@ -765,11 +811,47 @@ describe('time', () => {
     fireEvent.click(button(card, OPEN_CHOOSER), { detail: 1 });
     await settle();
     expect(within(card).getByRole('radiogroup')).toBeTruthy();
+
+    advance(NOTICE_MS - 1);
+    expect(cards()).toHaveLength(1);
+    advance(1);
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('a chooser the pointer is over keeps the card, and the 8 seconds start again when the pointer leaves', async () => {
+    render(<ErrorCards />);
+    failsLink('signIn');
+    const [card] = cards();
+    fireEvent.click(button(card, OPEN_CHOOSER), { detail: 1 });
+    await settle();
+
+    // The chooser is part of the card: the pointer over it is the pointer over the card.
+    fireEvent.pointerEnter(card);
     advance(NOTICE_MS * 3);
     expect(cards()).toHaveLength(1);
 
-    // Closed again: the 8 seconds start over.
-    fireEvent.click(button(card, OPEN_CHOOSER), { detail: 1 });
+    fireEvent.pointerLeave(card);
+    advance(NOTICE_MS - 1);
+    expect(cards()).toHaveLength(1);
+    advance(1);
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('a chooser the focus is in keeps the card, and the 8 seconds start again when the focus leaves', async () => {
+    render(<ErrorCards />);
+    failsLink('signIn');
+    const [card] = cards();
+    // Opened with the keyboard: the focus goes into the list.
+    fireEvent.click(button(card, OPEN_CHOOSER), { detail: 0 });
+    await settle();
+    expect(document.activeElement).toBe(within(card).getByRole('radio', { name: 'Firefox' }));
+
+    advance(NOTICE_MS * 3);
+    expect(cards()).toHaveLength(1);
+
+    act(() => {
+      (document.activeElement as HTMLElement).blur();
+    });
     advance(NOTICE_MS - 1);
     expect(cards()).toHaveLength(1);
     advance(1);
@@ -821,6 +903,30 @@ describe('time', () => {
 
     answer.resolve(null);
     await settle();
+  });
+
+  test('a fourth card does not push out the card that has the focus, until the focus leaves it', () => {
+    render(<ErrorCards />);
+    failsLink('network');
+    failsFile('b.mkv');
+    failsFile('c.mkv');
+    const retry = button(cards()[2], 'Try again');
+    act(() => {
+      retry.focus();
+    });
+
+    failsFile('d.mkv');
+
+    // The oldest card without the focus goes: b.mkv.
+    const titles = () => cards().map((item) => within(item).getByText(/^Cannot play /).textContent);
+    expect(titles()).toEqual(['Cannot play d.mkv', 'Cannot play c.mkv', 'Cannot play www.youtube.com']);
+
+    act(() => {
+      retry.blur();
+    });
+    failsFile('e.mkv');
+
+    expect(titles()).toEqual(['Cannot play e.mkv', 'Cannot play d.mkv', 'Cannot play c.mkv']);
   });
 });
 

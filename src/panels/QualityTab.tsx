@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { StreamInfo } from '../ipc/types';
 import Icon, { CHECK } from '../shell/Icon';
+import { streamErrorKey } from '../shell/notices/streamError';
 import { useUiStore } from '../state/uiStore';
 import { qualityOptions, type QualityOption } from '../streams/quality';
 import {
@@ -153,7 +154,7 @@ export default function QualityTab() {
       <>
         <p className={styles.empty}>{t('panels.quality.failed')}</p>
         <p className={styles.empty}>
-          {state.error === null ? t('panels.quality.failedUnknown') : t(`errors.stream.${state.error}`)}
+          {state.error === null ? t('panels.quality.failedUnknown') : t(streamErrorKey(state.error))}
         </p>
         {state.error === null && state.message.trim() !== '' && (
           <p className={quality.message}>{state.message}</p>

@@ -51,12 +51,20 @@ function rustHas(browsers: Browser[]) {
 async function open(over: Partial<BrowserChooserProps> = {}, browsers: Browser[] = FOUND) {
   rustHas(browsers);
   const onUse = vi.fn<(spec: string | null) => void>();
-  const props: BrowserChooserProps = { offerNone: false, busy: false, focusOnReady: false, onUse, ...over };
+  const onOpenSettings = vi.fn<() => void>();
+  const props: BrowserChooserProps = {
+    offerNone: false,
+    busy: false,
+    focusOnReady: false,
+    onUse,
+    onOpenSettings,
+    ...over,
+  };
   const view = render(<BrowserChooser {...props} />);
   await waitFor(() => {
     expect(screen.queryByText('Looking for browsers…')).toBeNull();
   });
-  return { onUse, props, ...view };
+  return { onUse, onOpenSettings, props, ...view };
 }
 
 const radio = (name: string) => screen.getByRole('radio', { name });
@@ -112,7 +120,15 @@ describe('the list', () => {
   test('says that it is looking, until Rust has answered', () => {
     vi.mocked(invoke).mockImplementation((() => new Promise(() => undefined)) as unknown as typeof invoke);
 
-    render(<BrowserChooser offerNone busy={false} focusOnReady={false} onUse={() => undefined} />);
+    render(
+      <BrowserChooser
+        offerNone
+        busy={false}
+        focusOnReady={false}
+        onUse={() => undefined}
+        onOpenSettings={() => undefined}
+      />,
+    );
 
     expect(screen.getByRole('status').textContent).toBe('Looking for browsers…');
     // Not even "Do not use cookies" yet: the list comes in one piece.
@@ -314,15 +330,18 @@ describe('the keyboard', () => {
 
 describe('no browser to choose', () => {
   test('none found: a sentence and a link to Settings → Playback, and nothing to use', async () => {
-    await open({}, []);
+    const { onOpenSettings } = await open({}, []);
 
     expect(screen.getByText('No browser was found whose cookies can be used.')).toBeTruthy();
     expect(screen.queryByRole('radiogroup')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Use and try again' })).toBeNull();
+    expect(onOpenSettings).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Settings → Playback' }));
 
-    expect(useUiStore.getState().page).toBe('settings');
+    // The owner of the chooser closes the card and opens the page: the chooser only says so.
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().page).toBe('player');
   });
 
   test('none found: the focus goes to the link when it was opened with the keyboard', async () => {
@@ -356,7 +375,15 @@ describe('no browser to choose', () => {
   test('a list that cannot be read says so, with the same way out', async () => {
     vi.mocked(invoke).mockImplementation((() => Promise.reject(new Error('no disk'))) as unknown as typeof invoke);
 
-    render(<BrowserChooser offerNone={false} busy={false} focusOnReady={false} onUse={() => undefined} />);
+    render(
+      <BrowserChooser
+        offerNone={false}
+        busy={false}
+        focusOnReady={false}
+        onUse={() => undefined}
+        onOpenSettings={() => undefined}
+      />,
+    );
 
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toBe('The browsers could not be listed.');

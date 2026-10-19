@@ -5,16 +5,16 @@
  * that reports errors (from `plugins:error`) and the two notices of the app itself, a Ctrl+V that
  * found no link and a dropped link that Rust refused. At most `MAX_NOTICES` are kept, the newest
  * first; the oldest goes when a new one needs its place, but not a card whose action is running
- * (a plugin being disabled, a link being tried again). A notice goes by itself after `NOTICE_MS`
- * (not while its action runs, the pointer is over it or the focus is in it) or when it is closed
- * (`shell/notices/ErrorCard.tsx`).
+ * (a plugin being disabled, a link being tried again) or a card that has the focus inside it. A
+ * notice goes by itself after `NOTICE_MS` (not while its action runs, the pointer is over it or the
+ * focus is in it) or when it is closed (`shell/notices/ErrorCard.tsx`).
  *
  * Other code adds one with `pushAppNotice` or `pushPluginNotice`; the card stack is the only reader.
  */
 
 import { create } from 'zustand';
 
-import type { LogLine, StreamError } from '../ipc/types';
+import type { LogLine, SourceError, StreamError } from '../ipc/types';
 import type { PluginProblem } from '../plugins/problem';
 
 /** Cards on top of one another. */
@@ -47,12 +47,21 @@ export type PlaybackRemedy = 'continues' | 'open';
  * - `idle`: the action is offered.
  * - `working`: it runs ("Update and try again" updates yt-dlp, which downloads; "Use and try again"
  *   saves the browser first). The card stays until it is done.
- * - `refused`: Rust did not take the link again (`stream_retry` rejected); the action is offered again.
+ * - `refused`: Rust did not take the link again (`stream_retry` rejected; `refusal` says how); the
+ *   action is offered again.
  * - `unsaved`: the choice of the browser could not be saved, so nothing was changed.
  *
  * When the action succeeds the card goes: the link is with the player, and a new failure is a new card.
  */
 export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved';
+
+/** How Rust refused to open a link again. */
+export interface Refusal {
+  /** What Rust said about the link (`stream_retry` rejects with a `LoadIssue`); `null` for any other failure. */
+  kind: SourceError | null;
+  /** The choice of the browser had been saved before the link was refused (the card says so). */
+  saved: boolean;
+}
 
 /** A file or a link that could not be played. */
 export interface PlaybackNotice extends NoticeBase {
@@ -69,6 +78,8 @@ export interface PlaybackNotice extends NoticeBase {
   /** The link that failed, for "Try again"; `null` for a file and where Rust did not name it. */
   url: string | null;
   retry: RetryPhase;
+  /** How the link was refused; set exactly in `refused`. */
+  refusal: Refusal | null;
 }
 
 /**
@@ -109,6 +120,8 @@ type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
 export interface NoticeState {
   /** Newest first. */
   notices: Notice[];
+  /** The card the focus is in, `null` for none (one element has the focus at a time). */
+  focused: number | null;
   /**
    * Adds a notice on top and returns its id. An app notice that is already shown (the same text)
    * is replaced rather than stacked, so that a key pressed three times is one card with a new timer.
@@ -119,8 +132,17 @@ export interface NoticeState {
   dismiss: (id: number) => void;
   /** Moves the card of a plugin on (`problem` with `failed`); a card that is gone is left alone. */
   setPluginPhase: (id: number, phase: PluginPhase, problem?: PluginProblem | null) => void;
-  /** Moves the action of a link's card on; a card that is gone, or is no playback card, is left alone. */
-  setRetryPhase: (id: number, retry: RetryPhase) => void;
+  /**
+   * Moves the action of a link's card on (`refusal` with `refused`); a card that is gone, or is no
+   * playback card, is left alone.
+   */
+  setRetryPhase: (id: number, retry: RetryPhase, refusal?: Refusal | null) => void;
+  /**
+   * The focus came into the card `id` (`inside`) or left it. A card that has the focus is not pushed
+   * out. Leaving a card that is not the one noted (the focus has gone to another card meanwhile)
+   * changes nothing, so the order of the two events does not matter.
+   */
+  setFocusInside: (id: number, inside: boolean) => void;
   /** Adds a line to the details of a playback notice that is still there; the newest `DETAIL_LINES` stay. */
   addLogLine: (id: number, line: LogLine) => void;
 }
@@ -136,15 +158,15 @@ export const isWorking = (notice: Notice): boolean =>
   (notice.kind === 'playback' && notice.retry === 'working');
 
 /**
- * The newest `MAX_NOTICES`: the oldest go, apart from a card whose action runs, which stays while
- * any other can go instead (when every card is at work, the oldest goes all the same). The one on
- * top is the notice that was just added, and it stays.
+ * The newest `MAX_NOTICES`: the oldest go, apart from a card whose action runs and the card the
+ * focus is in (`focused`), which stay while any other can go instead (when every card is spared,
+ * the oldest goes all the same). The one on top is the notice that was just added, and it stays.
  */
-function trimmed(notices: Notice[]): Notice[] {
+function trimmed(notices: Notice[], focused: number | null): Notice[] {
   const kept = [...notices];
   while (kept.length > MAX_NOTICES) {
     let drop = kept.length - 1;
-    while (drop > 0 && isWorking(kept[drop])) drop -= 1;
+    while (drop > 0 && (isWorking(kept[drop]) || kept[drop].id === focused)) drop -= 1;
     kept.splice(drop > 0 ? drop : kept.length - 1, 1);
   }
   return kept;
@@ -152,6 +174,7 @@ function trimmed(notices: Notice[]): Notice[] {
 
 export const useNoticeStore = create<NoticeState>()((set, get) => ({
   notices: [],
+  focused: null,
   push: (notice) => {
     if (notice.kind === 'plugin') {
       const there = get().notices.find((other) => other.kind === 'plugin' && other.name === notice.name);
@@ -164,7 +187,7 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
         notice.kind === 'app'
           ? state.notices.filter((other) => !(other.kind === 'app' && other.message === notice.message))
           : state.notices;
-      return { notices: trimmed([{ ...notice, id }, ...kept]) };
+      return { notices: trimmed([{ ...notice, id }, ...kept], state.focused) };
     });
     return id;
   },
@@ -179,19 +202,34 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
       };
     });
   },
-  setRetryPhase: (id, retry) => {
+  setRetryPhase: (id, retry, refusal = null) => {
     set((state) => {
       const target = state.notices.find((notice) => notice.id === id);
-      if (target?.kind !== 'playback' || target.retry === retry) return state;
+      // The reason belongs to a refused link only.
+      const reason = retry === 'refused' ? refusal : null;
+      if (target?.kind !== 'playback' || (target.retry === retry && target.refusal === reason)) {
+        return state;
+      }
       return {
-        notices: state.notices.map((notice) => (notice === target ? { ...target, retry } : notice)),
+        notices: state.notices.map((notice) =>
+          notice === target ? { ...target, retry, refusal: reason } : notice,
+        ),
       };
+    });
+  },
+  setFocusInside: (id, inside) => {
+    set((state) => {
+      const focused = inside ? id : state.focused === id ? null : state.focused;
+      return focused === state.focused ? state : { focused };
     });
   },
   dismiss: (id) => {
     set((state) =>
       state.notices.some((notice) => notice.id === id)
-        ? { notices: state.notices.filter((notice) => notice.id !== id) }
+        ? {
+            notices: state.notices.filter((notice) => notice.id !== id),
+            focused: state.focused === id ? null : state.focused,
+          }
         : state,
     );
   },

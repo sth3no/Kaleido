@@ -84,6 +84,7 @@ describe('streamErrorKey', () => {
       'retrying',
       'saving',
       'refused',
+      'saved',
       'unsaved',
     ].map((name) => `errors.streamAction.${name}`);
     for (const language of LANGUAGES) {

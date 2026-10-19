@@ -25,6 +25,7 @@ const playback = (name: string, lines: LogLine[] = []) =>
     stream: null,
     url: null,
     retry: 'idle',
+    refusal: null,
   });
 
 /** A link that failed for a reason Rust knows, as the card stack makes it from `end-file`. */
@@ -39,6 +40,7 @@ const link = (url: string, stream: StreamError = 'network') =>
     stream,
     url,
     retry: 'idle',
+    refusal: null,
   });
 
 const line = (text: string): LogLine => ({ level: 'error', prefix: 'cplayer', text });
@@ -299,5 +301,103 @@ describe('the cards of links that failed (spec 10.3)', () => {
 
     expect(playbackCards().map((notice) => notice.name)).toEqual(['d.mkv', 'c.mkv', 'example.com']);
     expect(store.getState().notices.some((notice) => notice.id === first)).toBe(true);
+  });
+
+  test('a refused link keeps how it was refused, and only a refused one', () => {
+    const id = link('https://example.com/a');
+
+    store.getState().setRetryPhase(id, 'refused', { kind: 'protocol', saved: true });
+    expect(playbackCards()[0]).toMatchObject({ retry: 'refused', refusal: { kind: 'protocol', saved: true } });
+
+    // Another reason for the same phase is a change.
+    store.getState().setRetryPhase(id, 'refused', { kind: null, saved: false });
+    expect(playbackCards()[0]?.refusal).toEqual({ kind: null, saved: false });
+
+    // The reason goes with the phase; one that comes with another phase is not kept.
+    store.getState().setRetryPhase(id, 'unsaved', { kind: 'invalid', saved: true });
+    expect(playbackCards()[0]).toMatchObject({ retry: 'unsaved', refusal: null });
+    store.getState().setRetryPhase(id, 'working');
+    expect(playbackCards()[0]?.refusal).toBeNull();
+  });
+
+  test('the same refusal again leaves the stack as it is', () => {
+    const id = link('https://example.com/a');
+    const refusal = { kind: 'invalid', saved: false } as const;
+    store.getState().setRetryPhase(id, 'refused', refusal);
+    const before = store.getState().notices;
+
+    store.getState().setRetryPhase(id, 'refused', refusal);
+
+    expect(store.getState().notices).toBe(before);
+  });
+});
+
+describe('the card the focus is in', () => {
+  test('setFocusInside notes the card, and leaving a card that is not the noted one changes nothing', () => {
+    const first = playback('a.mkv');
+    const second = playback('b.mkv');
+
+    store.getState().setFocusInside(first, true);
+    expect(store.getState().focused).toBe(first);
+
+    // The focus has moved on to the other card: its event may come before the first one's leaving.
+    store.getState().setFocusInside(second, true);
+    store.getState().setFocusInside(first, false);
+    expect(store.getState().focused).toBe(second);
+
+    store.getState().setFocusInside(second, false);
+    expect(store.getState().focused).toBeNull();
+  });
+
+  test('a fourth notice does not push out the card the focus is in', () => {
+    const first = playback('a.mkv');
+    playback('b.mkv');
+    playback('c.mkv');
+    store.getState().setFocusInside(first, true);
+
+    playback('d.mkv');
+
+    // The oldest card that has no focus goes instead: b.mkv.
+    expect(store.getState().notices.map((notice) => notice.kind === 'playback' && notice.name)).toEqual([
+      'd.mkv',
+      'c.mkv',
+      'a.mkv',
+    ]);
+  });
+
+  test('the card that is neither at work nor in focus goes, and the other two stay', () => {
+    const first = playback('a.mkv');
+    store.getState().setRetryPhase(first, 'working');
+    const second = playback('b.mkv');
+    store.getState().setFocusInside(second, true);
+    playback('c.mkv');
+
+    const newest = link('https://example.com/a');
+
+    expect(store.getState().notices).toHaveLength(MAX_NOTICES);
+    // c.mkv was the one that was neither.
+    expect(store.getState().notices.map((notice) => notice.id)).toEqual([newest, second, first]);
+  });
+
+  test('when every card is spared the oldest goes all the same', () => {
+    const first = playback('a.mkv');
+    store.getState().setRetryPhase(first, 'working');
+    const second = playback('b.mkv');
+    store.getState().setFocusInside(second, true);
+    const third = playback('c.mkv');
+    store.getState().setRetryPhase(third, 'working');
+
+    const newest = playback('d.mkv');
+
+    expect(store.getState().notices.map((notice) => notice.id)).toEqual([newest, third, second]);
+  });
+
+  test('a card that is dismissed no longer holds the note', () => {
+    const id = playback('a.mkv');
+    store.getState().setFocusInside(id, true);
+
+    store.getState().dismiss(id);
+
+    expect(store.getState().focused).toBeNull();
   });
 });
