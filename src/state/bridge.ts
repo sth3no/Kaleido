@@ -4,7 +4,9 @@
  * command line) and answers with the player's state, so anything Rust says meanwhile must find a
  * listener. Events a feature handles itself (`player:message`, `player:thumb`,
  * `system:paste-empty`, `settings:changed`) are not Rust's reply to `system_ui_ready`, so their
- * components subscribe when they mount.
+ * components subscribe when they mount. `stream:formats` is Rust's reply to a link that plays when
+ * the UI starts, so it is the bridge's, and so is the watching of `path` that asks for the
+ * qualities of a link (`streams/streamStore.ts`).
  */
 
 import { useEffect } from 'react';
@@ -17,7 +19,9 @@ import {
   onLog,
   onOpenRequest,
   onPlayerState,
+  onStreamFormats,
 } from '../ipc/events';
+import { followStreamPath, useStreamStore } from '../streams/streamStore';
 import { usePlayerStore } from './playerStore';
 import { useUiStore } from './uiStore';
 
@@ -34,6 +38,7 @@ const warn = (what: string) => (error: unknown) => {
 export async function startPlayerBridge(signal?: AbortSignal): Promise<() => void> {
   const player = () => usePlayerStore.getState();
   const ui = () => useUiStore.getState();
+  const streams = () => useStreamStore.getState();
   // A `glass:state` that arrives is newer than the answer to `glass_state`, which is asked for
   // meanwhile.
   let glassEvent = false;
@@ -66,11 +71,20 @@ export async function startPlayerBridge(signal?: AbortSignal): Promise<() => voi
     onOpenRequest(() => {
       if (!stopped()) ui().setPage('player');
     }),
+    // Taken only for the link that plays (the store compares it with `path`); one that comes
+    // before the UI knows the path is asked for again when the path arrives.
+    onStreamFormats((formats) => {
+      if (!stopped()) streams().apply(formats);
+    }),
   ]);
+  // What stops the watching of `path` (started below, before the first state is asked for).
+  let unfollow: (() => void) | undefined;
 
   const release = () => {
     if (released) return;
     released = true;
+    unfollow?.();
+    unfollow = undefined;
     for (const subscription of subscriptions) {
       if (subscription.status === 'fulfilled') subscription.value();
     }
@@ -88,6 +102,8 @@ export async function startPlayerBridge(signal?: AbortSignal): Promise<() => voi
     return release;
   }
 
+  // A link that plays when the UI starts arrives as `path` in the first state: watch before it.
+  unfollow = followStreamPath();
   await Promise.all([
     systemUiReady().then((snapshot) => {
       if (!signal?.aborted) player().applySnapshot(snapshot);

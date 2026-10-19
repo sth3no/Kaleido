@@ -32,6 +32,19 @@
   opacity: 0.4;
 }
 
+/* With a text (the quality that plays): as wide as the text needs, a pill of the same height. */
+.wide {
+  width: auto;
+  min-width: 34px;
+  padding: 0 var(--k-space-s);
+  grid-auto-flow: column;
+  gap: var(--k-space-xs);
+  font: inherit;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .large {
   width: 42px;
   height: 42px;

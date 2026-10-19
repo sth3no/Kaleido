@@ -10,7 +10,8 @@ import type { GlassState } from '../ipc/types';
 
 export type Page = 'player' | 'plugins' | 'settings';
 export type Panel = 'quick-settings' | 'playlist';
-export type QuickTab = 'subtitles' | 'audio';
+/** `quality` is for a link (an http(s) `path`); quick settings has no such tab for a file. */
+export type QuickTab = 'subtitles' | 'audio' | 'quality';
 export type FocusRequest = 'play';
 
 export interface UiState {

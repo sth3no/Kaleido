@@ -53,6 +53,7 @@
     "loading": "Loading…",
     "buffering": "Buffering…",
     "subtitles": "Subtitles",
+    "quality": "Quality: {{quality}}",
     "fullscreen": "Fullscreen",
     "exitFullscreen": "Exit fullscreen",
     "seek": {
@@ -71,7 +72,8 @@
     "tabs": {
       "label": "Quick settings sections",
       "subtitles": "Subtitles",
-      "audio": "Audio"
+      "audio": "Audio",
+      "quality": "Quality"
     },
     "track": {
       "fallback": "Track {{id}}",
@@ -88,6 +90,19 @@
     "audio": {
       "tracks": "Audio tracks",
       "none": "This file has no audio tracks"
+    },
+    "quality": {
+      "options": "Available qualities",
+      "auto": "Automatic",
+      "autoShort": "Auto",
+      "autoDetail": "The default quality from Settings",
+      "audioOnly": "Audio only",
+      "audioShort": "Audio",
+      "loading": "Loading the qualities…",
+      "failed": "The qualities of this link could not be loaded.",
+      "failedUnknown": "yt-dlp, the tool that reads web links, could not say why.",
+      "none": "yt-dlp lists no other qualities for this link.",
+      "switching": "Switching the quality…"
     },
     "delay": {
       "label": "Delay",
@@ -531,6 +546,17 @@
       "unsupported": "Kaleido cannot play this file: its format is not recognized or not supported, or the file is damaged.",
       "generic": "The file could not be played.",
       "continues": "Playback continues with the next file."
+    },
+    "stream": {
+      "outdated": "yt-dlp no longer understands this website. A newer yt-dlp may.",
+      "missing": "yt-dlp, the tool that reads web links, is not installed yet or could not be downloaded.",
+      "cookies": "The cookies of the chosen browser could not be read.",
+      "signIn": "This website requires you to sign in.",
+      "ageRestricted": "This video is age-restricted, and the website requires you to sign in to watch it.",
+      "geoBlocked": "This video is not available in your region.",
+      "private": "This video is private.",
+      "removed": "This video was removed or no longer exists.",
+      "network": "yt-dlp could not reach the website. Check your internet connection."
     },
     "plugin": {
       "title": "Plugin {{name}} reports errors",

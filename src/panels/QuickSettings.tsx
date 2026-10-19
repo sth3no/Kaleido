@@ -1,15 +1,18 @@
 /**
- * Quick settings (spec 8.5, point 2): the panel over the Subtitles button with two tabs.
+ * Quick settings (spec 8.5, point 2): the panel over the Subtitles button with two tabs, and a
+ * third for a link.
  *
  * - Subtitles: the tracks of the file with "Off" at the end, "Load from file…" (the open dialog for
  *   a subtitle file; Rust adds it to the playing file and selects it), the size (`sub-scale`, 50 to
  *   200 %) and the delay in steps of 0.1 s.
  * - Audio: the audio tracks, and the delay in steps of 0.05 s.
+ * - Quality (`QualityTab`): only while a link plays (an http(s) `path`). When what plays stops being
+ *   a link while that tab is open, the panel goes to Subtitles.
  *
- * Quality for streams comes with `tools` (M2). The tab is `uiStore.quickTab`: the Subtitles button
- * opens the panel on the first tab. What the panels set goes to mpv as commands, and what they show
- * is mpv's own report (`sid`, `aid`, `sub-scale`, `sub-delay`, `audio-delay`) with the value the
- * user just set standing in until mpv has reported it (`useSettled`).
+ * The tab is `uiStore.quickTab`: the Subtitles button opens the panel on the first tab, the Quality
+ * button on the last. What the panels set goes to mpv as commands, and what they show is mpv's own
+ * report (`sid`, `aid`, `sub-scale`, `sub-delay`, `audio-delay`) with the value the user just set
+ * standing in until mpv has reported it (`useSettled`).
  *
  * The tabs are a tablist: the arrows (and Home, End) move between them and switch, and say so with
  * `preventDefault` so that mpv does not also get the key.
@@ -33,10 +36,12 @@ import { throttle } from '../player/throttle';
 import Icon, { PLUS } from '../shell/Icon';
 import { selectTracks, usePlayerStore } from '../state/playerStore';
 import { useUiStore, type QuickTab } from '../state/uiStore';
+import { selectStreamUrl } from '../streams/streamStore';
 import DelayStepper from './DelayStepper';
 import styles from './Panel.module.css';
 import Popover from './Popover';
 import { numberProp, selectedTrackId, sendCommand } from './props';
+import QualityTab from './QualityTab';
 import quick from './QuickSettings.module.css';
 import TrackList from './TrackList';
 import { useSettled } from './useSettled';
@@ -58,7 +63,9 @@ export function clampSubScale(scale: number): number {
   return Math.min(SUB_SCALE.max, Math.max(SUB_SCALE.min, Math.round(scale * 100) / 100));
 }
 
-const TABS: readonly QuickTab[] = ['subtitles', 'audio'];
+/** The tabs of a file, and of a link, which can also be set to another quality. */
+const FILE_TABS: readonly QuickTab[] = ['subtitles', 'audio'];
+const STREAM_TABS: readonly QuickTab[] = ['subtitles', 'audio', 'quality'];
 
 const warn = (what: string) => (error: unknown) => {
   console.warn(what, error);
@@ -215,20 +222,28 @@ export interface QuickSettingsProps {
 
 export default function QuickSettings({ anchor }: QuickSettingsProps) {
   const { t } = useTranslation();
-  const tab = useUiStore((state) => state.quickTab);
+  const stored = useUiStore((state) => state.quickTab);
   const setQuickTab = useUiStore((state) => state.setQuickTab);
   const setPanel = useUiStore((state) => state.setPanel);
+  const stream = usePlayerStore((state) => selectStreamUrl(state.props) !== null);
   const ids = useId();
   const tabs = useRef<Partial<Record<QuickTab, HTMLButtonElement | null>>>({});
 
+  const names = stream ? STREAM_TABS : FILE_TABS;
+  // What plays is no link (any more): there is no Quality tab to show, and the panel is on the first.
+  const tab: QuickTab = names.includes(stored) ? stored : 'subtitles';
+  useEffect(() => {
+    if (tab !== stored) setQuickTab(tab);
+  }, [tab, stored, setQuickTab]);
+
   const onTabKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    const index = TABS.indexOf(tab);
+    const index = names.indexOf(tab);
     let next = -1;
-    if (e.key === 'ArrowRight') next = (index + 1) % TABS.length;
-    else if (e.key === 'ArrowLeft') next = (index + TABS.length - 1) % TABS.length;
+    if (e.key === 'ArrowRight') next = (index + 1) % names.length;
+    else if (e.key === 'ArrowLeft') next = (index + names.length - 1) % names.length;
     else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = TABS.length - 1;
-    const target = TABS[next];
+    else if (e.key === 'End') next = names.length - 1;
+    const target = names[next];
     if (!target) return;
     // Handled here: mpv does not get the arrow too.
     e.preventDefault();
@@ -246,7 +261,7 @@ export default function QuickSettings({ anchor }: QuickSettingsProps) {
       className={quick.quick}
     >
       <div role="tablist" aria-label={t('panels.tabs.label')} className={quick.tabs} onKeyDown={onTabKeyDown}>
-        {TABS.map((name) => {
+        {names.map((name) => {
           const selected = name === tab;
           return (
             <button
@@ -276,7 +291,9 @@ export default function QuickSettings({ anchor }: QuickSettingsProps) {
         aria-labelledby={`${ids}-tab-${tab}`}
         className={quick.section}
       >
-        {tab === 'subtitles' ? <SubtitlesTab /> : <AudioTab />}
+        {tab === 'subtitles' && <SubtitlesTab />}
+        {tab === 'audio' && <AudioTab />}
+        {tab === 'quality' && <QualityTab />}
       </div>
     </Popover>
   );

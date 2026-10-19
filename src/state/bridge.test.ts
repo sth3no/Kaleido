@@ -4,6 +4,8 @@ import { renderHook } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
+import type { StreamFormats } from '../ipc/types';
+import { useStreamStore } from '../streams/streamStore';
 import { startPlayerBridge, usePlayerBridge } from './bridge';
 import { usePlayerStore } from './playerStore';
 import { useUiStore } from './uiStore';
@@ -19,7 +21,13 @@ const EVENTS = [
   'player:log',
   'glass:state',
   'system:open-request',
+  'stream:formats',
 ];
+
+const LINK = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+
+/** What Rust says of a link that is being probed. */
+const loading = (url: string): StreamFormats => ({ url, state: { type: 'loading' }, chosen: null });
 
 /** What happened, in order: `listen <event>`, `unlisten <event>` and `invoke <command>`. */
 let order: string[];
@@ -67,6 +75,7 @@ beforeEach(() => {
   };
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
+  useStreamStore.setState(useStreamStore.getInitialState(), true);
   vi.mocked(listen).mockImplementation(((event: string, handler: EventCallback<unknown>) => {
     order.push(`listen ${event}`);
     handlers.set(event, handler);
@@ -170,6 +179,57 @@ describe('startPlayerBridge', () => {
     await started;
 
     expect(useUiStore.getState().glass).toEqual({ enabled: false, reason: 'gpuFailure' });
+  });
+
+  test('what Rust says of the link that plays reaches the stream store, and what it says of another link does not', async () => {
+    const stop = await startPlayerBridge();
+
+    fire('player:state', { changes: { path: LINK } });
+    fire('stream:formats', loading(LINK));
+    expect(useStreamStore.getState().formats).toEqual(loading(LINK));
+
+    fire('stream:formats', loading('https://www.twitch.tv/kaleido'));
+    expect(useStreamStore.getState().formats).toEqual(loading(LINK));
+    stop();
+  });
+
+  test('the qualities of a link are asked for when the path becomes one, and for nothing else', async () => {
+    answers.stream_formats = () => Promise.resolve({ ...loading(LINK), chosen: 'ba/b' });
+    const stop = await startPlayerBridge();
+
+    fire('player:state', { changes: { path: 'C:\\Videa\\a.mkv' } });
+    expect(steps('invoke')).not.toContain('invoke stream_formats');
+
+    fire('player:state', { changes: { path: LINK } });
+    expect(steps('invoke')).toContain('invoke stream_formats');
+    await vi.waitFor(() => {
+      expect(useStreamStore.getState().formats?.chosen).toBe('ba/b');
+    });
+    stop();
+  });
+
+  test('a link that plays when the UI starts is asked for once its state has arrived', async () => {
+    answers.system_ui_ready = () => Promise.resolve({ path: LINK, 'idle-active': false });
+    answers.stream_formats = () => Promise.resolve(loading(LINK));
+
+    await startPlayerBridge();
+    await vi.waitFor(() => {
+      expect(useStreamStore.getState().formats).toEqual(loading(LINK));
+    });
+    expect(steps('invoke')).toEqual(['invoke system_ui_ready', 'invoke glass_state', 'invoke stream_formats']);
+  });
+
+  test('stopping stops asking, and a stream:formats still on its way is ignored', async () => {
+    const stop = await startPlayerBridge();
+    fire('player:state', { changes: { path: LINK } });
+    expect(steps('invoke').filter((step) => step === 'invoke stream_formats')).toHaveLength(1);
+
+    stop();
+    fire('stream:formats', loading(LINK));
+    expect(useStreamStore.getState().formats).toBeNull();
+
+    usePlayerStore.getState().applyChanges({ path: 'https://www.twitch.tv/kaleido' });
+    expect(steps('invoke').filter((step) => step === 'invoke stream_formats')).toHaveLength(1);
   });
 
   test('stopping lets go of every listener, once, and an event still on its way is ignored', async () => {

@@ -53,6 +53,7 @@
     "loading": "Načítání…",
     "buffering": "Načítání dat…",
     "subtitles": "Titulky",
+    "quality": "Kvalita: {{quality}}",
     "fullscreen": "Celá obrazovka",
     "exitFullscreen": "Zrušit celou obrazovku",
     "seek": {
@@ -71,7 +72,8 @@
     "tabs": {
       "label": "Oddíly rychlého nastavení",
       "subtitles": "Titulky",
-      "audio": "Zvuk"
+      "audio": "Zvuk",
+      "quality": "Kvalita"
     },
     "track": {
       "fallback": "Stopa {{id}}",
@@ -88,6 +90,19 @@
     "audio": {
       "tracks": "Zvukové stopy",
       "none": "Soubor nemá žádné zvukové stopy"
+    },
+    "quality": {
+      "options": "Dostupné kvality",
+      "auto": "Automaticky",
+      "autoShort": "Auto",
+      "autoDetail": "Výchozí kvalita z Nastavení",
+      "audioOnly": "Jen zvuk",
+      "audioShort": "Zvuk",
+      "loading": "Načítám kvality…",
+      "failed": "Kvality tohoto odkazu se nepodařilo načíst.",
+      "failedUnknown": "yt-dlp, nástroj, který čte webové odkazy, nedokázal říct proč.",
+      "none": "yt-dlp pro tento odkaz neuvádí žádné další kvality.",
+      "switching": "Přepínám kvalitu…"
     },
     "delay": {
       "label": "Posun",
@@ -531,6 +546,17 @@
       "unsupported": "Kaleido tento soubor nepřehraje: formát se nepodařilo rozpoznat nebo není podporovaný, případně je soubor poškozený.",
       "generic": "Soubor se nepodařilo přehrát.",
       "continues": "Přehrávání pokračuje dalším souborem."
+    },
+    "stream": {
+      "outdated": "yt-dlp už tomuto webu nerozumí. Novější yt-dlp by mohl.",
+      "missing": "yt-dlp, nástroj, který čte webové odkazy, ještě není nainstalovaný, nebo se ho nepodařilo stáhnout.",
+      "cookies": "Cookies zvoleného prohlížeče se nepodařilo přečíst.",
+      "signIn": "Tento web vyžaduje přihlášení.",
+      "ageRestricted": "Video má věkové omezení a web vyžaduje přihlášení.",
+      "geoBlocked": "Video není ve tvém regionu dostupné.",
+      "private": "Video je soukromé.",
+      "removed": "Video bylo odstraněno nebo už neexistuje.",
+      "network": "yt-dlp se nepodařilo spojit s webem. Zkontroluj připojení k internetu."
     },
     "plugin": {
       "title": "Plugin {{name}} hlásí chyby",

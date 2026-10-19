@@ -41,3 +41,10 @@ test('the setters change one thing each', () => {
   expect(store.getState().panel).toBeNull();
   expect(store.getState().quickTab).toBe('audio');
 });
+
+test('quick settings can be set to the quality tab, which closing the panel leaves as it is', () => {
+  store.getState().setQuickTab('quality');
+  store.getState().setPanel('quick-settings');
+  store.getState().setPanel(null);
+  expect(store.getState().quickTab).toBe('quality');
+});

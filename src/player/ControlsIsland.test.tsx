@@ -3,8 +3,11 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 import { initI18n } from '../i18n';
+import type { StreamFormats } from '../ipc/types';
 import { usePlayerStore, type PlayerProps } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
+import { heightSelector } from '../streams/quality';
+import { useStreamStore } from '../streams/streamStore';
 import ControlsIsland from './ControlsIsland';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
@@ -15,6 +18,38 @@ const TWO_FILES = [
   { filename: 'C:\\Videa\\b.mkv' },
 ];
 
+const LINK = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+
+/** What Rust knows of `LINK`, the quality `chosen`. */
+const formatsOf = (chosen: string | null): StreamFormats => ({
+  url: LINK,
+  state: {
+    type: 'ready',
+    info: {
+      title: 'Big Buck Bunny',
+      duration: 634.5,
+      live: false,
+      formats: [
+        {
+          formatId: '137',
+          ext: 'mp4',
+          height: 1080,
+          width: 1920,
+          fps: 30,
+          vcodec: 'avc1',
+          acodec: null,
+          dynamicRange: 'SDR',
+          tbr: null,
+          filesize: null,
+          filesizeApprox: null,
+          protocol: 'https',
+        },
+      ],
+    },
+  },
+  chosen,
+});
+
 beforeAll(() => {
   initI18n('en');
 });
@@ -23,6 +58,7 @@ beforeEach(() => {
   vi.mocked(invoke).mockClear();
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
+  useStreamStore.setState(useStreamStore.getInitialState(), true);
   // The seekbar's clock and the glass measure on animation frames: none run here.
   vi.stubGlobal('requestAnimationFrame', () => 1);
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
@@ -152,6 +188,139 @@ test('the playlist button opens the playlist, and closes it again', () => {
 
   fireEvent.click(playlist);
   expect(useUiStore.getState().panel).toBeNull();
+});
+
+test('the quality tab and button show only for streams', () => {
+  open({ path: 'C:\\Videa\\a.mkv' });
+  render(<ControlsIsland />);
+  expect(screen.queryByRole('button', { name: /^Quality/ })).toBeNull();
+  // The others are there all the same.
+  expect(button('Subtitles')).toBeTruthy();
+
+  act(() => {
+    usePlayerStore.getState().applyChanges({ path: LINK });
+  });
+  expect(button('Quality: Auto').textContent).toBe('Auto');
+  // It stands beside the Subtitles button, before it.
+  const names = screen.getAllByRole('button').map((one) => one.getAttribute('aria-label'));
+  expect(names.indexOf('Quality: Auto')).toBe(names.indexOf('Subtitles') - 1);
+
+  act(() => {
+    usePlayerStore.getState().applyChanges({ path: 'C:\\Videa\\b.mkv' });
+  });
+  expect(screen.queryByRole('button', { name: /^Quality/ })).toBeNull();
+
+  // Nothing plays: nothing to set the quality of.
+  act(() => {
+    usePlayerStore.getState().applyChanges({ path: null });
+  });
+  expect(screen.queryByRole('button', { name: /^Quality/ })).toBeNull();
+});
+
+test('the quality button says the quality that plays, as Rust has it', () => {
+  open({ path: LINK });
+  useStreamStore.setState({ formats: formatsOf(null) });
+  render(<ControlsIsland />);
+  expect(button('Quality: Auto').textContent).toBe('Auto');
+
+  act(() => {
+    useStreamStore.getState().apply(formatsOf(heightSelector(1080)));
+  });
+  expect(button('Quality: 1080p').textContent).toBe('1080p');
+  expect(screen.queryByRole('button', { name: 'Quality: Auto' })).toBeNull();
+
+  act(() => {
+    useStreamStore.getState().apply(formatsOf('ba/b'));
+  });
+  expect(button('Quality: Audio').textContent).toBe('Audio');
+
+  act(() => {
+    useStreamStore.getState().apply(formatsOf(null));
+  });
+  expect(button('Quality: Auto').textContent).toBe('Auto');
+});
+
+test('the quality button knows nothing of another link, or of a link not probed yet', () => {
+  open({ path: LINK });
+  render(<ControlsIsland />);
+  // Nothing is known yet.
+  expect(button('Quality: Auto')).toBeTruthy();
+
+  act(() => {
+    useStreamStore.getState().apply(formatsOf(heightSelector(1080)));
+  });
+  expect(button('Quality: 1080p')).toBeTruthy();
+
+  // The next link plays: what was known of the one before is not its quality.
+  act(() => {
+    usePlayerStore.getState().applyChanges({ path: 'https://www.twitch.tv/kaleido' });
+  });
+  expect(button('Quality: Auto')).toBeTruthy();
+});
+
+test('the quality button opens quick settings on their Quality tab, and closes them again', () => {
+  open({ path: LINK });
+  useStreamStore.setState({ formats: formatsOf(null) });
+  render(<ControlsIsland />);
+  const quality = button('Quality: Auto');
+  expect(quality.getAttribute('aria-expanded')).toBe('false');
+  expect(quality.getAttribute('aria-haspopup')).toBe('dialog');
+
+  fireEvent.click(quality);
+  expect(useUiStore.getState().panel).toBe('quick-settings');
+  expect(useUiStore.getState().quickTab).toBe('quality');
+  expect(quality.getAttribute('aria-expanded')).toBe('true');
+  // The Subtitles button is not the one that is open.
+  expect(button('Subtitles').getAttribute('aria-expanded')).toBe('false');
+  expect(screen.getByRole('radiogroup', { name: 'Available qualities' })).toBeTruthy();
+
+  fireEvent.click(quality);
+  expect(useUiStore.getState().panel).toBeNull();
+  expect(quality.getAttribute('aria-expanded')).toBe('false');
+});
+
+test('quick settings open on the Quality tab: the Subtitles button brings the Subtitles tab', () => {
+  open({ path: LINK });
+  render(<ControlsIsland />);
+  fireEvent.click(button('Quality: Auto'));
+  expect(useUiStore.getState().quickTab).toBe('quality');
+
+  fireEvent.click(button('Subtitles'));
+  expect(useUiStore.getState().panel).toBe('quick-settings');
+  expect(useUiStore.getState().quickTab).toBe('subtitles');
+  expect(button('Subtitles').getAttribute('aria-expanded')).toBe('true');
+  expect(button('Quality: Auto').getAttribute('aria-expanded')).toBe('false');
+});
+
+test('quick settings opened with the quality button give the focus back to it', () => {
+  open({ path: LINK });
+  render(<ControlsIsland />);
+  const quality = button('Quality: Auto');
+  fireEvent.click(quality);
+  expect(useUiStore.getState().panel).toBe('quick-settings');
+
+  // Esc is the panel's: it closes it and the focus returns to the button that opened it.
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape', code: 'Escape' });
+  expect(useUiStore.getState().panel).toBeNull();
+  expect(document.activeElement).toBe(quality);
+});
+
+test('quick settings open on Quality when the link ends go to Subtitles, over the Subtitles button', () => {
+  open({ path: LINK });
+  render(<ControlsIsland />);
+  fireEvent.click(button('Quality: Auto'));
+
+  act(() => {
+    usePlayerStore.getState().applyChanges({ path: 'C:\\Videa\\a.mkv' });
+  });
+  expect(screen.queryByRole('button', { name: /^Quality/ })).toBeNull();
+  expect(useUiStore.getState().panel).toBe('quick-settings');
+  expect(useUiStore.getState().quickTab).toBe('subtitles');
+  expect(screen.getByRole('tab', { name: 'Subtitles' }).getAttribute('aria-selected')).toBe('true');
+
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape', code: 'Escape' });
+  expect(useUiStore.getState().panel).toBeNull();
+  expect(document.activeElement).toBe(button('Subtitles'));
 });
 
 test('the island is one group of controls, and an island for the autohide', () => {

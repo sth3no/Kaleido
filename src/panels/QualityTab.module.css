@@ -1,0 +1,43 @@
+/*
+ * What the Quality tab (QualityTab.tsx) adds to the lists of Panel.module.css: the ring that shows a
+ * choice at work, the line under the list that says so, and the reason a probe failed.
+ */
+
+/* A ring with one bright quarter. With reduced motion it stands still (theme/global.css). */
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* A live region that is always there; with nothing in it it takes no room. */
+.status {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-m);
+  font-size: var(--k-font-size-xs);
+  opacity: 0.72;
+}
+
+.status:empty {
+  padding: 0;
+}
+
+/* The last line yt-dlp wrote, for a failure that has no class: it may be long and has no spaces. */
+.message {
+  margin: 0;
+  padding: 0 var(--k-space-m) var(--k-space-s);
+  font-size: var(--k-font-size-xs);
+  opacity: 0.72;
+  overflow-wrap: anywhere;
+}

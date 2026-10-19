@@ -5,9 +5,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 
 import { initI18n } from '../i18n';
 import { attachVideoInput } from '../input/forward';
-import type { Track } from '../ipc/types';
+import type { StreamFormats, Track } from '../ipc/types';
 import { usePlayerStore, type PlayerProps } from '../state/playerStore';
 import { useUiStore, type QuickTab } from '../state/uiStore';
+import { useStreamStore } from '../streams/streamStore';
 import { clampDelay, stepDelay } from './DelayStepper';
 import QuickSettings, {
   AUDIO_DELAY_STEP_S,
@@ -23,6 +24,38 @@ const SUBTITLES: Track[] = [
   { id: 2, type: 'sub', lang: 'en', title: 'SDH' },
 ];
 
+const LINK = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+
+/** What Rust knows of `LINK`: a 1080p picture. */
+const FORMATS: StreamFormats = {
+  url: LINK,
+  state: {
+    type: 'ready',
+    info: {
+      title: 'Big Buck Bunny',
+      duration: 634.5,
+      live: false,
+      formats: [
+        {
+          formatId: '137',
+          ext: 'mp4',
+          height: 1080,
+          width: 1920,
+          fps: 30,
+          vcodec: 'avc1',
+          acodec: null,
+          dynamicRange: 'SDR',
+          tbr: null,
+          filesize: null,
+          filesizeApprox: null,
+          protocol: 'https',
+        },
+      ],
+    },
+  },
+  chosen: null,
+};
+
 const SOUNDS: Track[] = [
   { id: 1, type: 'audio', lang: 'en', codec: 'ac3', 'demux-channel-count': 6 },
   { id: 2, type: 'audio', lang: 'cs', title: 'Commentary' },
@@ -36,6 +69,7 @@ beforeEach(() => {
   vi.mocked(invoke).mockClear();
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
+  useStreamStore.setState(useStreamStore.getInitialState(), true);
   // The glass measures on animation frames: none run here.
   vi.stubGlobal('requestAnimationFrame', () => 1);
   vi.stubGlobal('cancelAnimationFrame', () => undefined);
@@ -324,6 +358,121 @@ describe('tabs', () => {
     } finally {
       detach();
     }
+  });
+});
+
+describe('the quality tab', () => {
+  const tabNames = () => screen.getAllByRole('tab').map((tab) => tab.textContent);
+
+  test('the quality tab and button show only for streams: a file has two tabs', () => {
+    open({ 'track-list': SUBTITLES, path: 'C:\\Videa\\a.mkv' });
+    expect(tabNames()).toEqual(['Subtitles', 'Audio']);
+    expect(screen.queryByRole('tab', { name: 'Quality' })).toBeNull();
+  });
+
+  test('the quality tab and button show only for streams: a link has three', () => {
+    open({ path: LINK });
+    expect(tabNames()).toEqual(['Subtitles', 'Audio', 'Quality']);
+  });
+
+  test.each(['http://example.com/a.mp4', 'HTTPS://EXAMPLE.COM/A.MP4'])(
+    'an http(s) path, in any case, is a link: %s',
+    (path) => {
+      open({ path });
+      expect(tabNames()).toEqual(['Subtitles', 'Audio', 'Quality']);
+    },
+  );
+
+  test.each([undefined, null, '', 'ftp://example.com/a.mp4', 'file:///C:/a.mkv', 'C:\\a.mkv'])(
+    'a path that is no http(s) link has no quality tab: %j',
+    (path) => {
+      open({ path });
+      expect(tabNames()).toEqual(['Subtitles', 'Audio']);
+    },
+  );
+
+  test('a click on the tab shows the qualities of the link', () => {
+    useStreamStore.setState({ formats: FORMATS });
+    open({ path: LINK });
+    fireEvent.click(screen.getByRole('tab', { name: 'Quality' }));
+    expect(useUiStore.getState().quickTab).toBe('quality');
+    expect(screen.getByRole('tab', { name: 'Quality' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      screen.getByRole('tab', { name: 'Quality' }).id,
+    );
+    const group = screen.getByRole('radiogroup', { name: 'Available qualities' });
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(2);
+    // The other tabs' lists are not there.
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('slider')).toBeNull();
+  });
+
+  test('the panel opens on the quality tab when it was asked to', () => {
+    useStreamStore.setState({ formats: FORMATS });
+    open({ path: LINK }, 'quality');
+    expect(screen.getByRole('tab', { name: 'Quality' }).getAttribute('aria-selected')).toBe('true');
+    // The focus goes to the choice that is marked, as it does in the track lists.
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: /^Automatic/ }));
+  });
+
+  test('the panel on the quality tab goes to Subtitles when what plays stops being a link', () => {
+    open({ path: LINK }, 'quality');
+    expect(screen.getByRole('tab', { name: 'Quality' }).getAttribute('aria-selected')).toBe('true');
+
+    act(() => {
+      usePlayerStore.getState().applyChanges({ path: 'C:\\Videa\\a.mkv' });
+    });
+    expect(tabNames()).toEqual(['Subtitles', 'Audio']);
+    expect(useUiStore.getState().quickTab).toBe('subtitles');
+    expect(screen.getByRole('tab', { name: 'Subtitles' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(
+      screen.getByRole('tab', { name: 'Subtitles' }).id,
+    );
+    expect(screen.queryByRole('radiogroup')).toBeNull();
+    // Still open.
+    expect(useUiStore.getState().panel).toBe('quick-settings');
+  });
+
+  test('the same when nothing plays any more', () => {
+    open({ path: LINK }, 'quality');
+    act(() => {
+      usePlayerStore.getState().applyChanges({ path: null, 'idle-active': true });
+    });
+    expect(useUiStore.getState().quickTab).toBe('subtitles');
+    expect(tabNames()).toEqual(['Subtitles', 'Audio']);
+  });
+
+  test('a quality tab left over from a link is not shown for a file', () => {
+    open({ path: 'C:\\Videa\\a.mkv', 'track-list': SUBTITLES, sid: 1 }, 'quality');
+    expect(useUiStore.getState().quickTab).toBe('subtitles');
+    expect(screen.getByRole('tab', { name: 'Subtitles' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('listbox', { name: 'Subtitle tracks' })).toBeTruthy();
+  });
+
+  test('the arrows, Home and End go through the three tabs of a link, round', () => {
+    open({ path: LINK }, 'audio');
+    const subtitles = screen.getByRole('tab', { name: 'Subtitles' });
+    const audio = screen.getByRole('tab', { name: 'Audio' });
+    const quality = screen.getByRole('tab', { name: 'Quality' });
+    audio.focus();
+
+    fireEvent.keyDown(audio, { key: 'ArrowRight', code: 'ArrowRight' });
+    expect(useUiStore.getState().quickTab).toBe('quality');
+    expect(document.activeElement).toBe(quality);
+    expect(quality.tabIndex).toBe(0);
+    expect(audio.tabIndex).toBe(-1);
+
+    fireEvent.keyDown(quality, { key: 'ArrowRight', code: 'ArrowRight' });
+    expect(useUiStore.getState().quickTab).toBe('subtitles');
+    expect(document.activeElement).toBe(subtitles);
+
+    fireEvent.keyDown(subtitles, { key: 'ArrowLeft', code: 'ArrowLeft' });
+    expect(useUiStore.getState().quickTab).toBe('quality');
+    fireEvent.keyDown(quality, { key: 'Home', code: 'Home' });
+    expect(useUiStore.getState().quickTab).toBe('subtitles');
+    fireEvent.keyDown(subtitles, { key: 'End', code: 'End' });
+    expect(useUiStore.getState().quickTab).toBe('quality');
+    expect(document.activeElement).toBe(quality);
   });
 });
 

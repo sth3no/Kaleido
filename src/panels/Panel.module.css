@@ -32,7 +32,9 @@
   background: var(--k-color-hover);
 }
 
-.option[aria-selected='true'] {
+/* A track in a listbox is `aria-selected`, a quality in a radio group `aria-checked`. */
+.option[aria-selected='true'],
+.option[aria-checked='true'] {
   background: var(--k-color-selected);
 }
 
@@ -161,7 +163,8 @@
 
 /* High contrast: system colours, and an edge where a tint would show the choice. */
 @media (forced-colors: active) {
-  .option[aria-selected='true'] {
+  .option[aria-selected='true'],
+  .option[aria-checked='true'] {
     border-color: Highlight;
   }
 

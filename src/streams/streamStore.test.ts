@@ -1,0 +1,518 @@
+import { invoke } from '@tauri-apps/api/core';
+import i18next from 'i18next';
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+
+import { initI18n } from '../i18n';
+import type { StreamFormat, StreamFormats, StreamInfo } from '../ipc/types';
+import { usePlayerStore } from '../state/playerStore';
+import { heightSelector, qualityOptions, type QualityOption } from './quality';
+import {
+  followStreamPath,
+  PENDING_MS,
+  selectStreamUrl,
+  useStreamStore,
+} from './streamStore';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+
+const LINK = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+const OTHER = 'https://www.twitch.tv/kaleido';
+const P720 = heightSelector(720);
+const P1080 = heightSelector(1080);
+
+const picture = (height: number): StreamFormat => ({
+  formatId: String(height),
+  ext: 'mp4',
+  height,
+  width: Math.round((height * 16) / 9),
+  fps: 30,
+  vcodec: 'avc1',
+  acodec: null,
+  dynamicRange: 'SDR',
+  tbr: null,
+  filesize: null,
+  filesizeApprox: null,
+  protocol: 'https',
+});
+
+const INFO: StreamInfo = {
+  title: 'Big Buck Bunny',
+  duration: 634.5,
+  live: false,
+  formats: [picture(720), picture(1080)],
+};
+
+const ready = (url: string, chosen: string | null = null): StreamFormats => ({
+  url,
+  state: { type: 'ready', info: INFO },
+  chosen,
+});
+
+const loading = (url: string): StreamFormats => ({ url, state: { type: 'loading' }, chosen: null });
+
+/** The choice with `selector`, as the list makes it. */
+function option(selector: string | null): QualityOption {
+  const found = qualityOptions(INFO, i18next.getFixedT('en')).find(
+    (candidate) => candidate.selector === selector,
+  );
+  if (!found) throw new Error(`no option for ${String(selector)}`);
+  return found;
+}
+
+/** A promise the test settles when it likes. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+type Answers = Record<string, (args: unknown) => unknown>;
+
+function rust(answers: Answers) {
+  vi.mocked(invoke).mockImplementation((async (command: string, args?: unknown) =>
+    answers[command]?.(args) ?? null) as unknown as typeof invoke);
+}
+
+const sent = (command: string) =>
+  vi.mocked(invoke).mock.calls.filter(([name]) => name === command);
+
+const store = useStreamStore;
+
+/** Lets everything that waits on a promise run. */
+const settle = () =>
+  new Promise<void>((done) => {
+    setTimeout(done, 0);
+  });
+
+/** mpv reports a new `path`. */
+const play = (path: string | null) => {
+  usePlayerStore.getState().applyChanges({ path });
+};
+
+beforeAll(() => {
+  initI18n('en');
+});
+
+beforeEach(() => {
+  store.setState(store.getInitialState(), true);
+  usePlayerStore.setState(usePlayerStore.getInitialState(), true);
+  vi.mocked(invoke).mockReset();
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe('selectStreamUrl', () => {
+  test.each([
+    ['http://example.com/a.mp4', 'http://example.com/a.mp4'],
+    [LINK, LINK],
+    ['HTTPS://EXAMPLE.COM/A', 'HTTPS://EXAMPLE.COM/A'],
+    ['HtTp://example.com', 'HtTp://example.com'],
+    ['C:\\Videa\\a.mkv', null],
+    ['\\\\?\\C:\\Videa\\a.mkv', null],
+    ['file:///C:/Videa/a.mkv', null],
+    ['ftp://example.com/a.mkv', null],
+    ['httpx://example.com', null],
+    ['http:/example.com', null],
+    ['see http://example.com', null],
+    ['', null],
+    [null, null],
+    [undefined, null],
+    [42, null],
+  ])('the path %j is a link: %j', (path, expected) => {
+    expect(selectStreamUrl({ path })).toBe(expected);
+  });
+
+  test('no path at all is no link', () => {
+    expect(selectStreamUrl({})).toBeNull();
+  });
+});
+
+describe('following stream:formats', () => {
+  test('what Rust says of the link that plays is kept', () => {
+    play(LINK);
+    store.getState().apply(loading(LINK));
+    expect(store.getState().formats).toEqual(loading(LINK));
+
+    store.getState().apply(ready(LINK, P720));
+    expect(store.getState().formats).toEqual(ready(LINK, P720));
+  });
+
+  test('an event for another link is ignored', () => {
+    play(LINK);
+    store.getState().apply(ready(LINK));
+    store.getState().apply(ready(OTHER, P720));
+    store.getState().apply(loading('https://example.com/other'));
+    expect(store.getState().formats).toEqual(ready(LINK));
+  });
+
+  test('nothing is kept for what is no link, or while nothing plays', () => {
+    store.getState().apply(ready(LINK));
+    expect(store.getState().formats).toBeNull();
+
+    play('C:\\Videa\\a.mkv');
+    store.getState().apply(ready('C:\\Videa\\a.mkv'));
+    expect(store.getState().formats).toBeNull();
+
+    play(null);
+    store.getState().apply(ready(LINK));
+    expect(store.getState().formats).toBeNull();
+  });
+});
+
+describe('asking when the path changes', () => {
+  test('a path that becomes a link is asked for, and the answer is kept', async () => {
+    rust({ stream_formats: () => ready(LINK) });
+    const stop = followStreamPath();
+
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(store.getState().formats).toEqual(ready(LINK));
+    });
+    expect(sent('stream_formats')).toHaveLength(1);
+    stop();
+  });
+
+  test('an event that came before the UI knew the path is not lost: the answer has it', async () => {
+    rust({ stream_formats: () => ready(LINK, P1080) });
+    const stop = followStreamPath();
+
+    // `stream:formats` is early: mpv's path has not reached the UI yet.
+    store.getState().apply(loading(LINK));
+    expect(store.getState().formats).toBeNull();
+
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(store.getState().formats).toEqual(ready(LINK, P1080));
+    });
+    stop();
+  });
+
+  test('a file, or nothing, is not asked for', () => {
+    rust({});
+    const stop = followStreamPath();
+    play('C:\\Videa\\a.mkv');
+    play(null);
+    play('ftp://example.com/a.mkv');
+    expect(sent('stream_formats')).toEqual([]);
+    stop();
+  });
+
+  test('only a change of the path asks, and each link is asked for once', async () => {
+    rust({ stream_formats: () => null });
+    const stop = followStreamPath();
+
+    play(LINK);
+    usePlayerStore.getState().applyChanges({ 'time-pos': 5, pause: false });
+    usePlayerStore.getState().applyChanges({ path: LINK });
+    expect(sent('stream_formats')).toHaveLength(1);
+
+    play(OTHER);
+    expect(sent('stream_formats')).toHaveLength(2);
+    await settle();
+    stop();
+  });
+
+  test('a link that plays when the UI starts is asked for at once', async () => {
+    usePlayerStore.getState().applyChanges({ path: LINK });
+    rust({ stream_formats: () => ready(LINK, P720) });
+
+    const stop = followStreamPath();
+    await vi.waitFor(() => {
+      expect(store.getState().formats).toEqual(ready(LINK, P720));
+    });
+    stop();
+  });
+
+  test('stopping stops asking', () => {
+    rust({});
+    const stop = followStreamPath();
+    stop();
+    play(LINK);
+    expect(sent('stream_formats')).toEqual([]);
+  });
+
+  test('an event that came while Rust was asked is newer than its answer', async () => {
+    const answer = deferred<StreamFormats>();
+    rust({ stream_formats: () => answer.promise });
+    const stop = followStreamPath();
+
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(sent('stream_formats')).toHaveLength(1);
+    });
+    store.getState().apply(ready(LINK, P720));
+    answer.resolve(ready(LINK));
+    await settle();
+
+    expect(store.getState().formats).toEqual(ready(LINK, P720));
+    stop();
+  });
+
+  test('an answer for a link that no longer plays is dropped', async () => {
+    const answer = deferred<StreamFormats>();
+    rust({ stream_formats: () => answer.promise });
+    const stop = followStreamPath();
+
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(sent('stream_formats')).toHaveLength(1);
+    });
+    play('C:\\Videa\\a.mkv');
+    answer.resolve(ready(LINK));
+    await settle();
+
+    expect(store.getState().formats).toBeNull();
+    stop();
+  });
+
+  test('a read that fails is only reported', async () => {
+    rust({
+      stream_formats: () => {
+        throw new Error('no streams');
+      },
+    });
+    const stop = followStreamPath();
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(console.warn).toHaveBeenCalledWith('stream_formats', expect.any(Error));
+    });
+    expect(store.getState().formats).toBeNull();
+    stop();
+  });
+
+  test('an answer that is no state of a link is not taken', async () => {
+    rust({ stream_formats: () => 'nothing' });
+    const stop = followStreamPath();
+    play(LINK);
+    await vi.waitFor(() => {
+      expect(sent('stream_formats')).toHaveLength(1);
+    });
+    await settle();
+    expect(store.getState().formats).toBeNull();
+    stop();
+  });
+});
+
+describe('the formats of the links that played', () => {
+  test('the path passing through nothing, as it does while a quality loads, keeps the formats', () => {
+    rust({});
+    const stop = followStreamPath();
+    play(LINK);
+    store.getState().apply(ready(LINK, P720));
+
+    play(null);
+    expect(store.getState().formats).toEqual(ready(LINK, P720));
+    play(LINK);
+    expect(store.getState().formats).toEqual(ready(LINK, P720));
+    stop();
+  });
+
+  test('another link drops them, and a file in between does not', () => {
+    rust({});
+    const stop = followStreamPath();
+    play(LINK);
+    store.getState().apply(ready(LINK, P720));
+
+    play('C:\\Videa\\a.mkv');
+    expect(store.getState().formats).toEqual(ready(LINK, P720));
+    play(OTHER);
+    expect(store.getState().formats).toBeNull();
+    stop();
+  });
+});
+
+describe('choosing a quality', () => {
+  test('choosing a height sends its selector and marks it chosen', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P1080));
+    expect(sent('player_set_quality')).toEqual([['player_set_quality', { format: P1080 }]]);
+
+    // What is marked is Rust's word, not the click.
+    expect(store.getState().formats?.chosen).toBeNull();
+    store.getState().apply(ready(LINK, P1080));
+    expect(store.getState().formats?.chosen).toBe(P1080);
+  });
+
+  test('Automatic sends nothing but null: the default quality', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK, P720));
+
+    await store.getState().select(option(null));
+    expect(sent('player_set_quality')).toEqual([['player_set_quality', { format: null }]]);
+  });
+
+  test('the choice is at work until Rust says the new quality, and only that one ends it', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+    expect(store.getState().pending).toBeNull();
+
+    await store.getState().select(option(P720));
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
+
+    // The probe is told again, with the quality as it was: it is not the choice.
+    store.getState().apply(ready(LINK));
+    store.getState().apply(ready(LINK, P1080));
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
+
+    store.getState().apply(ready(LINK, P720));
+    expect(store.getState().pending).toBeNull();
+  });
+
+  test('Automatic is at work until Rust says there is no choice', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK, P720));
+
+    await store.getState().select(option(null));
+    expect(store.getState().pending).toEqual({ url: LINK, selector: null });
+    store.getState().apply(ready(LINK, null));
+    expect(store.getState().pending).toBeNull();
+  });
+
+  test('a choice Rust never confirms stops being at work after ten seconds', async () => {
+    vi.useFakeTimers();
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P720));
+    expect(PENDING_MS).toBe(10_000);
+    vi.advanceTimersByTime(PENDING_MS - 1);
+    expect(store.getState().pending).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(store.getState().pending).toBeNull();
+    // The quality is still whatever Rust said.
+    expect(store.getState().formats?.chosen).toBeNull();
+  });
+
+  test('the timer of a choice that was confirmed does not end a later one', async () => {
+    vi.useFakeTimers();
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P720));
+    vi.advanceTimersByTime(6000);
+    store.getState().apply(ready(LINK, P720));
+    expect(store.getState().pending).toBeNull();
+
+    await store.getState().select(option(P1080));
+    // Four seconds on, the first choice's timer would have gone: this one has all of its ten.
+    vi.advanceTimersByTime(4000);
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+    vi.advanceTimersByTime(PENDING_MS);
+    expect(store.getState().pending).toBeNull();
+  });
+
+  test('a second choice while the first is at work takes its place', async () => {
+    vi.useFakeTimers();
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P720));
+    vi.advanceTimersByTime(8000);
+    await store.getState().select(option(P1080));
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+    // Two seconds on, the first choice's timer would have gone.
+    vi.advanceTimersByTime(2000);
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+    expect(sent('player_set_quality')).toHaveLength(2);
+  });
+
+  test('a choice Rust refuses is not waited for', async () => {
+    rust({
+      player_set_quality: () => {
+        throw 'notAStream';
+      },
+    });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P720));
+    expect(store.getState().pending).toBeNull();
+    expect(console.warn).toHaveBeenCalledWith('player_set_quality', 'notAStream');
+  });
+
+  test('the refusal of an earlier choice does not end the wait for a later one', async () => {
+    const first = deferred<null>();
+    let calls = 0;
+    rust({
+      player_set_quality: () => {
+        calls += 1;
+        return calls === 1 ? first.promise : null;
+      },
+    });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    const earlier = store.getState().select(option(P720));
+    await store.getState().select(option(P1080));
+    first.reject('invalid');
+    await earlier;
+
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+  });
+
+  test('what is chosen already, or is at work, is not chosen again', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK, P720));
+
+    await store.getState().select(option(P720));
+    expect(sent('player_set_quality')).toEqual([]);
+    expect(store.getState().pending).toBeNull();
+
+    await store.getState().select(option(P1080));
+    await store.getState().select(option(P1080));
+    expect(sent('player_set_quality')).toHaveLength(1);
+
+    // Back to what was chosen before is a choice, while the other is at work.
+    await store.getState().select(option(P720));
+    expect(sent('player_set_quality')).toHaveLength(2);
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
+  });
+
+  test('Automatic is not chosen again either, while it is the quality', async () => {
+    rust({ player_set_quality: () => null });
+    play(LINK);
+    store.getState().apply(ready(LINK, null));
+
+    await store.getState().select(option(null));
+    expect(sent('player_set_quality')).toEqual([]);
+  });
+
+  test('nothing is sent while no link plays', async () => {
+    rust({ player_set_quality: () => null });
+    play('C:\\Videa\\a.mkv');
+    await store.getState().select(option(P720));
+    expect(sent('player_set_quality')).toEqual([]);
+    expect(store.getState().pending).toBeNull();
+  });
+
+  test('another link ends the wait of the one before', async () => {
+    rust({ player_set_quality: () => null, stream_formats: () => null });
+    const stop = followStreamPath();
+    play(LINK);
+    store.getState().apply(ready(LINK));
+    await store.getState().select(option(P720));
+    expect(store.getState().pending).not.toBeNull();
+
+    play(OTHER);
+    expect(store.getState().pending).toBeNull();
+    stop();
+  });
+});
