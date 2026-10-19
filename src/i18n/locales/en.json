@@ -102,7 +102,8 @@
       "failed": "The qualities of this link could not be loaded.",
       "failedUnknown": "yt-dlp, the tool that reads web links, could not say why.",
       "none": "yt-dlp lists no other qualities for this link.",
-      "switching": "Switching the quality…"
+      "switching": "Switching the quality…",
+      "refused": "The quality could not be changed."
     },
     "delay": {
       "label": "Delay",

@@ -6,6 +6,7 @@ import { initI18n, setLanguage } from '../i18n';
 import { attachVideoInput } from '../input/forward';
 import type { StreamError, StreamFormat, StreamFormats, StreamInfo } from '../ipc/types';
 import { usePlayerStore } from '../state/playerStore';
+import { useUiStore } from '../state/uiStore';
 import { AUDIO_ONLY_SELECTOR, heightSelector } from '../streams/quality';
 import { useStreamStore } from '../streams/streamStore';
 import QualityTab from './QualityTab';
@@ -74,23 +75,36 @@ beforeEach(() => {
   vi.mocked(invoke).mockClear();
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useStreamStore.setState(useStreamStore.getInitialState(), true);
+  useUiStore.setState(useUiStore.getInitialState(), true);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-/** A link plays, `formats` is what is known of it, and the tab is shown. */
+/** A promise the test settles when it likes. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** A link plays, `formats` is what is known of it, and the tab is shown in open quick settings. */
 function open(formats: StreamFormats | null) {
   usePlayerStore.setState({
     loaded: true,
     props: { 'idle-active': false, pause: false, path: LINK },
   });
+  useUiStore.setState({ panel: 'quick-settings', quickTab: 'quality' });
   useStreamStore.setState({ formats });
   return render(<QualityTab />);
 }
+
+/** The panel is closed (Rust took a choice and the link reloads). */
+const closed = () => waitFor(() => expect(useUiStore.getState().panel).toBeNull());
 
 /** Rust says something of the link (`stream:formats`). */
 const hear = (formats: StreamFormats) => {
@@ -136,19 +150,21 @@ describe('the qualities', () => {
     expect(radio('720p').getAttribute('aria-checked')).toBe('false');
   });
 
-  test('a choice that is none of them marks none, and a click on any still works', () => {
+  test('a choice that is none of them marks none, and a click on any still works', async () => {
     open(ready('bv*[height<=?1440]+ba/b[height<=?1440]'));
     expect(screen.getAllByRole('radio').filter((one) => one.getAttribute('aria-checked') === 'true')).toEqual([]);
     // Tab reaches the first one then.
     expect((radio(/^Automatic/) as HTMLButtonElement).tabIndex).toBe(0);
     fireEvent.click(radio('720p'));
     expect(qualities()).toEqual([P720]);
+    await closed();
   });
 
-  test('audio only is there when the stream has a format of sound alone, and not otherwise', () => {
+  test('audio only is there when the stream has a format of sound alone, and not otherwise', async () => {
     const { unmount } = open(ready());
     fireEvent.click(radio('Audio only'));
     expect(qualities()).toEqual([AUDIO_ONLY_SELECTOR]);
+    await closed();
     unmount();
 
     open(ready(null, { ...INFO, formats: INFO.formats.filter((format) => format.vcodec !== null) }));
@@ -186,28 +202,43 @@ describe('the qualities', () => {
 });
 
 describe('choosing', () => {
-  test('choosing a height sends its selector and marks it chosen', () => {
+  test('choosing a height sends its selector, and the panel closes when Rust has taken it', async () => {
     open(ready());
     fireEvent.click(radio('1080p60'));
     expect(qualities()).toEqual([P1080]);
 
-    // Rust's word is what is marked.
+    // The link reloads like any open: nothing more to show in the panel.
+    await closed();
+  });
+
+  test('what is marked is Rust’s word, not the click: the new quality is marked when it says it', async () => {
+    const { unmount } = open(ready());
+    fireEvent.click(radio('1080p60'));
     expect(radio('1080p60').getAttribute('aria-checked')).toBe('false');
+    await closed();
+
+    // `stream:formats` carries the new `chosen`; the panel, opened again, shows it marked.
     hear(ready(P1080));
+    unmount();
+    render(<QualityTab />);
     expect(radio('1080p60').getAttribute('aria-checked')).toBe('true');
     expect(radio(/^Automatic/).getAttribute('aria-checked')).toBe('false');
   });
 
-  test('Automatic sends the default quality: no selector', () => {
+  test('Automatic sends the default quality: no selector', async () => {
     open(ready(P720));
     fireEvent.click(radio(/^Automatic/));
     expect(qualities()).toEqual([null]);
+    await closed();
+
     hear(ready(null));
     expect(radio(/^Automatic/).getAttribute('aria-checked')).toBe('true');
     expect(radio('720p').getAttribute('aria-checked')).toBe('false');
   });
 
-  test('a choice is at work until Rust says it, and the list says so', () => {
+  test('the option shows a ring, and the list says so, for the round trip of the command', async () => {
+    const answer = deferred<null>();
+    vi.mocked(invoke).mockImplementationOnce(() => answer.promise);
     open(ready());
     expect(screen.getByRole('status').textContent).toBe('');
 
@@ -216,43 +247,83 @@ describe('choosing', () => {
     expect(radio('1080p60').hasAttribute('aria-busy')).toBe(false);
     expect(radio(/^Automatic/).hasAttribute('aria-busy')).toBe(false);
     expect(screen.getByRole('status').textContent).toBe('Switching the quality…');
+    // Still open: Rust has not answered.
+    expect(useUiStore.getState().panel).toBe('quick-settings');
 
-    // The probe told again with the quality as it was changes nothing about the wait.
-    hear(ready());
+    // What Rust says of the link meanwhile does not end it, the command's answer does.
+    hear(ready(P720));
     expect(radio('720p').getAttribute('aria-busy')).toBe('true');
 
-    hear(ready(P720));
+    await act(async () => {
+      answer.resolve(null);
+      await answer.promise;
+    });
+    await closed();
     expect(radio('720p').hasAttribute('aria-busy')).toBe(false);
-    expect(radio('720p').getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('status').textContent).toBe('');
   });
 
-  test('a choice that Rust never confirms is not at work for ever', () => {
-    vi.useFakeTimers();
+  test('a choice that is taken after another panel was opened leaves that panel', async () => {
+    const answer = deferred<null>();
+    vi.mocked(invoke).mockImplementationOnce(() => answer.promise);
     open(ready());
     fireEvent.click(radio('720p'));
-    expect(radio('720p').getAttribute('aria-busy')).toBe('true');
+
     act(() => {
-      vi.advanceTimersByTime(10_000);
+      useUiStore.getState().setPanel('playlist');
     });
-    expect(radio('720p').hasAttribute('aria-busy')).toBe(false);
-    expect(radio(/^Automatic/).getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      answer.resolve(null);
+      await answer.promise;
+    });
+    await waitFor(() => {
+      expect(radio('720p').hasAttribute('aria-busy')).toBe(false);
+    });
+    expect(useUiStore.getState().panel).toBe('playlist');
   });
 
-  test('the quality that is marked is not sent again', () => {
+  test('the quality that is marked is not sent again, and the panel stays', () => {
     open(ready(P1080));
     fireEvent.click(radio('1080p60'));
     expect(qualities()).toEqual([]);
     expect(radio('1080p60').hasAttribute('aria-busy')).toBe(false);
+    expect(useUiStore.getState().panel).toBe('quick-settings');
   });
 
-  test('a refused choice is not left at work', async () => {
+  test('a choice Rust refuses keeps the panel open and says so on the option', async () => {
     vi.mocked(invoke).mockRejectedValueOnce('notAStream');
     open(ready());
     fireEvent.click(radio('720p'));
+
+    // The refusal is part of the option, so its name is not just `720p` any more.
     await waitFor(() => {
-      expect(radio('720p').hasAttribute('aria-busy')).toBe(false);
+      expect(radio(/^720p/).hasAttribute('data-refused')).toBe(true);
     });
+    expect(radio(/^720p/).textContent).toContain('The quality could not be changed.');
+    expect(radio(/^720p/).hasAttribute('aria-busy')).toBe(false);
+    expect(screen.getByRole('radiogroup').getAttribute('aria-invalid')).toBe('true');
+    expect(screen.getByRole('status').textContent).toBe('');
+    // Nothing else says it, and nothing changed.
+    expect(radio('1080p60').hasAttribute('data-refused')).toBe(false);
+    expect(radio('1080p60').textContent).not.toContain('could not be changed');
+    expect(radio(/^Automatic/).getAttribute('aria-checked')).toBe('true');
+    expect(useUiStore.getState().panel).toBe('quick-settings');
+  });
+
+  test('the next choice forgets the refusal, and is taken', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce('invalid');
+    open(ready());
+    fireEvent.click(radio('720p'));
+    await waitFor(() => {
+      expect(radio(/^720p/).hasAttribute('data-refused')).toBe(true);
+    });
+
+    fireEvent.click(radio('1080p60'));
+    expect(radio('720p').hasAttribute('data-refused')).toBe(false);
+    expect(radio('720p').textContent).not.toContain('could not be changed');
+    expect(screen.getByRole('radiogroup').hasAttribute('aria-invalid')).toBe(false);
+    expect(qualities()).toEqual([P720, P1080]);
+    await closed();
   });
 });
 

@@ -6,12 +6,7 @@ import { initI18n } from '../i18n';
 import type { StreamFormat, StreamFormats, StreamInfo } from '../ipc/types';
 import { usePlayerStore } from '../state/playerStore';
 import { heightSelector, qualityOptions, type QualityOption } from './quality';
-import {
-  followStreamPath,
-  PENDING_MS,
-  selectStreamUrl,
-  useStreamStore,
-} from './streamStore';
+import { followStreamPath, selectStreamUrl, useStreamStore } from './streamStore';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -105,7 +100,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -335,7 +329,7 @@ describe('choosing a quality', () => {
     play(LINK);
     store.getState().apply(ready(LINK));
 
-    await store.getState().select(option(P1080));
+    expect(await store.getState().select(option(P1080))).toBe(true);
     expect(sent('player_set_quality')).toEqual([['player_set_quality', { format: P1080 }]]);
 
     // What is marked is Rust's word, not the click.
@@ -349,91 +343,71 @@ describe('choosing a quality', () => {
     play(LINK);
     store.getState().apply(ready(LINK, P720));
 
-    await store.getState().select(option(null));
+    expect(await store.getState().select(option(null))).toBe(true);
     expect(sent('player_set_quality')).toEqual([['player_set_quality', { format: null }]]);
   });
 
-  test('the choice is at work until Rust says the new quality, and only that one ends it', async () => {
-    rust({ player_set_quality: () => null });
+  test('the choice is at work for the round trip of the command, and no longer', async () => {
+    const answer = deferred<null>();
+    rust({ player_set_quality: () => answer.promise });
     play(LINK);
     store.getState().apply(ready(LINK));
     expect(store.getState().pending).toBeNull();
 
-    await store.getState().select(option(P720));
+    const choosing = store.getState().select(option(P720));
     expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
-
-    // The probe is told again, with the quality as it was: it is not the choice.
-    store.getState().apply(ready(LINK));
-    store.getState().apply(ready(LINK, P1080));
-    expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
-
+    // What Rust says of the link meanwhile does not end it: only the command's answer does.
     store.getState().apply(ready(LINK, P720));
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
+
+    answer.resolve(null);
+    expect(await choosing).toBe(true);
     expect(store.getState().pending).toBeNull();
+    expect(store.getState().refused).toBeNull();
   });
 
-  test('Automatic is at work until Rust says there is no choice', async () => {
-    rust({ player_set_quality: () => null });
+  test('Automatic is at work for the round trip too', async () => {
+    const answer = deferred<null>();
+    rust({ player_set_quality: () => answer.promise });
     play(LINK);
     store.getState().apply(ready(LINK, P720));
 
-    await store.getState().select(option(null));
+    const choosing = store.getState().select(option(null));
     expect(store.getState().pending).toEqual({ url: LINK, selector: null });
-    store.getState().apply(ready(LINK, null));
+    answer.resolve(null);
+    await choosing;
     expect(store.getState().pending).toBeNull();
   });
 
-  test('a choice Rust never confirms stops being at work after ten seconds', async () => {
-    vi.useFakeTimers();
-    rust({ player_set_quality: () => null });
+  test('a second choice during the round trip takes the first one’s place', async () => {
+    const first = deferred<null>();
+    const second = deferred<null>();
+    let calls = 0;
+    rust({
+      player_set_quality: () => {
+        calls += 1;
+        return calls === 1 ? first.promise : second.promise;
+      },
+    });
     play(LINK);
     store.getState().apply(ready(LINK));
 
-    await store.getState().select(option(P720));
-    expect(PENDING_MS).toBe(10_000);
-    vi.advanceTimersByTime(PENDING_MS - 1);
-    expect(store.getState().pending).not.toBeNull();
-    vi.advanceTimersByTime(1);
-    expect(store.getState().pending).toBeNull();
-    // The quality is still whatever Rust said.
-    expect(store.getState().formats?.chosen).toBeNull();
-  });
-
-  test('the timer of a choice that was confirmed does not end a later one', async () => {
-    vi.useFakeTimers();
-    rust({ player_set_quality: () => null });
-    play(LINK);
-    store.getState().apply(ready(LINK));
-
-    await store.getState().select(option(P720));
-    vi.advanceTimersByTime(6000);
-    store.getState().apply(ready(LINK, P720));
-    expect(store.getState().pending).toBeNull();
-
-    await store.getState().select(option(P1080));
-    // Four seconds on, the first choice's timer would have gone: this one has all of its ten.
-    vi.advanceTimersByTime(4000);
+    const earlier = store.getState().select(option(P720));
+    const later = store.getState().select(option(P1080));
     expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
-    vi.advanceTimersByTime(PENDING_MS);
+
+    // The first command returns first: the later choice is still at work.
+    first.resolve(null);
+    expect(await earlier).toBe(true);
+    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+
+    second.resolve(null);
+    expect(await later).toBe(true);
     expect(store.getState().pending).toBeNull();
-  });
-
-  test('a second choice while the first is at work takes its place', async () => {
-    vi.useFakeTimers();
-    rust({ player_set_quality: () => null });
-    play(LINK);
-    store.getState().apply(ready(LINK));
-
-    await store.getState().select(option(P720));
-    vi.advanceTimersByTime(8000);
-    await store.getState().select(option(P1080));
-    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
-    // Two seconds on, the first choice's timer would have gone.
-    vi.advanceTimersByTime(2000);
-    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
     expect(sent('player_set_quality')).toHaveLength(2);
   });
 
-  test('a choice Rust refuses is not waited for', async () => {
+  test('a choice Rust refuses is not at work, and is remembered as refused', async () => {
     rust({
       player_set_quality: () => {
         throw 'notAStream';
@@ -442,12 +416,37 @@ describe('choosing a quality', () => {
     play(LINK);
     store.getState().apply(ready(LINK));
 
-    await store.getState().select(option(P720));
+    expect(await store.getState().select(option(P720))).toBe(false);
     expect(store.getState().pending).toBeNull();
+    expect(store.getState().refused).toEqual({ url: LINK, selector: P720 });
     expect(console.warn).toHaveBeenCalledWith('player_set_quality', 'notAStream');
+    // Nothing changed: the quality is whatever Rust said.
+    expect(store.getState().formats?.chosen).toBeNull();
   });
 
-  test('the refusal of an earlier choice does not end the wait for a later one', async () => {
+  test('the next choice forgets a refusal, and a choice that is taken leaves none', async () => {
+    let refuse = true;
+    rust({
+      player_set_quality: () => {
+        if (refuse) throw 'invalid';
+        return null;
+      },
+    });
+    play(LINK);
+    store.getState().apply(ready(LINK));
+
+    await store.getState().select(option(P720));
+    expect(store.getState().refused).toEqual({ url: LINK, selector: P720 });
+
+    refuse = false;
+    const choosing = store.getState().select(option(P1080));
+    // It is forgotten as soon as the next choice is sent.
+    expect(store.getState().refused).toBeNull();
+    expect(await choosing).toBe(true);
+    expect(store.getState().refused).toBeNull();
+  });
+
+  test('the refusal of an earlier choice is not shown when a later one has taken its place', async () => {
     const first = deferred<null>();
     let calls = 0;
     rust({
@@ -462,28 +461,38 @@ describe('choosing a quality', () => {
     const earlier = store.getState().select(option(P720));
     await store.getState().select(option(P1080));
     first.reject('invalid');
-    await earlier;
+    expect(await earlier).toBe(false);
 
-    expect(store.getState().pending).toEqual({ url: LINK, selector: P1080 });
+    expect(store.getState().refused).toBeNull();
+    expect(store.getState().pending).toBeNull();
   });
 
-  test('what is chosen already, or is at work, is not chosen again', async () => {
-    rust({ player_set_quality: () => null });
+  test('what is chosen already, or is being sent, is not chosen again', async () => {
+    const answer = deferred<null>();
+    let calls = 0;
+    rust({
+      player_set_quality: () => {
+        calls += 1;
+        return calls === 1 ? answer.promise : null;
+      },
+    });
     play(LINK);
     store.getState().apply(ready(LINK, P720));
 
-    await store.getState().select(option(P720));
+    expect(await store.getState().select(option(P720))).toBe(false);
     expect(sent('player_set_quality')).toEqual([]);
     expect(store.getState().pending).toBeNull();
 
-    await store.getState().select(option(P1080));
-    await store.getState().select(option(P1080));
+    const choosing = store.getState().select(option(P1080));
+    expect(await store.getState().select(option(P1080))).toBe(false);
     expect(sent('player_set_quality')).toHaveLength(1);
 
-    // Back to what was chosen before is a choice, while the other is at work.
-    await store.getState().select(option(P720));
+    // Back to what was chosen before is a choice, while the other is being sent.
+    const back = store.getState().select(option(P720));
     expect(sent('player_set_quality')).toHaveLength(2);
     expect(store.getState().pending).toEqual({ url: LINK, selector: P720 });
+    answer.resolve(null);
+    await Promise.all([choosing, back]);
   });
 
   test('Automatic is not chosen again either, while it is the quality', async () => {
@@ -491,28 +500,38 @@ describe('choosing a quality', () => {
     play(LINK);
     store.getState().apply(ready(LINK, null));
 
-    await store.getState().select(option(null));
+    expect(await store.getState().select(option(null))).toBe(false);
     expect(sent('player_set_quality')).toEqual([]);
   });
 
   test('nothing is sent while no link plays', async () => {
     rust({ player_set_quality: () => null });
     play('C:\\Videa\\a.mkv');
-    await store.getState().select(option(P720));
+    expect(await store.getState().select(option(P720))).toBe(false);
     expect(sent('player_set_quality')).toEqual([]);
     expect(store.getState().pending).toBeNull();
   });
 
-  test('another link ends the wait of the one before', async () => {
-    rust({ player_set_quality: () => null, stream_formats: () => null });
+  test('another link ends the wait for the one before, and its refusal', async () => {
+    const answer = deferred<null>();
+    rust({ player_set_quality: () => answer.promise, stream_formats: () => null });
     const stop = followStreamPath();
     play(LINK);
     store.getState().apply(ready(LINK));
-    await store.getState().select(option(P720));
+    const choosing = store.getState().select(option(P720));
     expect(store.getState().pending).not.toBeNull();
 
     play(OTHER);
     expect(store.getState().pending).toBeNull();
+
+    // The command returns for a link that no longer plays: it is no refusal of this one.
+    answer.reject('notAStream');
+    expect(await choosing).toBe(false);
+    expect(store.getState().refused).toBeNull();
+
+    store.setState({ refused: { url: OTHER, selector: P720 } });
+    play(LINK);
+    expect(store.getState().refused).toBeNull();
     stop();
   });
 });

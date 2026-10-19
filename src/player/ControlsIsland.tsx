@@ -1,7 +1,7 @@
 /**
  * The big island at the bottom (spec 8.4; key-screens-v2.html, screen 2): the timeline, and under
- * it the volume, previous / play and pause / next, and the buttons for the quality (of a link
- * only), the subtitles, the playlist and fullscreen.
+ * it the volume, previous / play and pause / next, and the buttons for the subtitles, the quality
+ * (of a link only), the playlist and fullscreen, in that order (spec 8.4).
  *
  * - Previous and next work with a playlist; without one they are off.
  * - The subtitles button opens quick settings on its Subtitles tab, the quality button on its
@@ -9,7 +9,9 @@
  *   button shows only while a link plays (an http(s) `path`) and says the quality that plays in a
  *   word (`1080p`, `Auto`). The panels are `panels/`: they stand over the button that opened them,
  *   which they get as their anchor, and are drawn by the island so that they go with it (when the
- *   island goes, the panel is closed, whatever took the island away).
+ *   island goes, the panel is closed, whatever took the island away). Choosing a quality reloads
+ *   the link, which ends the entry that plays and drops this island with it (`PlayerPage`): the
+ *   Quality tab closes the panel itself when Rust has taken the choice.
  * - Fullscreen is mpv's property: the button asks mpv, and Rust switches the window (the UI never
  *   does), so a double click on the video and the key do the same.
  * - It is glass over the video, so it is one of the regions the shader blurs, and the subtitles
@@ -180,6 +182,14 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
           />
         </div>
         <div className={styles.tools}>
+          <ControlButton
+            ref={subtitlesButton}
+            label={t('player.subtitles')}
+            icon={SUBTITLES}
+            popup
+            aria-expanded={subtitlesOpen}
+            onClick={toggleSubtitles}
+          />
           {stream && (
             <ControlButton
               ref={qualityButton}
@@ -190,14 +200,6 @@ export default function ControlsIsland({ hidden = false }: ControlsIslandProps) 
               onClick={toggleQuality}
             />
           )}
-          <ControlButton
-            ref={subtitlesButton}
-            label={t('player.subtitles')}
-            icon={SUBTITLES}
-            popup
-            aria-expanded={subtitlesOpen}
-            onClick={toggleSubtitles}
-          />
           <ControlButton
             ref={playlistButton}
             label={t('panels.playlist')}

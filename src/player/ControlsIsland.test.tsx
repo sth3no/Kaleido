@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 import { initI18n } from '../i18n';
@@ -66,6 +66,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function open(props: PlayerProps = {}) {
@@ -201,9 +202,11 @@ test('the quality tab and button show only for streams', () => {
     usePlayerStore.getState().applyChanges({ path: LINK });
   });
   expect(button('Quality: Auto').textContent).toBe('Auto');
-  // It stands beside the Subtitles button, before it.
+  // Spec 8.4 orders them subtitles, quality, playlist, fullscreen.
   const names = screen.getAllByRole('button').map((one) => one.getAttribute('aria-label'));
-  expect(names.indexOf('Quality: Auto')).toBe(names.indexOf('Subtitles') - 1);
+  expect(names.indexOf('Quality: Auto')).toBe(names.indexOf('Subtitles') + 1);
+  expect(names.indexOf('Playlist')).toBe(names.indexOf('Quality: Auto') + 1);
+  expect(names.indexOf('Fullscreen')).toBe(names.indexOf('Playlist') + 1);
 
   act(() => {
     usePlayerStore.getState().applyChanges({ path: 'C:\\Videa\\b.mkv' });
@@ -290,6 +293,44 @@ test('quick settings open on the Quality tab: the Subtitles button brings the Su
   expect(useUiStore.getState().quickTab).toBe('subtitles');
   expect(button('Subtitles').getAttribute('aria-expanded')).toBe('true');
   expect(button('Quality: Auto').getAttribute('aria-expanded')).toBe('false');
+});
+
+test('choosing a quality closes quick settings: the link reloads, and the button says it once Rust does', async () => {
+  open({ path: LINK });
+  useStreamStore.setState({ formats: formatsOf(null) });
+  render(<ControlsIsland />);
+  fireEvent.click(button('Quality: Auto'));
+
+  fireEvent.click(screen.getByRole('radio', { name: '1080p' }));
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith('player_set_quality', {
+    format: heightSelector(1080),
+  });
+  await waitFor(() => {
+    expect(useUiStore.getState().panel).toBeNull();
+  });
+  expect(screen.queryByRole('radiogroup')).toBeNull();
+  expect(button('Quality: Auto').getAttribute('aria-expanded')).toBe('false');
+
+  act(() => {
+    useStreamStore.getState().apply(formatsOf(heightSelector(1080)));
+  });
+  expect(button('Quality: 1080p').textContent).toBe('1080p');
+});
+
+test('a quality that Rust refuses leaves quick settings open', async () => {
+  open({ path: LINK });
+  useStreamStore.setState({ formats: formatsOf(null) });
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  render(<ControlsIsland />);
+  fireEvent.click(button('Quality: Auto'));
+
+  vi.mocked(invoke).mockRejectedValueOnce('notAStream');
+  fireEvent.click(screen.getByRole('radio', { name: '1080p' }));
+  await waitFor(() => {
+    expect(screen.getByRole('radio', { name: /^1080p/ }).hasAttribute('data-refused')).toBe(true);
+  });
+  expect(useUiStore.getState().panel).toBe('quick-settings');
+  expect(button('Quality: Auto').getAttribute('aria-expanded')).toBe('true');
 });
 
 test('quick settings opened with the quality button give the focus back to it', () => {

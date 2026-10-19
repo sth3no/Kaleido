@@ -10,11 +10,14 @@
  *   load), so the store asks `stream_formats` whenever `path` becomes a link (`followStreamPath`,
  *   which the bridge starts before it asks for the player's state). What is taken from the answer
  *   is not older than the newest event (`version`), as in `pluginsStore`.
- * - `select` sends the choice (`player_set_quality`); the store marks it `pending` until the
- *   `stream:formats` that carries it as `chosen` arrives, or `PENDING_MS` pass, so that the list can
- *   show the choice at work. Rust's `chosen` is what is marked, not the click.
- * - `path` can pass through `null` while a link reloads in place (a quality is changed): the
- *   formats stay then, and are shown only while `path` is the link they belong to.
+ * - `select` sends the choice (`player_set_quality`) and says whether Rust took it. A choice is a
+ *   reload like any open: the entry that plays ends, the player shows its loading title and goes on
+ *   at the same position (Ruling R13), so the choice is `pending` only for the round trip of the
+ *   command, for the list to show it at work. Rust's `chosen` is what is marked, not the click; the
+ *   list shows it when the panel is opened again. A choice Rust refuses is `refused`, for the list
+ *   to say so on that option.
+ * - `path` passes through `null` while a link reloads: the formats stay then, and are shown only
+ *   while `path` is the link they belong to.
  */
 
 import { create } from 'zustand';
@@ -23,9 +26,6 @@ import { playerSetQuality, streamFormats } from '../ipc/commands';
 import type { StreamFormats } from '../ipc/types';
 import { usePlayerStore, type PlayerProps } from '../state/playerStore';
 import type { QualityOption } from './quality';
-
-/** How long a choice is shown at work without Rust confirming it, ms. */
-export const PENDING_MS = 10_000;
 
 const LINK = /^https?:\/\//i;
 
@@ -41,7 +41,7 @@ export function selectStreamUrl(props: PlayerProps): string | null {
   return typeof path === 'string' && LINK.test(path) ? path : null;
 }
 
-/** A choice that was sent and that Rust has not confirmed yet. */
+/** A choice that was sent: the one Rust has not answered yet, or the one it refused. */
 export interface PendingQuality {
   /** The link it was sent for. */
   url: string;
@@ -52,7 +52,10 @@ export interface PendingQuality {
 export interface StreamData {
   /** The latest state of a link taken, which is for the current one while `path` is that link. */
   formats: StreamFormats | null;
+  /** The choice whose command has not returned yet. */
   pending: PendingQuality | null;
+  /** The newest choice Rust refused (`QualityError`), until the next choice or another link. */
+  refused: PendingQuality | null;
   /** Counts the states taken, so that an answer that was asked for earlier does not undo one. */
   version: number;
   /** A `stream:formats` came: taken if it is for the link that plays. */
@@ -61,16 +64,12 @@ export interface StreamData {
   ask: () => Promise<void>;
   /** `path` changed to `url` (a link, or `null` for what is no link). */
   pathChanged: (url: string | null) => void;
-  /** Plays the link in the quality of `option`. */
-  select: (option: QualityOption) => Promise<void>;
-}
-
-/** The timer that ends the pending state; there is one pending choice at a time. */
-let pendingTimer: ReturnType<typeof setTimeout> | undefined;
-
-function stopPendingTimer(): void {
-  clearTimeout(pendingTimer);
-  pendingTimer = undefined;
+  /**
+   * Plays the link in the quality of `option`; resolves with whether Rust took it. A choice that
+   * changes nothing (the quality is that already, or is being sent) and one for what is no link
+   * send nothing and resolve with `false`.
+   */
+  select: (option: QualityOption) => Promise<boolean>;
 }
 
 const currentUrl = (): string | null => selectStreamUrl(usePlayerStore.getState().props);
@@ -78,21 +77,12 @@ const currentUrl = (): string | null => selectStreamUrl(usePlayerStore.getState(
 export const useStreamStore = create<StreamData>()((set, get) => ({
   formats: null,
   pending: null,
+  refused: null,
   version: 0,
 
   apply: (payload) => {
     if (payload.url !== currentUrl()) return;
-    set((state) => {
-      const { pending } = state;
-      const confirmed =
-        pending !== null && pending.url === payload.url && pending.selector === payload.chosen;
-      return {
-        formats: payload,
-        version: state.version + 1,
-        pending: confirmed ? null : pending,
-      };
-    });
-    if (get().pending === null) stopPendingTimer();
+    set((state) => ({ formats: payload, version: state.version + 1 }));
   },
 
   ask: async () => {
@@ -114,36 +104,33 @@ export const useStreamStore = create<StreamData>()((set, get) => ({
     set((state) => ({
       formats: state.formats?.url === url ? state.formats : null,
       pending: state.pending?.url === url ? state.pending : null,
+      refused: state.refused?.url === url ? state.refused : null,
     }));
-    if (get().pending === null) stopPendingTimer();
     void get().ask();
   },
 
   select: async (option) => {
     const url = currentUrl();
-    if (url === null) return;
+    if (url === null) return false;
     const { formats, pending } = get();
     // What the link is set to, or about to be: choosing it again changes nothing.
     const current =
       pending?.url === url ? pending.selector : formats?.url === url ? formats.chosen : null;
-    if (option.selector === current) return;
+    if (option.selector === current) return false;
 
     const mine: PendingQuality = { url, selector: option.selector };
-    const drop = () => {
-      if (get().pending !== mine) return;
-      stopPendingTimer();
-      set({ pending: null });
-    };
-    stopPendingTimer();
-    set({ pending: mine });
-    pendingTimer = setTimeout(drop, PENDING_MS);
+    set({ pending: mine, refused: null });
+    let taken = false;
     try {
       await playerSetQuality(option.selector);
+      taken = true;
     } catch (error) {
-      // `notAStream` or `invalid`: nothing changed, and there is nothing to wait for.
+      // `notAStream` or `invalid`: nothing changed.
       console.warn('player_set_quality', error);
-      drop();
     }
+    // Only the newest choice has a say: a later one has taken the place of this one.
+    if (get().pending === mine) set({ pending: null, refused: taken ? null : mine });
+    return taken;
   },
 }));
 
@@ -154,11 +141,18 @@ export function useStreamFormats(): StreamFormats | null {
   return url !== null && formats?.url === url ? formats : null;
 }
 
-/** The choice of the link that plays that Rust has not confirmed yet, or `null`. */
+/** The choice of the link that plays whose command has not returned yet, or `null`. */
 export function usePendingQuality(): PendingQuality | null {
   const url = usePlayerStore((state) => selectStreamUrl(state.props));
   const pending = useStreamStore((state) => state.pending);
   return url !== null && pending?.url === url ? pending : null;
+}
+
+/** The choice of the link that plays that Rust refused, or `null`. */
+export function useRefusedQuality(): PendingQuality | null {
+  const url = usePlayerStore((state) => selectStreamUrl(state.props));
+  const refused = useStreamStore((state) => state.refused);
+  return url !== null && refused?.url === url ? refused : null;
 }
 
 /**

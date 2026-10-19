@@ -4,8 +4,11 @@
  * (`streams/streamStore.ts`).
  *
  * - Ready: a radio group, "Automatic" first. The one marked is Rust's `chosen` (`null` is
- *   Automatic); a click sends the choice, and the option shows a ring until Rust says the new
- *   `chosen` (or ten seconds pass), with the same words in a live region under the list.
+ *   Automatic). A click sends the choice, and the option shows a ring (with the same words in a
+ *   live region under the list) for the round trip of the command. A choice is a reload like any
+ *   open (Ruling R13): when Rust has taken it, the panel closes at once, the player shows its
+ *   loading title and goes on at the same position, and the panel shows the new quality marked when
+ *   it is opened again. When Rust refuses it the panel stays open and the option says so.
  * - Loading: it says so. Failed: it says why, in the words of the class of the error
  *   (`errors.stream.*`, which the error cards use too); a failure that has no class shows the last
  *   line yt-dlp wrote.
@@ -21,8 +24,14 @@ import { useTranslation } from 'react-i18next';
 
 import type { StreamInfo } from '../ipc/types';
 import Icon, { CHECK } from '../shell/Icon';
-import { qualityOptions } from '../streams/quality';
-import { usePendingQuality, useStreamFormats, useStreamStore } from '../streams/streamStore';
+import { useUiStore } from '../state/uiStore';
+import { qualityOptions, type QualityOption } from '../streams/quality';
+import {
+  usePendingQuality,
+  useRefusedQuality,
+  useStreamFormats,
+  useStreamStore,
+} from '../streams/streamStore';
 import styles from './Panel.module.css';
 import quality from './QualityTab.module.css';
 
@@ -35,6 +44,7 @@ interface QualityListProps {
 function QualityList({ info, chosen }: QualityListProps) {
   const { t } = useTranslation();
   const pending = usePendingQuality();
+  const refused = useRefusedQuality();
   const select = useStreamStore((state) => state.select);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
 
@@ -46,6 +56,14 @@ function QualityList({ info, chosen }: QualityListProps) {
   const marked = options.findIndex((option) => option.selector === chosen);
   // What Tab reaches and the panel opens on: the marked option, or the first.
   const entry = Math.max(0, marked);
+
+  // Rust has taken the choice: the link reloads, so quick settings have nothing more to show.
+  const choose = (option: QualityOption) => {
+    void select(option).then((taken) => {
+      const { panel, setPanel } = useUiStore.getState();
+      if (taken && panel === 'quick-settings') setPanel(null);
+    });
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const index = buttons.current.findIndex((button) => button !== null && button === document.activeElement);
@@ -67,12 +85,14 @@ function QualityList({ info, chosen }: QualityListProps) {
       <div
         role="radiogroup"
         aria-label={t('panels.quality.options')}
+        aria-invalid={refused !== null || undefined}
         className={styles.options}
         onKeyDown={onKeyDown}
       >
         {options.map((option, index) => {
           const isMarked = index === marked;
           const busy = pending !== null && pending.selector === option.selector;
+          const isRefused = refused !== null && refused.selector === option.selector;
           return (
             <button
               key={option.id}
@@ -81,13 +101,14 @@ function QualityList({ info, chosen }: QualityListProps) {
               }}
               type="button"
               role="radio"
-              className={styles.option}
+              className={isRefused ? `${styles.option} ${quality.refused}` : styles.option}
               aria-checked={isMarked}
               aria-busy={busy || undefined}
+              data-refused={isRefused ? '' : undefined}
               tabIndex={index === entry ? 0 : -1}
               data-autofocus={index === entry ? '' : undefined}
               onClick={() => {
-                void select(option);
+                choose(option);
               }}
             >
               <span className={styles.text}>
@@ -95,6 +116,7 @@ function QualityList({ info, chosen }: QualityListProps) {
                 {option.selector === null && (
                   <span className={styles.detail}>{t('panels.quality.autoDetail')}</span>
                 )}
+                {isRefused && <span className={styles.detail}>{t('panels.quality.refused')}</span>}
               </span>
               {busy ? (
                 <span className={quality.spinner} aria-hidden />

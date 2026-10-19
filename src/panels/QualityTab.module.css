@@ -1,6 +1,7 @@
 /*
  * What the Quality tab (QualityTab.tsx) adds to the lists of Panel.module.css: the ring that shows a
- * choice at work, the line under the list that says so, and the reason a probe failed.
+ * choice at work, the line under the list that says so, the edge of an option Rust refused, and the
+ * reason a probe failed.
  */
 
 /* A ring with one bright quarter. With reduced motion it stands still (theme/global.css). */
@@ -18,6 +19,17 @@
 @keyframes spin {
   to {
     rotate: 360deg;
+  }
+}
+
+/* The option whose choice Rust refused: an edge in the colour of an error (its words are the option's detail). */
+.refused[data-refused] {
+  border-color: var(--k-color-danger);
+}
+
+@media (forced-colors: active) {
+  .refused[data-refused] {
+    border-color: CanvasText;
   }
 }
 
