@@ -59,10 +59,10 @@ and `-Unregister` removes the registration. Details:
 `install-local-prototype.ps1`, which this script replaces). The M4 installer replaces both.
 
 Run it yourself, in your own PowerShell window, with Kaleido closed (it refuses to replace a
-running installed player). It writes to your user's registry and to `%LOCALAPPDATA%\Programs\`, and only a
-script that runs in your own Windows session reaches the registration Explorer reads; a sandboxed
-shell's registry and `%APPDATA%` writes do not reach it. The same goes for
-`scripts/diagnose-associations.ps1`, which reads the registration back.
+running installed player). It writes to your user's registry and to `%LOCALAPPDATA%\Programs\`,
+and only a script that runs in your own Windows session reaches the registration Explorer reads;
+what a sandboxed shell writes to the registry, `%APPDATA%` or `%LOCALAPPDATA%` does not reach it.
+The same goes for `scripts/diagnose-associations.ps1`, which reads the registration back.
 
 ## Plugins and essentials
 
@@ -72,11 +72,12 @@ has any. There is no Kaleido plugin API. My plugins lists whatever is in that fo
 plugin off (the script moves to `scripts-disabled\`) or on, uninstalls it (the files go to the
 Recycle Bin and the options stay), and edits its settings. A change to a plugin that is running
 waits for Apply, which restarts mpv's core and carries on with the same playlist, position,
-tracks, pause and volume. `plugins.json` beside `mpv.conf` records what Kaleido installed.
+tracks, pause, volume and speed. `plugins.json` beside `mpv.conf` records what Kaleido installed.
 
 The essentials are the plugins Kaleido installs itself on its first start: thumbfast (the
 timeline previews), sub-select (picks the subtitles by your languages) and reload (reloads a
-stalled stream; `Ctrl+R` does it by hand). Which ones, from which repository and commit, with the
+stalled stream; `Ctrl+R` does it by hand; a link it reloads plays in the default quality, and the
+Quality button says so). Which ones, from which repository and commit, with the
 SHA-256 of every file, the settings My plugins offers for them and the options Kaleido writes
 itself is pinned in one file, `resources/essentials/essentials.json`. The scripts themselves are
 not in git; `scripts/fetch-essentials.ps1` downloads them:
@@ -111,7 +112,8 @@ background (the M4 installer will bring first copies).
   `yt-dlp/yt-dlp`, `yt-dlp/yt-dlp-nightly-builds` and `denoland/deno`, over https and only from
   GitHub's own hosts. A download is used only when its SHA-256 is the one the release lists, and
   it is put in place beside the file that may be running, so a failed or interrupted update leaves
-  the tool as it was.
+  the tool as it was. Every check also reads the SHA-256 of the file in place: one that was
+  replaced or damaged since is downloaded again, so Check now repairs it.
 - **When.** yt-dlp is checked daily, and at once when a link fails because yt-dlp no longer
   understands its site (not more than once in ten minutes); Deno weekly. A check that fails is
   tried again after 1 minute, 5 minutes, 30 minutes and then every 2 hours; offline, a tool that
@@ -120,7 +122,11 @@ background (the M4 installer will bring first copies).
   doing and Check now, and the version of libmpv, which comes with Kaleido. The yt-dlp channel
   there is Stable or Nightly: nightly gets fixes for websites sooner and is less tested. Deno
   has stable releases only.
-- **Limits.** A whole download has 10 minutes. For proxies only the `HTTP_PROXY` and
+- **A link that keeps failing.** The card's "Update and try again" opens the link again only when
+  the update brought something new; otherwise the card says what it found (yt-dlp is already the
+  newest, or Deno is missing) and links to Settings → Updates.
+- **Limits.** A whole download has 10 minutes, doubled after each failed check of the tool up to
+  80 minutes, so a slow line gets there in the end. For proxies only the `HTTP_PROXY` and
   `HTTPS_PROXY` environment variables are used, not Windows' own proxy setting.
 
 ## Test

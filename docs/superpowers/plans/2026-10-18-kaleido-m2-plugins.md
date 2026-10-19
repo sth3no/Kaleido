@@ -960,3 +960,16 @@ Spolehlivé znamení zastaralého extraktoru je dovětek `please report this iss
 - Syntaxe `BROWSER[+KEYRING][:PROFIL][::KONTEJNER]` (KEYRING jen Linux), prohlížeče yt-dlp: `brave, chrome, chromium, edge, firefox, opera, safari, vivaldi, whale`; profil = jméno nebo cesta, výchozí naposled použitý.
 - `ytdl_hook` cookies, které yt-dlp vrátí, předá i mpv (`cookies-file=memory://…`), takže je mají i požadavky přehrávání.
 - Windows: Chromium (`v20`, App-Bound od Chrome 127) → `Failed to decrypt with DPAPI` (issue #10927 zamčené, podpora v20 v kódu není); běžící Chromium → `Could not copy Chrome cookie database` (#7271); obojí je tvrdá chyba celého načtení. Firefox funguje i za běhu. Zda Edge používá App-Bound šifrování, je neověřené (správce yt-dlp v 2024: týká se všech prohlížečů na Chromiu).
+
+## Po závěrečné revizi
+
+Závěrečná revize celé větve (2026-10-19) našla tři mezery plánu; oprava je v kódu a pravidla platí i pro M3 a M4:
+
+- Rozhodnutí 7 neříkalo, že se kontroluje i soubor na disku: součet vydání se porovnával jen se záznamem v `tools.json`, takže nahrazený nebo poškozený nástroj zůstal „aktuální“. Teď každá kontrola přečte SHA-256 souboru (záznam Deno má i součet `deno.exe`) a nesoulad stáhne znovu.
+- Rozhodnutí 10 nepočítalo s přibaleným skriptem reload: jeho Ctrl+R a obnova při zaseknutí načtou položku bez `ytdl-format`. V M2 to UI aspoň řekne pravdivě (Ruling R17).
+- Spec 10.3 mlčí o yt-dlp, který je už nejnovější: „Aktualizovat a zkusit znovu“ se pak točilo dokola. Teď karta řekne, co kontrola našla, a místo tlačítka nabídne Nastavení → Aktualizace.
+
+Dvě poučení pro M3:
+
+- Jednorázová událost, která může přijít dřív, než UI poslouchá (`plugins:error` při startu), potřebuje přehrání ve chvíli, kdy je UI připravené, jako má fronta otevírání.
+- Volby jedné položky odkazu (zvolená kvalita) patří do háku mpv `on_load`, ne do voleb `loadfile` jedné položky, které jiné skripty nepřenesou (navazuje na R17).

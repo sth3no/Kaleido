@@ -70,7 +70,9 @@ Automaticky poběží potom (ručně neopakovat; jak je spustit, říká [README
 
 yt-dlp a Deno jsou Kaleidovy vlastní: leží v `%LOCALAPPDATA%\Kaleido\tools\` (`yt-dlp.exe`,
 `deno.exe`, `tools.json`), stahuje, ověřuje (SHA-256 podle seznamu součtů u vydání) a vyměňuje je
-Rust. yt-dlp z `PATH` Kaleido nepoužije. Soubory v `tools\` upravuj jen se zavřeným Kaleidem.
+Rust. Každá kontrola přečte i SHA-256 souboru na místě: nahrazený nebo poškozený soubor stáhne
+znovu (závěrečná revize I-2). yt-dlp z `PATH` Kaleido nepoužije. Soubory v `tools\` upravuj jen
+se zavřeným Kaleidem.
 
 - [ ] **První start bez nástrojů:** Kaleido zavřít, `%LOCALAPPDATA%\Kaleido\tools` přejmenovat na
   `tools.bak` a Kaleido spustit. Okno běží hned a nic se neptá. V Nastavení → Aktualizace se yt-dlp
@@ -104,14 +106,18 @@ Rust. yt-dlp z `PATH` Kaleido nepoužije. Soubory v `tools\` upravuj jen se zav�
 - [ ] **První start offline, bez nástrojů (rozhodnutí 8):** `tools` přejmenovat na `tools.bak`, síť
   vypnout, Kaleido spustit a vložit odkaz na YouTube. Karta: „yt-dlp, nástroj, který čte webové
   odkazy, ještě není nainstalovaný, nebo se ho nepodařilo stáhnout.“ s tlačítkem „Aktualizovat a
-  zkusit znovu“. V Aktualizacích je yt-dlp „Není nainstalováno“ a „Vyžaduje pozornost“. Zapnout síť
-  a tlačítko stisknout: karta říká „Aktualizuji yt-dlp, pak odkaz zkusím znovu…“, yt-dlp se
-  stáhne a odkaz se přehraje.
-- [ ] **Známé omezení (Task 8): jedno stažení má 10 minut.** Pod asi 70 KB/s (43 MB / 600 s) se zip s
-  Deno nikdy nedokončí; yt-dlp (asi 18 MB) potřebuje jen kolem 30 KB/s. Uživatel to uvidí tak, že
-  Deno zůstane „Vyžaduje pozornost“ s anglickým důvodem (pravděpodobně časový limit) a další pokus
-  přijde po odstupu; yt-dlp při tom může být v pořádku. Kdo má jak omezit rychlost, může to vyzkoušet;
-  jinak jen zapsat „nezkoušeno“.
+  zkusit znovu“. V Aktualizacích je yt-dlp „Není nainstalováno“ a „Vyžaduje pozornost“. Tlačítko
+  stisknout ještě bez sítě: karta zůstane s větou „yt-dlp se nepodařilo aktualizovat.“ a anglickým
+  důvodem, tlačítko zůstane a přibude „Nastavení → Aktualizace“ (závěrečná revize I-1). Zapnout
+  síť a tlačítko stisknout znovu: karta říká „Aktualizuji yt-dlp, pak odkaz zkusím znovu…“, yt-dlp
+  se stáhne a odkaz se přehraje.
+- [ ] **Pomalá linka: čas na stažení roste (závěrečná revize, menší bod 5).** Jedno stažení
+  nástroje má napoprvé 10 minut, po každé neúspěšné kontrole téhož nástroje dvakrát víc, nejvýš 80
+  minut (10, 20, 40, 80). Pod asi 70 KB/s (43 MB / 600 s) se zip s Deno napoprvé nedokončí; Deno
+  zůstane „Vyžaduje pozornost“ s anglickým důvodem (pravděpodobně časový limit), ale další pokus po
+  odstupu má víc času, takže se zip na lince od asi 10 KB/s nakonec stáhne. Každý přerušený pokus
+  stáhne část zipu zbytečně. Kdo má jak omezit rychlost, může to vyzkoušet; jinak jen zapsat
+  „nezkoušeno“.
 - [ ] **Známé omezení (Task 8): jen proměnné `HTTP_PROXY` a `HTTPS_PROXY`.** Kaleido nečte proxy
   nastavenou jen ve Windows (Nastavení → Síť a internet → Proxy). Za takovou proxy zůstanou nástroje
   offline: Aktualizace ukážou „Vyžaduje pozornost“ a „Zkontrolovat teď“ to nezmění. Obejít to jde
@@ -126,8 +132,9 @@ Rust. yt-dlp z `PATH` Kaleido nepoužije. Soubory v `tools\` upravuj jen se zav�
 - [ ] **Před Deno a po něm:** hned po „První start bez nástrojů“, dokud u Deno není „Aktuální“, vlož
   odkaz na YouTube a podívej se do záložky Kvalita: YouTube bez Deno jen tiše nabídne méně formátů
   (Kaleido to nehlásí). Až je Deno „Aktuální“, vlož odkaz znovu, bez restartu Kaleida: Kaleido pošle
-  běžícímu přehrávači cestu k Deno, takže kvalit je víc. Zapsat, co jsi viděl; rozdíl může být
-  malý, podle videa a podle toho, co YouTube právě dělá.
+  běžícímu přehrávači cestu k Deno a znovu vložený odkaz se yt-dlp zeptá znovu (záložka ukáže
+  „Načítám kvality…“; závěrečná revize, menší bod 1), takže kvalit je víc. Zapsat, co jsi viděl;
+  rozdíl může být malý, podle videa a podle toho, co YouTube právě dělá.
 
 ### Kvalita streamů (Task 12, 15 a 17, Ruling R13)
 
@@ -148,10 +155,19 @@ Rust. yt-dlp z `PATH` Kaleido nepoužije. Soubory v `tools\` upravuj jen se zav�
   volbě a mezerník i šipky pak mají dělat to, co v přehrávači.
 - [ ] **Dvě volby rychle za sebou (R13):** vybrat kvalitu, panel hned znovu otevřít a vybrat jinou.
   Platí poslední volba, playlist nemá zdvojenou ani zbylou položku a pozice neuskočila daleko.
+  Přijde-li druhá volba dřív, než se první načetla, Kaleido ji nenačte; tlačítko a záložka pak
+  ukážou tu kvalitu, se kterou položka opravdu hraje, ne druhou volbu (Task 12, závěrečná revize
+  I-4). Zapsat, kterou ukázaly.
 - [ ] **Zpět na Automaticky** vrátí výchozí kvalitu z Nastavení.
 - [ ] **Znovu otevřený odkaz (Ruling R12):** zvolit pro odkaz jinou kvalitu a vložit stejný odkaz
-  znovu: hraje ve výchozí kvalitě, ne ve zvolené. Naopak Použít v Moje pluginy (restart jádra) uprostřed
-  téhož odkazu zachová zvolenou kvalitu.
+  znovu: hraje ve výchozí kvalitě, ne ve zvolené, a záložka se yt-dlp zeptá znovu („Načítám
+  kvality…“). Naopak Použít v Moje pluginy (restart jádra) uprostřed téhož odkazu zachová zvolenou
+  kvalitu a tlačítko ji pořád ukazuje.
+- [ ] **Ctrl+R a zaseknutí po volbě kvality (Ruling R17):** zvolit 480p, pak stisknout `Ctrl+R`
+  (essential reload načte položku znovu). Do M3 reload zvolenou kvalitu nepřenese: odkaz hraje ve
+  výchozí kvalitě a tlačítko to **říká** („Kvalita: Auto“, v záložce je označené Automaticky), ne
+  „480p“. Totéž po samovolném znovunačtení při zaseknutí (viz reload v Essentials v praxi). Kvalitu
+  jde zvolit znovu. Zapsat, jestli tlačítko někdy ukázalo kvalitu, se kterou odkaz nehrál.
 - [ ] **Výchozí kvalita (Task 17):** Nastavení → Přehrávání → Výchozí kvalita streamů nabízí
   Nejlepší, 2160p, 1440p, 1080p, 720p, 480p a Jen zvuk; hint říká „Platí pro odkazy otevřené od
   teď.“ S 480p odkaz otevřený potom hraje ve 480p (štítek v titulním ostrůvku) a záložka Kvalita u
@@ -184,48 +200,57 @@ nebo odkaz se nepodařilo otevřít…“ (pak řádky přišly pozdě; úryvek 
   na chvíli být „Vyžaduje pozornost“ s důvodem, že soubor zmizel: kontrola, kterou nikdo nevynutil,
   ho napoprvé nestáhne, jen zapíše selhání a počká (Ruling R10; antivirus, který ho pořád odnáší,
   se tak nezahltí stahováním). Tlačítko na kartě kontrolu vynutí.
-- [ ] **`yt-dlp.exe` nahrazený starou verzí, `tools.json` beze změny (varianta B):** Kaleido
-  zavřít. Současný `tools\yt-dlp.exe` odložit (třeba přejmenovat na `yt-dlp.new`) a na jeho místo
-  dát starý `yt-dlp.exe`. `tools.json` nechat, jak je, jen se podívat na `checkedAt` u `ytDlp`:
-  má být z posledních 24 hodin, ale starší než pár minut (jinak ho přepsat na čas před hodinou, v
-  UTC, tvaru `RRRR-MM-DDThh:mm:ssZ`), aby se při startu neudělala plánovaná kontrola. Kaleido pozná
-  „novou verzi“ podle součtu zapsaného v `tools.json`, ne podle samotného souboru. Tady se součet
-  shoduje s vydáním, takže žádná kontrola nic nestáhne, jen přepíše `checkedAt`, a starý soubor
-  zůstane na místě. Aktualizace přitom říkají „Aktuální“ a ukazují zapsanou novou verzi, ne verzi
-  souboru. Spustit Kaleido čerstvě (hlídání deseti minut níže se počítá od prvního takového selhání
-  v tomto běhu) a vložit odkaz na YouTube: karta „yt-dlp už tomuto webu nerozumí. Novější yt-dlp by
-  mohl.“ s „Aktualizovat a zkusit znovu“. **Každý odkaz na YouTube teď selže takto**, dokud se
-  soubor nevymění. Kaleido první takovou chybu za běh sám zkontroluje na pozadí; kontrola nic
-  nenajde, a „Zkontrolováno“ u yt-dlp v Nastavení → Aktualizace se přepne na „nyní“. Selže-li starý
-  yt-dlp jinak (třeba „Tento web vyžaduje přihlášení.“), zapsat jak a řádek z `mpv.log`.
-- [ ] **Kontrola při chybě nejvýš jednou za 10 minut (Ruling R11), ve variantě B:** před prvním
-  odkazem si přečíst „Zkontrolováno“ u yt-dlp v Aktualizacích (třeba „před N hodinami“); po prvním
-  selhání je „nyní“. Za dvě tři minuty (Aktualizace otevřít znovu: „před N minutami“) vložit další
-  odkaz, který selže: „Zkontrolováno“ se **nezmění**, protože druhá chyba do deseti minut novou
-  kontrolu sama nespustí (a plánovaná kontrola splatná není). Víc než deset minut po první chybě
-  další selhání kontrolu zase spustí a „Zkontrolováno“ je znovu „nyní“. Tlačítko na kartě kontrolu
-  vynutí kdykoli, takže po jeho stisku je „nyní“ vždycky.
-- [ ] **Tlačítko na kartě ve variantě B:** „Aktualizovat a zkusit znovu“ na kartě zastaralého yt-dlp:
-  karta říká „Aktualizuji yt-dlp, pak odkaz zkusím znovu…“, vynucená kontrola nenajde nic nového a
-  nic nestáhne („Zkontrolováno“ je „nyní“), karta se zavře (odkaz je předán přehrávači) a odkaz
-  selže stejně, takže přijde nová karta téže třídy. Tlačítko tu starý soubor opravit neumí; to
-  ukazuje varianta A níže.
-- [ ] **Dvě karty zastaralého yt-dlp najednou (Task 16), ve variantě B:** dva odkazy na YouTube za
-  sebou, aby byly otevřené dvě karty (ukazatel nad kartou ji drží, takže 8 s netlačí), a na obou
-  hned stisknout „Aktualizovat a zkusit znovu“. Rust nespustí dvě kontroly zároveň (druhý požadavek
-  počká na běžící kontrolu), obě tlačítka dokončí, žádná karta nehlásí spor a oba odkazy se
-  zkusí znovu; zapsat, kolik nových karet přišlo. Ve variantě B se nic nestahuje: jedno stahování v
-  Aktualizacích ukáže jen varianta A, a to jen když stisk stihneš dřív, než kontrola vyvolaná
-  první chybou soubor vymění.
-- [ ] **`yt-dlp.exe` nahrazený starou verzí, změněný součet (varianta A):** po variantě B (starý
-  soubor je už na místě) Kaleido zavřít a v `tools.json` u `ytDlp` změnit v `sha256` jeden znak
-  (`checkedAt` nechat z posledních 24 hodin). Samostatně: totéž plus výměna souboru jako ve
-  variantě B. Kaleido spustit a vložit odkaz na YouTube: karta „yt-dlp už tomuto webu nerozumí.
-  Novější yt-dlp by mohl.“ První takovou chybu za běh Kaleido zkontroluje sám na pozadí, tentokrát
-  se součet liší, a tak se v Aktualizacích krátce ukáže stahování a `yt-dlp.exe` se vymění;
-  tlačítko na kartě na tu kontrolu počká (nebo ji vynutí) a odkaz **přehraje**. Po tomhle je
-  yt-dlp zase aktuální a zapsaný součet sedí. (Odložený `yt-dlp.new` z varianty B už není
-  potřeba.)
+- [ ] **Nahrazený nebo poškozený `yt-dlp.exe` (varianta B, závěrečná revize I-2):** Kaleido zavřít.
+  Současný `tools\yt-dlp.exe` odložit (třeba přejmenovat na `yt-dlp.new`) a na jeho místo dát starý
+  `yt-dlp.exe`; `tools.json` nechat, jak je. Kaleido spustit: Aktualizace pořád říkají „Aktuální“ se
+  zapsanou verzí, soubor se čte až při kontrole. Stisknout u yt-dlp „Zkontrolovat teď“: kontrola
+  přečte SHA-256 souboru, pozná, že to není ten, který Kaleido dal na místo, a stáhne yt-dlp znovu
+  („Stahuji novou verzi…“, pak „Aktuální“). `yt-dlp.exe` má nový čas změny a odkaz na YouTube
+  hraje. Totéž s poškozeným souborem (na místo `yt-dlp.exe` dát třeba kopii `tools.json` pod tím
+  jménem). Bez stisku to udělá první kontrola, která přijde sama (denní, nebo ta po chybě odkazu),
+  a stejně tak „Aktualizovat a zkusit znovu“ na kartě odkazu, který se starým souborem selhal: yt-dlp
+  stáhne a odkaz přehraje. Odložený `yt-dlp.new` pak smazat.
+- [ ] **Jiný součet v `tools.json` (varianta A):** Kaleido zavřít a v `tools.json` u `ytDlp` změnit v
+  `sha256` jednu číslici nebo písmeno za jiné (ne jen velikost písmene, tu Kaleido nerozlišuje).
+  Kaleido spustit a stisknout „Zkontrolovat teď“: zapsaný součet nesedí se souborem, a tak se
+  `yt-dlp.exe` stáhne znovu a zapsaný součet je zase ten z vydání.
+- [ ] **Zastaralý yt-dlp, a nic nového (závěrečná revize I-1):** chybu třídy „zastaralý yt-dlp“ jde
+  spolehlivě vyvolat formátem, který žádné video nemá: yt-dlp pak píše „Requested format is not
+  available“ a Rust to třídí jako zastaralý extraktor (`player/stream_error.rs`). Kaleido zavřít, do
+  `%APPDATA%\Kaleido\mpv.conf` dát řádek `ytdl-format=bestvideo[height=12345]` a Kaleido spustit;
+  Deno musí být „Aktuální“ (jinak karta řekne větu o Deno, viz níže). Vložit odkaz na YouTube: karta
+  „yt-dlp už tomuto webu nerozumí. Novější yt-dlp by mohl.“ s „Aktualizovat a zkusit znovu“.
+  Stisknout: karta řekne „Aktualizuji yt-dlp, pak odkaz zkusím znovu…“, vynucená kontrola nic
+  nestáhne („Zkontrolováno nyní“) a karta **zůstane** s větou „yt-dlp <verze> je už nejnovější. Web
+  se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní. Kanál Nightly (Nastavení →
+  Aktualizace) ji často mívá dřív.“ Tlačítko aktualizace zmizí (fokus, který mělo, přejde na odkaz)
+  a místo něj je „Nastavení → Aktualizace“: zavře kartu a otevře Nastavení rovnou na Aktualizacích.
+  Odkaz se znovu nezkusí, takže nová karta nepřijde. Platí, jen dokud je nainstalovaný yt-dlp
+  nejnovější ve svém kanálu: vyjde-li mezitím nový, kontrola ho stáhne, odkaz se zkusí znovu, selže
+  kvůli formátu a přijde nová karta. Karta nepozná, že příčinou je tvůj formát (`mpv.conf` se tu
+  nečte). Řádek nech v `mpv.conf` pro kroky níže (Nightly, deset minut, dvě karty, bez Deno) a pak
+  ho odeber.
+- [ ] **Totéž na Nightly:** Nastavení → Aktualizace → Kanál yt-dlp → Nightly (stáhne se nightly) a
+  krok zopakovat: věta je stejná, jen bez věty o kanálu Nightly. Pak zpět na Stabilní.
+- [ ] **Kontrola při chybě nejvýš jednou za 10 minut (Ruling R11):** s řádkem v `mpv.conf`. Kaleido
+  spustit čerstvě (deset minut se počítá od první takové chyby v tomto běhu) a počkat, až u yt-dlp v
+  Aktualizacích není „nyní“, ale „před N minutami“ nebo „před N hodinami“ (kontrola při startu, byla-li
+  splatná, je hotová). Teprve pak vložit odkaz na YouTube: po selhání je „Zkontrolováno nyní“, protože
+  Kaleido první takovou chybu za běh zkontroluje sám na pozadí. Kartu zavřít (Zavřít, ne
+  aktualizovat). Za dvě tři minuty (Aktualizace: „před N minutami“) vložit odkaz znovu: selže stejně
+  a „Zkontrolováno“ se **nevrátí na „nyní“**: druhá chyba do deseti minut novou kontrolu sama
+  nespustí. Víc než deset minut po první chybě ji další selhání spustí zase („nyní“). Tlačítko na
+  kartě kontrolu vynutí kdykoli.
+- [ ] **Dvě karty najednou (Task 16):** s řádkem v `mpv.conf` dva odkazy na YouTube za sebou, aby byly
+  otevřené dvě karty (ukazatel nad kartou ji drží, takže 8 s netlačí), a na obou hned stisknout
+  „Aktualizovat a zkusit znovu“. Rust nespustí dvě kontroly zároveň (druhý požadavek počká na
+  běžící), obě tlačítka dokončí, žádná karta nehlásí spor, obě karty zůstanou s větou „je už
+  nejnovější“, nic se nestáhne a žádná nová karta nepřijde.
+- [ ] **Bez Deno (závěrečná revize I-1):** odkaz na YouTube, který selže jako zastaralý (formát výše),
+  když se Deno nepodaří stáhnout: karta řekne „Tento odkaz potřebuje Deno, které yt-dlp používá pro
+  YouTube, a Deno není připravené.“ s anglickým důvodem; „Aktualizovat a zkusit znovu“ zůstane a
+  zkusí stáhnout i Deno, „Nastavení → Aktualizace“ přibude. Vyvolat to jde jen tak, že se zablokuje
+  stahování Deno a nic jiného; bez toho zapsat „nezkoušeno“ (pokrývá to test karty).
 
 ### Cookies z prohlížeče (Task 11, 16 a 17)
 
@@ -287,11 +312,12 @@ Stránka je v liště mezi Přehrávačem a Nastavením. Plugin je obyčejný sk
   Použít plugin ještě běží (vypnutý thumbfast pořád ukazuje náhledy).
 - [ ] **Použít uprostřed filmu (Task 6):** přehrávat složku se třemi videi. Přejít na druhé, přetočit
   na asi 1:00, v Titulky načíst externí titulky ze souboru a vybrat je, vybrat jinou zvukovou stopu
-  (soubor mkv se dvěma), hlasitost 40, ztlumit (`m`) a pozastavit. Na Moje pluginy vypnout plugin a
-  stisknout Použít. Lišta říká „Restartuji přehrávač…“ a tlačítko „Používám…“ (nic se nedá měnit);
-  asi za vteřinu lišta zmizí a fokus se vrátí na nadpis stránky. Zpět v přehrávači je to, jak to
-  bylo: stejný playlist (druhá položka aktuální), pozice (o vteřinu dvě vedle), pauza, obě vybrané
-  stopy včetně externích titulků, hlasitost 40 a ztlumení. **Sledovat dvě věci:**
+  (soubor mkv se dvěma), hlasitost 40, ztlumit (`m`), rychlost 2× (`}`) a pozastavit. Na Moje
+  pluginy vypnout plugin a stisknout Použít. Lišta říká „Restartuji přehrávač…“ a tlačítko
+  „Používám…“ (nic se nedá měnit); asi za vteřinu lišta zmizí a fokus se vrátí na nadpis stránky.
+  Zpět v přehrávači je to, jak to bylo: stejný playlist (druhá položka aktuální), pozice (o vteřinu
+  dvě vedle), pauza, obě vybrané stopy včetně externích titulků, hlasitost 40, ztlumení a rychlost
+  2× (závěrečná revize, menší bod 4). **Sledovat dvě věci:**
   - V mini přehrávači (video hraje v rohu stránky) při Použít: nebliká, nebo se schová a ukáže znovu?
     Nové jádro nejdřív hlásí prázdný playlist a nečinnost, stránka to má brát jako restart, ne jako
     zastavení.
@@ -330,11 +356,11 @@ Stránka je v liště mezi Přehrávačem a Nastavením. Plugin je obyčejný sk
 - [ ] **Kopie bez voleb Kaleida (Task 5):** essential odinstalovat (Koš), v `script-opts` smazat
   `thumbfast.conf`, dát do `scripts\` jen vlastní `thumbfast.lua` a Kaleido restartovat. Kaleido pro
   vlastní kopii nezapíše nic (volby spravuje jen u svého essentialu), takže má výchozí `mpv_path=mpv`.
-  S tím se thumbfast na Windows nejdřív zeptá mpv na vlastnost `user-data/frontend/process-path`;
-  Kaleido ji nenastavuje, takže může zkusit spustit `Kaleido.exe`, nebo nenajde žádné `mpv` a
-  náhledy nebudou. Najet na lištu a zapsat, co se děje (náhledy chybí? druhé okno nebo proces
-  `Kaleido.exe` navíc? karta chyby?). Potom vlastní kopii smazat a nechat Obnovit essentials, které
-  `thumbfast.conf` zapíše znovu.
+  Vlastnost `user-data/frontend/process-path` thumbfast na Windows použije, jen když je nastavená, a
+  Kaleido ani libmpv ji nenastavují. Vlastní thumbfast proto spustí `mpv` z `PATH` (náhledy bez
+  Kaleidova HDR přepisu), a když žádné není, náhledy nebudou. `Kaleido.exe` nespustí nikdy. Najet
+  na lištu a zapsat, co se děje (náhledy, nebo žádné; karta chyby?). Potom vlastní kopii smazat a
+  nechat Obnovit essentials, které `thumbfast.conf` zapíše znovu.
 - [ ] **Vlastní `script-opts` v mpv.conf přebíjí Kaleido (rozhodnutí 2, Task 5):** do `mpv.conf`
   (mimo blok Kaleida) dát `script-opts=thumbfast-max_height=100` a Kaleido restartovat. Náhledy
   fungují dál (ostatní volby jsou Kaleidovy) a jsou nejvýš 100 px vysoké: tvoje hodnota vyhrává nad
@@ -356,9 +382,9 @@ Stránka je v liště mezi Přehrávačem a Nastavením. Plugin je obyčejný sk
   (`mp.register_event("file-loaded", function() mp.msg.error("zkušební chyba za běhu") end)`).
   - Po spuštění Kaleida: na Moje pluginy má `chyba-start.lua` štítek „Hlásí chyby: 1“, který po
     stisknutí rozbalí log pluginu („Chyby pluginu chyba-start.lua“) s řádkem chyby a po dalším
-    stisknutí ho zase sbalí. **Karta se neukázala.** To je známé omezení: událost o první chybě
-    pluginu se pošle jednou, ještě než stránka poslouchá, takže plugin, který chybuje už při
-    startu jádra, má štítek a log, ale ne kartu.
+    stisknutí ho zase sbalí. **Karta přijde i tak** (závěrečná revize I-3): událost o první chybě
+    pluginu se poslala, ještě než UI poslouchalo, a karty se proto po startu UI zeptají na pluginy,
+    které hlásí chyby. `chyba-start.lua` dostane kartu jednou, hned po startu; zapsat, jestli přišla.
   - Otevřít video: `chyba-beh.lua` chybuje až za běhu, a tak **karta přijde**: „Plugin chyba-beh.lua
     hlásí chyby“, „Dál běží. Kaleido sám nic nevypíná.“ a „Vypnout“. Vypnout: „chyba-beh.lua je
     vypnutý. Změna se projeví po Použít.“ a odkaz „Moje pluginy“ otevře stránku. Plugin běží až do
@@ -459,6 +485,34 @@ dohraješ, v pořadí z [README.md](../../README.md) (`cargo fmt --all --check`,
 - `the_newest_firefox_fork_profile_wins`: případ shody (Task 11).
 - `src/settings/SettingsPage.test.tsx`: jeho očekávání se v Task 17 upravovala rukou, takže když
   vitest selže, dívat se nejdřív tam.
+- Testy závěrečné opravy (taky nikdy neběžely):
+  - nástroje (dočasná složka, falešný web): `a_file_that_is_not_the_one_put_in_place_is_downloaded_again`,
+    `a_download_after_failed_checks_has_more_time`,
+    `a_link_update_says_what_was_put_in_place_since_the_link_failed`, `deno_is_needed_for_youtube_links`;
+    upravené `the_same_checksum_downloads_nothing` (vynucená kontrola se ptá na verzi),
+    `offline_keeps_the_installed_tool_and_backs_off`, `deno_comes_out_of_its_zip`; k tomu
+    `tools_json_round_trips_and_keeps_unknown_keys` (`exeSha256`), `a_file_is_hashed_as_its_bytes`
+    (checksum.rs) a `the_large_timeout_grows_with_the_failures` (http.rs);
+  - `commands.rs`: `a_failed_link_keeps_the_installs_of_its_failure`,
+    `a_retry_without_the_tools_updates_nothing`;
+  - streams.rs bez libmpv: `a_link_opened_again_plays_the_default_quality_and_is_asked_again`,
+    `an_entry_kaleido_did_not_load_with_the_choice_plays_the_default`,
+    `a_pick_that_loads_nothing_goes_back_to_what_plays`, `a_link_appended_while_it_plays_keeps_what_plays`,
+    `a_restart_knows_the_entries_it_loaded_with_the_choice`; se skutečnou libmpv
+    `changing_quality_keeps_the_playlist_and_the_position` (id nové položky) a
+    `a_second_change_while_the_first_loads_keeps_the_position`;
+  - ytdlp.rs: `an_unknown_codec_is_not_no_stream` a `formats_keep_what_the_quality_list_needs` (kodek
+    nesprávného typu je teď neznámý, `""`);
+  - restart s rychlostí: `restore_commands_play_the_current_entry_with_its_options`,
+    `an_idle_player_gets_its_volume_back_and_nothing_else` a se skutečnou libmpv
+    `restart_resumes_the_playlist_where_it_was`;
+  - kontrakt: `ipc_fixtures_match_serde` a `src/ipc/contract.test.ts` (nové `returns.stream_retry.json`,
+    formát HLS s neznámými kodeky);
+  - vitest: `StreamErrorCard.test.tsx` (blok „an update that finds nothing new“), `PluginNotice.test.tsx`
+    (blok „a plugin that broke before the UI listened“), `noticeStore.test.ts`, `uiStore.test.ts`,
+    `SettingsPage.test.tsx` (sekce, o kterou požádá karta), `formats.test.ts`, `problem.test.ts`,
+    `PluginsPage.test.tsx` a `PluginSettings.test.tsx` (Io s větou v jazyce UI), `ErrorCard.test.tsx` a
+    `App.test.tsx` (karty se při připojení ptají na `plugins_list`).
 - **Předem varovat:** tyto testy vkládají malé zástupné soubory do skutečného Koše Windows:
   `uninstalling_an_essential_remembers_it`, `every_script_has_a_name_of_its_own` a
   `the_recycle_bin_takes_files_and_folders`. Po průchodu je z Koše vysypej, nebo je tam nech.
