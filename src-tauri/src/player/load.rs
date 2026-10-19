@@ -301,14 +301,9 @@ pub fn link_from_text(text: &str) -> Option<Url> {
     http_url(text)
 }
 
-/// Checks every source in `raw` and queues the valid ones on the engine; the others come back
-/// as issues and do not keep the rest from opening. Looks at the disk, never waits for mpv.
-pub fn open_sources(
-    engine: &Engine,
-    raw: &[String],
-    mode: LoadMode,
-    cwd: &Path,
-) -> Result<(), Vec<LoadIssue>> {
+/// Checks every source in `raw` ([`parse_source`]): the valid ones, and an issue for each of the
+/// others, both in order. Looks at the disk.
+pub fn parse_sources(raw: &[String], cwd: &Path) -> (Vec<Source>, Vec<LoadIssue>) {
     let mut sources = Vec::new();
     let mut issues = Vec::new();
     for text in raw {
@@ -320,6 +315,20 @@ pub fn open_sources(
             }),
         }
     }
+    (sources, issues)
+}
+
+/// Checks every source in `raw` and queues the valid ones on the engine; the others come back
+/// as issues and do not keep the rest from opening. Looks at the disk, never waits for mpv. The
+/// player's own way, which the tests use: the app opens through `system::open_on_player`, which
+/// tells the rest of Kaleido first (Ruling R12).
+pub fn open_sources(
+    engine: &Engine,
+    raw: &[String],
+    mode: LoadMode,
+    cwd: &Path,
+) -> Result<(), Vec<LoadIssue>> {
+    let (sources, issues) = parse_sources(raw, cwd);
     open_checked(engine, &sources, mode, &ValidatedOptions::default());
     if issues.is_empty() {
         Ok(())
@@ -331,7 +340,8 @@ pub fn open_sources(
 /// Queues `sources`, which [`parse_source`] has accepted, on the engine, as [`open_sources`]
 /// does; `opts` go with the first one. For the open requests that check their sources
 /// themselves (`system`: command line, dialog, paste, drop); the command line checked its
-/// options when it read them (`system::cli`).
+/// options when it read them (`system::cli`). The app calls it only through
+/// `system::open_on_player`.
 pub fn open_checked(engine: &Engine, sources: &[Source], mode: LoadMode, opts: &ValidatedOptions) {
     let commands = load_commands(sources, mode, opts);
     match mode {

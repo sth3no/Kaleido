@@ -11,6 +11,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
+use crate::player::load::ValidatedOptions;
 use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand, Request};
 use crate::plugins::{self, PluginError, PluginSettings, Plugins, PluginsState};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
@@ -52,17 +53,25 @@ pub fn player_input(engine: State<'_, Engine>, event: InputEvent) {
 }
 
 /// Opens files and links. A source that cannot be opened is reported and the others open.
-/// Asynchronous, so that looking for the files (a network share may answer slowly) does not
-/// hold up the main thread.
+/// Through the app's one way to the player (`system::open_on_player`: a link opened again plays in
+/// the default quality). Asynchronous, so that looking for the files (a network share may answer
+/// slowly) does not hold up the main thread.
 #[tauri::command]
 pub async fn player_load(
+    app: AppHandle,
     engine: State<'_, Engine>,
     sources: Vec<String>,
     mode: LoadMode,
 ) -> Result<(), Vec<LoadIssue>> {
     // Relative to where Kaleido runs, as for a command line.
     let cwd = std::env::current_dir().unwrap_or_default();
-    player::open_sources(&engine, &sources, mode, &cwd)
+    let (sources, issues) = player::load::parse_sources(&sources, &cwd);
+    system::open_on_player(&app, &engine, &sources, mode, &ValidatedOptions::default());
+    if issues.is_empty() {
+        Ok(())
+    } else {
+        Err(issues)
+    }
 }
 
 /// The UI listens to the player's events now: what was opened before plays, and the UI gets

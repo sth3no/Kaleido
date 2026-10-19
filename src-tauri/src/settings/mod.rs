@@ -229,10 +229,16 @@ fn read_mpv_conf(config_dir: &Path) -> MpvConf {
     }
 }
 
+/// The managed options whose value in the player is not the setting's, so they are read from
+/// mpv.conf only (`None` where mpv.conf has none): while a link plays that was loaded again with a
+/// quality chosen for it (`streams`), the player's `ytdl-format` is that link's per-file one, not
+/// the default quality of the settings.
+const FROM_MPV_CONF_ONLY: &[&str] = &["ytdl-format"];
+
 /// Every key of [`MPV_SETTINGS`] with its value: from mpv.conf's main section where it is set
-/// there, else the player's current value (`None` if mpv has none), numbers in the short form
-/// mpv.conf has them in. The glass shader is not the user's and never shows in
-/// `glsl-shaders`. Waits for mpv, so not on the main thread.
+/// there, else the player's current value (`None` if mpv has none; always `None` for the keys of
+/// [`FROM_MPV_CONF_ONLY`]), numbers in the short form mpv.conf has them in. The glass shader is not
+/// the user's and never shows in `glsl-shaders`. Waits for mpv, so not on the main thread.
 pub fn get_mpv(
     engine: &Engine,
     config_dir: &Path,
@@ -245,6 +251,9 @@ pub fn get_mpv(
         match conf.get(setting.key) {
             Some(value) => {
                 values.insert(setting.key.to_owned(), Some(value));
+            }
+            None if FROM_MPV_CONF_ONLY.contains(&setting.key) => {
+                values.insert(setting.key.to_owned(), None);
             }
             None => missing.push(setting),
         }
@@ -851,6 +860,49 @@ mod tests {
 
     fn property(engine: &Engine, name: &'static str) -> String {
         engine.call(move |mpv| mpv.get_string(name).unwrap())
+    }
+
+    /// The default quality of links is mpv.conf's only: the player's `ytdl-format` is the per-file
+    /// one of a link loaded with a chosen quality while it plays (`streams`), and must never pass
+    /// for the setting. Set, it reaches mpv.conf and the player (for the next link); taken out, it
+    /// is none again. Needs a real libmpv.
+    #[test]
+    fn the_default_stream_quality_is_mpv_confs_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let (engine, glass) = real(&paths);
+        let presets = mpv_keys::STREAM_QUALITY_PRESETS;
+        // As the per-file value of a reloaded link shows while it plays.
+        engine.command(&["set", "ytdl-format", presets[3]]);
+        assert_eq!(property(&engine, "ytdl-format"), presets[3]);
+        let values = get_mpv(&engine, &paths.config_dir, glass.shader());
+        assert_eq!(values["ytdl-format"], None, "not the player's");
+        assert_eq!(values.len(), MPV_SETTINGS.len());
+
+        set_mpv(
+            &engine,
+            &glass,
+            &paths.config_dir,
+            "ytdl-format",
+            Some(presets[2]),
+        )
+        .unwrap();
+        assert!(
+            mpv_conf(&paths)
+                .lines()
+                .any(|line| line == format!("ytdl-format={}", presets[2])),
+            "{}",
+            mpv_conf(&paths)
+        );
+        assert_eq!(property(&engine, "ytdl-format"), presets[2], "live");
+        let values = get_mpv(&engine, &paths.config_dir, glass.shader());
+        assert_eq!(values["ytdl-format"].as_deref(), Some(presets[2]));
+
+        set_mpv(&engine, &glass, &paths.config_dir, "ytdl-format", None).unwrap();
+        assert!(!mpv_conf(&paths).contains("ytdl-format"));
+        engine.command(&["set", "ytdl-format", presets[5]]);
+        let values = get_mpv(&engine, &paths.config_dir, glass.shader());
+        assert_eq!(values["ytdl-format"], None);
     }
 
     #[test]

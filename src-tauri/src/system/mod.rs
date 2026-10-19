@@ -1,7 +1,8 @@
 //! How files and links reach the player from outside and from the UI (spec 9.2, 9.3): the
 //! command line, later launches, the open dialog, the clipboard and drag and drop. They all go
-//! through one [`OpenQueue`] and are played by the same `player::load::open_checked`. The browsers
-//! whose cookies yt-dlp can use for links are found by [`browsers`].
+//! through one [`OpenQueue`] and, like the UI's `player_load`, reach the player through
+//! [`open_on_player`]. The browsers whose cookies yt-dlp can use for links are found by
+//! [`browsers`].
 
 pub mod browsers;
 pub mod cli;
@@ -26,8 +27,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::player::{self, Engine};
+use crate::player::load::{Source, ValidatedOptions};
+use crate::player::{self, Engine, LoadMode};
 use crate::settings;
+use crate::streams::Streams;
 use open_queue::{Batch, OpenQueue, OpenRequest};
 
 /// Kaleido's public roadmap (spec 11.7): the GitHub Project in the Kaleido repository, which the
@@ -211,7 +214,7 @@ fn play(app: &AppHandle, batch: Batch) {
         tracing::warn!("open request dropped: the player is not running");
         return;
     };
-    player::load::open_checked(&engine, &batch.sources, batch.mode, &batch.options);
+    open_on_player(app, &engine, &batch.sources, batch.mode, &batch.options);
     let event = OpenRequestEvent {
         count: batch.sources.len(),
     };
@@ -220,11 +223,27 @@ fn play(app: &AppHandle, batch: Batch) {
     }
 }
 
+/// The one way the app hands sources to the player: the open queue's batches (the command line,
+/// later launches, a drop, the dialog, a paste and the paste field, the retry of a link) and the
+/// UI's `player_load`. A link among them is opened anew, so the streams forget the quality chosen
+/// for it before (Ruling R12), and then the sources are queued (`player::load::open_checked`).
+/// Never waits for mpv.
+pub fn open_on_player(
+    app: &AppHandle,
+    engine: &Engine,
+    sources: &[Source],
+    mode: LoadMode,
+    opts: &ValidatedOptions,
+) {
+    if let Some(streams) = app.try_state::<Streams>() {
+        streams.opened(sources);
+    }
+    player::load::open_checked(engine, sources, mode, opts);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::player::LoadMode;
-    use crate::player::load::{Source, ValidatedOptions};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 

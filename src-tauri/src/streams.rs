@@ -19,9 +19,10 @@ use std::thread;
 
 use mpv_ffi::Mpv;
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::player::EntryOptions;
-use crate::player::load::{LoadOptions, NO_FOLDER_PLAYLIST, per_file_option};
+use crate::player::load::{LoadOptions, NO_FOLDER_PLAYLIST, Source, per_file_option};
 use crate::player::stream_error::{StreamError, classify, is_link};
 use crate::system::diagnostics::sanitize;
 use crate::tools::ytdlp::{ProbeError, StreamInfo};
@@ -342,6 +343,22 @@ impl Streams {
         })
     }
 
+    /// `sources` are opened (Ruling R12; every way of opening goes through
+    /// `system::open_on_player`, which tells this first): a link among them is opened anew and plays
+    /// in the default quality, so a quality chosen for it before is forgotten, and the UI is told
+    /// where its formats are known. The entries a change of quality loads are no open: they keep
+    /// theirs, and a restart of the core loads the link's entries with a choice that is still there.
+    pub fn opened(&self, sources: &[Source]) {
+        let mut state = self.shared.lock();
+        for source in sources {
+            if let Source::Url(url) = source
+                && state.chosen.remove(url.as_str()).is_some()
+            {
+                self.shared.tell(&state, url.as_str());
+            }
+        }
+    }
+
     /// The `entry_options` of a restart of the core (lib.rs, `restart_engine`): a link with a
     /// chosen quality loads with its `ytdl-format` again. It reads the choice when the restart
     /// asks, on the request thread.
@@ -365,34 +382,56 @@ pub struct Reload {
 
 impl Reload {
     /// Loads the link again in place ([`quality_commands`]), with the `mpv` of a `Request::Call`
-    /// (never `Engine::call` on this thread). Reads where it is now: when another entry plays by
-    /// then, nothing is loaded (the quality stays chosen for the link, for a restart of the core;
-    /// the entry plays in the quality it had when it plays again). The position is kept unless
-    /// the link is live, which joins the live edge again (as reload.lua does): by its probe, or,
-    /// while that is not known, by whether mpv knows a duration. The old entry goes only once the
-    /// new one is in the playlist.
+    /// (never `Engine::call` on this thread). Reads where it is now, and loads only the entry that
+    /// plays when it is the link ([`playing_index`]): when another entry plays by then, or the
+    /// switch to the next one is on its way, nothing is loaded and the log says why (the quality
+    /// stays chosen for the link, for a restart of the core). The new entry starts where the old
+    /// one is ([`Reload::start`]). The old entry goes only once the new one is in the playlist.
     pub fn run(&self, mpv: &Mpv) {
-        if mpv.get_string(PATH).ok().as_deref() != Some(self.url.as_str()) {
-            tracing::info!("another entry plays now; the link is not loaded with its new quality");
-            return;
-        }
-        let Some(index) = mpv.get_i64("playlist-pos").ok().filter(|index| *index >= 0) else {
-            tracing::warn!("the link has no place in the playlist; its quality is not changed now");
-            return;
+        let index = match mpv.get_string("playlist") {
+            Ok(playlist) => playing_index(&playlist, &self.url),
+            Err(error) => {
+                tracing::warn!("cannot read mpv's playlist for a new quality: {error}");
+                return;
+            }
         };
-        let position = if self.keeps_position(mpv) {
-            mpv.get_f64("time-pos")
-                .ok()
-                .filter(|position| position.is_finite() && *position >= 0.0)
-        } else {
-            None
+        let index = match index {
+            Ok(index) => index,
+            Err(why) => {
+                tracing::info!("the link is not loaded with its new quality: {why}");
+                return;
+            }
         };
-        for args in quality_commands(&self.url, self.format.as_deref(), position, index) {
+        let start = self.start(mpv);
+        for args in quality_commands(&self.url, self.format.as_deref(), start.as_deref(), index) {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             if let Err(error) = mpv.command(&args) {
                 tracing::warn!("mpv refuses the {} of a new quality: {error}", args[0]);
                 return;
             }
+        }
+    }
+
+    /// Where the new entry starts, as mpv's `start` takes it. Once the entry plays (mpv has a
+    /// `time-pos`: also while it seeks, to where it seeks), where it is, unless the link is live,
+    /// which joins the live edge again (as reload.lua does). While it still loads (no `time-pos`:
+    /// the hooks such as `ytdl_hook`'s yt-dlp, the opening of the stream), where it was going to
+    /// start: mpv's `start` as it is for the entry then, which by then holds its own per-file
+    /// start (a command line's `--start`, a restart of the core), or that of a saved position (both
+    /// are put in place before the hooks run, `play_current_file`). mpv writes it in its own form
+    /// (`%g` seconds, `+`/`-` relative, `#` chapter, `%` percent), which the new entry takes as it
+    /// is; `none` (and nothing) is no start.
+    fn start(&self, mpv: &Mpv) -> Option<String> {
+        let position = mpv
+            .get_f64("time-pos")
+            .ok()
+            .filter(|position| position.is_finite() && *position >= 0.0);
+        match position {
+            Some(position) => self.keeps_position(mpv).then(|| position.to_string()),
+            None => mpv
+                .get_string("start")
+                .ok()
+                .filter(|start| !start.is_empty() && start != "none"),
         }
     }
 
@@ -406,23 +445,47 @@ impl Reload {
     }
 }
 
+/// The index in mpv's `playlist` (its JSON text) of the entry that plays, when it is `url`: the
+/// entry that is `current` and also `playing` (as `resume::capture` reads it). Right after a
+/// `playlist-next`, or while an earlier change of quality is on its way, the current entry is not
+/// the one that plays yet, and `path` and `playlist-pos` then speak of different entries: there is
+/// no entry to load again. `Err` says why, for the log.
+fn playing_index(playlist: &str, url: &str) -> Result<usize, &'static str> {
+    let Ok(Value::Array(entries)) = serde_json::from_str::<Value>(playlist) else {
+        return Err("mpv's playlist cannot be read");
+    };
+    let flag = |entry: &Value, name: &str| entry.get(name).and_then(Value::as_bool) == Some(true);
+    let index = entries
+        .iter()
+        .position(|entry| flag(entry, "current"))
+        .ok_or("no entry is current")?;
+    let entry = &entries[index];
+    if !flag(entry, "playing") {
+        return Err("the switch to another entry is on its way");
+    }
+    if entry.get("filename").and_then(Value::as_str) != Some(url) {
+        return Err("another entry plays now");
+    }
+    Ok(index)
+}
+
 /// The commands that load the entry `path` at playlist `index` (the one that plays) again with
-/// the quality `format` (`None`: the default; it has passed the check of `--format`) from
-/// `position` (`None`: where mpv starts it): a new entry right after it, with its own
+/// the quality `format` (`None`: the default; it has passed the check of `--format`) from `start`
+/// (mpv's `start` value, `None`: where mpv starts it): a new entry right after it, with its own
 /// [`NO_FOLDER_PLAYLIST`] (Ruling R55), start and `ytdl-format` (each value quoted as `%N%`), and
 /// the old entry removed. While something plays, `insert-next-play` only adds the entry (it plays
 /// at once only when nothing is current), and removing the entry that plays makes mpv go on with
 /// the one after it, the new one (mpv's `playlist_remove` makes it current, and `PT_NEXT_ENTRY`
 /// plays it): the playlist keeps its order and length, the new entry where the old one was.
-pub fn quality_commands(
+pub(crate) fn quality_commands(
     path: &str,
     format: Option<&str>,
-    position: Option<f64>,
-    index: i64,
+    start: Option<&str>,
+    index: usize,
 ) -> Vec<Vec<String>> {
     let mut options = vec![NO_FOLDER_PLAYLIST.to_owned()];
-    if let Some(position) = position {
-        options.push(per_file_option("start", &position.to_string()));
+    if let Some(start) = start {
+        options.push(per_file_option("start", start));
     }
     if let Some(format) = format {
         options.push(per_file_option(YTDL_FORMAT, format));
@@ -470,12 +533,13 @@ fn formats_state(result: Result<StreamInfo, ProbeError>) -> FormatsState {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use serde_json::Value;
-
     use super::*;
+    use crate::paths::AppPaths;
     use crate::player::resume::{self, ResumeEntry, ResumeState};
     use crate::player::testing::{NoEvents, eventually, headless, temp_paths};
     use crate::player::{Engine, Request};
@@ -880,7 +944,7 @@ mod tests {
             quality_commands(
                 LINK,
                 Some("bv*[height<=?720]+ba/b[height<=?720]"),
-                Some(183.5),
+                Some("183.5"),
                 2
             ),
             [
@@ -908,10 +972,82 @@ mod tests {
                 strings(&["playlist-remove", "0"]),
             ]
         );
+        // A start as mpv writes its `start` of an entry that still loads: taken as it is.
         assert_eq!(
-            quality_commands(LINK, Some("ba/b"), Some(3.0), 7)[0][4],
-            "autocreate-playlist=no,start=%1%3,ytdl-format=%4%ba/b"
+            quality_commands(LINK, Some("ba/b"), Some("+600"), 7)[0][4],
+            "autocreate-playlist=no,start=%4%+600,ytdl-format=%4%ba/b"
         );
+    }
+
+    /// Only the entry that plays is loaded again, and only when it is the link: `path` and
+    /// `playlist-pos` can speak of different entries while a switch is on its way.
+    #[test]
+    fn only_the_entry_that_plays_is_reloaded() {
+        let other = "https://example.com/next";
+        let playlist = |entries: Value| entries.to_string();
+        let playing = playlist(serde_json::json!([
+            { "filename": other, "id": 1 },
+            { "filename": LINK, "id": 2, "current": true, "playing": true },
+            { "filename": other, "id": 3 }
+        ]));
+        assert_eq!(playing_index(&playing, LINK), Ok(1));
+        assert_eq!(
+            playing_index(&playing, other),
+            Err("another entry plays now")
+        );
+        // Right after `playlist-next` (or a change of quality just before this one): the next
+        // entry is current, the one that plays is not, or no longer in the playlist at all.
+        let switching = playlist(serde_json::json!([
+            { "filename": LINK, "id": 2, "playing": true },
+            { "filename": LINK, "id": 4, "current": true }
+        ]));
+        assert_eq!(
+            playing_index(&switching, LINK),
+            Err("the switch to another entry is on its way")
+        );
+        let gone = playlist(serde_json::json!([{ "filename": LINK, "id": 4, "current": true }]));
+        assert!(playing_index(&gone, LINK).is_err());
+        assert_eq!(
+            playing_index(&playlist(serde_json::json!([])), LINK),
+            Err("no entry is current")
+        );
+        assert_eq!(
+            playing_index("not json", LINK),
+            Err("mpv's playlist cannot be read")
+        );
+    }
+
+    /// Ruling R12: a link opened again (any open path) plays in the default quality, so the
+    /// choice made for it before goes, and the UI hears it; other links keep theirs.
+    #[test]
+    fn a_link_opened_again_plays_the_default_quality() {
+        let (probe, _) = answering(Ok(info("x")));
+        let (emit, told) = telling();
+        let streams = Streams::new(probe, emit);
+        let other = "https://example.com/other";
+        for link in [other, LINK] {
+            streams.on_path(Some(link));
+            told_until(&told, link, |formats| {
+                matches!(formats.state, FormatsState::Ready { .. })
+            });
+            streams.choose(Some("ba/b")).unwrap();
+            told_until(&told, link, |formats| formats.chosen.is_some());
+        }
+
+        streams.opened(&[
+            Source::File(r"C:\Videa\film.mkv".into()),
+            Source::Url(url::Url::parse(LINK).unwrap()),
+        ]);
+        assert_eq!(next(&told), formats(LINK, ready("x"), None));
+        assert!(streams.entry_options()(LINK).is_empty());
+        assert_eq!(streams.current().unwrap().chosen, None);
+        assert_eq!(
+            streams.entry_options()(other),
+            [(YTDL_FORMAT.to_owned(), "ba/b".to_owned())]
+        );
+        // Opened once more: nothing was chosen, so nothing is told.
+        streams.opened(&[Source::Url(url::Url::parse(LINK).unwrap())]);
+        assert!(told.try_recv().is_err());
     }
 
     /// What `stream_formats` and `stream:formats` carry, as the UI reads them.
@@ -951,7 +1087,7 @@ mod tests {
         );
     }
 
-    // The test below plays files in a real libmpv (vo=null, ao=null): local clips in place of a
+    // The tests below play files in a real libmpv (vo=null, ao=null): local clips in place of a
     // link, which is loaded again the same way.
 
     fn playlist(mpv: &Mpv) -> Vec<Value> {
@@ -962,20 +1098,15 @@ mod tests {
         }
     }
 
-    /// [a, b], b plays (paused) at 3 s, and its quality is changed: the playlist still has two
-    /// entries, a and then b, b is a new entry and the one that plays, at 3 s ± 0.5 with the
-    /// chosen `ytdl-format` for itself, and still paused. Shows that the old entry can go in the
-    /// same request as the new one is added, without waiting for the new one's `file-loaded`.
-    #[test]
-    fn changing_quality_keeps_the_playlist_and_the_position() {
-        let tmp = tempfile::tempdir().unwrap();
+    /// The clips a and b in a playlist of a core over `paths`, b playing, paused (so that the
+    /// position stays where it was put) at 3 s; and the id of b's entry.
+    fn b_at_three_seconds(paths: AppPaths, dir: &Path) -> (Engine, [String; 2], i64) {
         let [a, b] = ["a.y4m", "b.y4m"].map(|name| {
-            let path = tmp.path().join(name);
+            let path = dir.join(name);
             mpv_ffi::testing::write_y4m(&path, 64, 36, 10 * 30).unwrap();
             path.to_string_lossy().into_owned()
         });
-        let engine = Engine::start(headless(temp_paths(tmp.path())), NoEvents).unwrap();
-        // Paused, so that the position stays where it was put.
+        let engine = Engine::start(headless(paths), NoEvents).unwrap();
         engine.command(&["set", "pause", "yes"]);
         engine.command(&["loadfile", &a, "append"]);
         engine.command(&["loadfile", &b, "append"]);
@@ -990,31 +1121,120 @@ mod tests {
                 .is_ok_and(|position| (position - 3.0).abs() < 0.1)
         });
         let old = engine.call(|mpv| playlist(mpv)[1]["id"].as_i64().unwrap());
+        (engine, [a, b], old)
+    }
 
-        let format = STREAM_QUALITY_PRESETS[3];
+    /// The request that loads `url` again with `format`, as `player_set_quality` queues it.
+    fn reload(url: &str, format: &str) -> Request {
         let reload = Reload {
-            url: b.clone(),
+            url: url.to_owned(),
             format: Some(format.to_owned()),
             live: Some(false),
         };
-        engine.request(Request::Call(Box::new(move |mpv| reload.run(mpv))));
+        Request::Call(Box::new(move |mpv| reload.run(mpv)))
+    }
 
-        let (first, second) = (a.clone(), b.clone());
-        eventually(&engine, "the new entry of b plays at 3 s", move |mpv| {
+    /// Waits until [a, b] is the playlist again, b a new entry (none of the ids in `not`) that
+    /// plays at 3 s ± 0.5.
+    fn b_plays_anew_at_three_seconds(engine: &Engine, [a, b]: &[String; 2], not: &[i64]) {
+        let (a, b, not) = (a.clone(), b.clone(), not.to_vec());
+        eventually(engine, "a new entry of b plays at 3 s", move |mpv| {
             let entries = playlist(mpv);
             entries.len() == 2
-                && entries[0]["filename"] == first.as_str()
-                && entries[1]["filename"] == second.as_str()
+                && entries[0]["filename"] == a.as_str()
+                && entries[1]["filename"] == b.as_str()
                 && entries[1]["current"] == true
-                && entries[1]["id"].as_i64() != Some(old)
+                && entries[1]["playing"] == true
+                && entries[1]["id"]
+                    .as_i64()
+                    .is_some_and(|id| !not.contains(&id))
                 && mpv.get_i64("playlist-pos").ok() == Some(1)
                 && mpv
                     .get_f64("time-pos")
                     .is_ok_and(|position| (position - 3.0).abs() <= 0.5)
         });
+    }
+
+    /// [a, b], b plays (paused) at 3 s, and its quality is changed: the playlist still has two
+    /// entries, a and then b, b is a new entry and the one that plays, at 3 s ± 0.5 with the
+    /// chosen `ytdl-format` for itself, and still paused. Shows that the old entry can go in the
+    /// same request as the new one is added, without waiting for the new one's `file-loaded`.
+    #[test]
+    fn changing_quality_keeps_the_playlist_and_the_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (engine, clips, old) = b_at_three_seconds(temp_paths(tmp.path()), tmp.path());
+
+        let format = STREAM_QUALITY_PRESETS[3];
+        engine.request(reload(&clips[1], format));
+
+        b_plays_anew_at_three_seconds(&engine, &clips, &[old]);
         assert_eq!(
             engine.call(|mpv| mpv.get_string(YTDL_FORMAT).unwrap()),
             format
+        );
+        assert!(engine.call(|mpv| mpv.get_flag("pause").unwrap()));
+    }
+
+    /// Holds the next load in its `on_load` hook for 1.5 s once it is told to (`hold-next-load`),
+    /// as `ytdl_hook` holds a link while yt-dlp runs.
+    const HOLD_SCRIPT: &str = r#"local hold = false
+mp.register_script_message("hold-next-load", function() hold = true end)
+mp.add_hook("on_load", 50, function(hook)
+    if not hold then return end
+    hold = false
+    hook:defer()
+    mp.add_timeout(1.5, function() hook:cont() end)
+end)
+"#;
+
+    /// Two changes of quality back to back, the second while the entry of the first still loads
+    /// (held in its `on_load` hook): that entry has no `time-pos` yet, so the second takes the
+    /// start it was going to play from (mpv's `start` for it, its per-file 3 s), and the link plays
+    /// on at 3 s in the second quality, not from 0:00.
+    #[test]
+    fn a_second_change_while_the_first_loads_keeps_the_position() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        fs::create_dir_all(&paths.scripts_dir).unwrap();
+        fs::write(paths.scripts_dir.join("hold.lua"), HOLD_SCRIPT).unwrap();
+        let (engine, clips, old) = b_at_three_seconds(paths, tmp.path());
+        eventually(&engine, "the hold script runs", |mpv| {
+            mpv.command(&["script-message-to", "hold", "ping"]).is_ok()
+        });
+
+        // The script hears this before the hook of the entry the reload adds.
+        engine.command(&["script-message-to", "hold", "hold-next-load"]);
+        engine.request(reload(&clips[1], STREAM_QUALITY_PRESETS[3]));
+        let (b, before) = (clips[1].clone(), old);
+        eventually(&engine, "the first new entry loads, held", move |mpv| {
+            let entries = playlist(mpv);
+            entries.len() == 2
+                && entries[1]["filename"] == b.as_str()
+                && entries[1]["id"].as_i64() != Some(before)
+                && entries[1]["playing"] == true
+                && mpv.get_f64("time-pos").is_err()
+        });
+        let (loading, start) = engine.call(|mpv| {
+            (
+                playlist(mpv)[1]["id"].as_i64().unwrap(),
+                mpv.get_string("start").unwrap(),
+            )
+        });
+        // Its own start, in mpv's `%g`.
+        assert!(
+            start
+                .parse::<f64>()
+                .is_ok_and(|start| (start - 3.0).abs() < 0.1),
+            "{start:?}"
+        );
+
+        let second = STREAM_QUALITY_PRESETS[1];
+        engine.request(reload(&clips[1], second));
+
+        b_plays_anew_at_three_seconds(&engine, &clips, &[old, loading]);
+        assert_eq!(
+            engine.call(|mpv| mpv.get_string(YTDL_FORMAT).unwrap()),
+            second
         );
         assert!(engine.call(|mpv| mpv.get_flag("pause").unwrap()));
     }
