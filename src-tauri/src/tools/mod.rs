@@ -13,11 +13,12 @@
 //! 4. otherwise downloads the asset, verifies it against that checksum, puts the tool in place
 //!    beside the one that may run ([`replace`]), reads its version ([`Inspect`]) and records it;
 //! 5. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
-//!    A tool whose file is gone, or that says no version, is such an error too
+//!    A tool whose file is gone, or whose version cannot be read, is such an error too
 //!    ([`ToolError::Gone`], [`ToolError::Silent`]; controller Ruling R10): a virus scanner that
 //!    takes `yt-dlp.exe` away is not answered with a download at every round. A check that is not
-//!    forced and finds the file of a tool that was in place gone counts that as one failure and
-//!    downloads nothing; the next one, after the backoff, downloads it again.
+//!    forced and starts with an installed record, no failure in a row (`failures` 0) and the file
+//!    missing counts that as one failure and puts nothing in place (no bundled copy, no
+//!    download); the next one, which has that failure (after the backoff) or is forced, does.
 //!
 //! Nothing is ever put in place unverified: a download must have the checksum the release lists
 //! for it, and a bundled copy the one the installer's `tools.json` beside it names (the installer
@@ -224,15 +225,18 @@ pub enum ToolError {
     /// The tool could not be put in place, or the check stopped unexpectedly.
     Io(String),
     /// The tool's file is gone (Ruling R10): a virus scanner that quarantines it, as some do with
-    /// PyInstaller programs like `yt-dlp.exe`. Either a check that is not forced found it gone at
-    /// its start, of a tool that was in place and not backing off, and downloaded nothing (counted
-    /// once per vanishing: the next check, after the backoff or forced, downloads it again); or
-    /// it was gone right after a check put it in place. Its backoff climbs with the vanishings in
-    /// a row ([`ToolRecord::vanished`]).
+    /// PyInstaller programs like `yt-dlp.exe`. Either a check that is not forced started with an
+    /// installed record, no failure in a row (`failures` 0) and the file missing, and put nothing
+    /// in place (no bundled copy, no download; once per vanishing: the next check, which has that
+    /// failure, after the backoff, or is forced, puts it in place again); or the file was gone
+    /// right after a check put it in place. Its backoff climbs with the vanishings in a row
+    /// ([`ToolRecord::vanished`]), also across the installs in between.
     Gone(ToolId),
-    /// The tool is in place after a check but its `--version` said nothing within its time
-    /// ([`run::VERSION_TIMEOUT`]): it does not run (a virus scanner that blocks it, a broken
-    /// file). It is asked again at every round ([`Tools::inspect_again`]).
+    /// The tool is in place after a check, but its version could not be read ([`Inspect`]
+    /// returned none): `--version` could not be started, ended with an error, took longer than
+    /// [`run::VERSION_TIMEOUT`], or wrote nothing that reads as a version. It does not run as it
+    /// should (a virus scanner that blocks it, a broken file). It is asked again at every round
+    /// ([`Tools::inspect_again`]).
     Silent(ToolId),
 }
 
@@ -559,7 +563,16 @@ impl Tools {
         let in_place = self.installed(tool, record.as_ref());
         let source = source(tool, channel);
         let mut record = record;
-        if !in_place && let Some(taken) = self.take_bundled(tool, &source) {
+        if !in_place && let Some(mut taken) = self.take_bundled(tool, &source) {
+            // The copy is in place now. What the earlier attempts left stays with it: the failures
+            // in a row and the vanishings, the basis of the backoff of whatever fails next (a
+            // scanner that takes every copy away keeps waiting longer), and the last check that
+            // went through.
+            if let Some(previous) = &record {
+                taken.failures = previous.failures;
+                taken.vanished = previous.vanished;
+                taken.checked_at = previous.checked_at.clone();
+            }
             record = Some(taken);
         }
         match self.update(tool, channel, &source, record.as_ref()) {
@@ -768,7 +781,9 @@ impl Tools {
     ///   yt-dlp from another channel than `channel` (the user switched) is due at once, unless a
     ///   failed check still backs off, so that a failing switch is not tried again and again;
     /// - a tool that is not there, or does not say its version: at once, unless its last attempt
-    ///   still backs off.
+    ///   still backs off. A check that is not forced and finds an installed record, no failure in
+    ///   a row and the file missing then fails once ([`ToolError::Gone`]) without putting anything
+    ///   in place, and backs off.
     fn next_due_of(
         &self,
         tool: ToolId,
@@ -2485,6 +2500,81 @@ mod tests {
             before + Duration::seconds(60) <= next && next <= after + Duration::seconds(60),
             "{next}"
         );
+    }
+
+    /// The installation's bundled copy as `resources\tools\yt-dlp.exe`, with the `tools.json`
+    /// beside it that names it (plan decision 7).
+    fn put_bundled_copy(setup: &Setup, exe: &[u8]) {
+        let dir = setup.paths.resource_dir.join(BUNDLED_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("yt-dlp.exe"), exe).unwrap();
+        let mut file = ToolsFile::default();
+        let mut bundled = record(exe, "2026.08.19", "2026-10-15T00:00:00Z");
+        bundled.checked_at = None;
+        file.tools.insert(ToolId::YtDlp, bundled);
+        file.save(dir.join(store::FILE)).unwrap();
+    }
+
+    /// Ruling R10 with a bundled copy beside the tools (plan decision 7): taking it over again is
+    /// putting it in place again, so a scanner that takes every copy away waits longer each time
+    /// (60, 300, 1800 s) rather than a minute again and again.
+    #[test]
+    fn a_bundled_copy_taken_away_again_and_again_waits_longer_each_time() {
+        let setup = Setup::new();
+        let exe = b"bundled yt-dlp 2026.08.19";
+        put_bundled_copy(&setup, exe);
+        // The release has the same file: nothing is ever downloaded.
+        setup.release(Channel::Stable, &sha256_hex(exe), b"never fetched");
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let source = source(ToolId::YtDlp, Channel::Stable);
+        let mut tools = setup.tools();
+        assert_eq!(
+            tools
+                .check(ToolId::YtDlp, Channel::Stable, false)
+                .unwrap()
+                .state,
+            ToolState::Ready
+        );
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+
+        for (round, wait) in [(1, 60), (2, 300), (3, 1800)] {
+            // The scanner takes it away; the next check counts it and copies nothing.
+            fs::remove_file(setup.exe(ToolId::YtDlp)).unwrap();
+            let before = now();
+            assert_eq!(
+                tools.check(ToolId::YtDlp, Channel::Stable, false),
+                Err(ToolError::Gone(ToolId::YtDlp)),
+                "round {round}"
+            );
+            let after = now();
+            assert!(!setup.exe(ToolId::YtDlp).exists(), "round {round}");
+            let recorded = setup.record(ToolId::YtDlp).unwrap();
+            assert_eq!((recorded.failures, recorded.vanished), (round, round));
+            let next = time_of(&recorded.next_try);
+            assert!(
+                before + Duration::seconds(wait) <= next && next <= after + Duration::seconds(wait),
+                "round {round}: {next}"
+            );
+
+            // After the backoff the bundled copy is put back, ready, and the streak stays.
+            tools = backoff_over(&setup, ToolId::YtDlp);
+            assert_eq!(
+                tools
+                    .check(ToolId::YtDlp, Channel::Stable, false)
+                    .unwrap()
+                    .state,
+                ToolState::Ready,
+                "round {round}"
+            );
+            assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+            let recorded = setup.record(ToolId::YtDlp).unwrap();
+            assert_eq!(
+                (recorded.failures, recorded.next_try, recorded.vanished),
+                (0, None, round),
+                "round {round}"
+            );
+        }
+        assert_eq!(setup.web.count(&source.asset_url()), 0);
     }
 
     /// Ruling R10 and the scheduler's rounds: a tool put in place whose `--version` does not
