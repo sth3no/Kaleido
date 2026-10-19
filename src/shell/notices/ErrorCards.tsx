@@ -8,13 +8,15 @@
  * What makes a card (`state/noticeStore.ts` holds them, at most three, the newest on top):
  *
  * - `player:end-file` with `reason: "error"`: a playback card. The text comes from mpv's error
- *   string (`playbackError.ts`). The name is the file Rust says failed (`file`, the playlist entry
- *   by the id of the event), and what the card offers is Rust's `continues`: whether mpv goes on
- *   by itself (Rulings R42, R43). Rust has them from the playlist as it is when the file fails;
- *   the UI's copy of it may be older than that, so nothing here reads it, and nothing looks at
- *   the entry that is current, which has moved on. The details are the tail of mpv's log
- *   (`logTail`); the lines that explain the failure may arrive after `end-file`, so for a moment
- *   longer the card also takes the lines that come in.
+ *   string (`playbackError.ts`), or, for a link that failed for a reason Rust knows
+ *   (`streamError`, spec 10.3), from that class (`streamError.ts`), which also gives the card the
+ *   action of the class on the link that failed (`file`). The name is the file Rust says failed
+ *   (`file`, the playlist entry by the id of the event), and what the card offers is Rust's
+ *   `continues`: whether mpv goes on by itself (Rulings R42, R43). Rust has them from the playlist
+ *   as it is when the file fails; the UI's copy of it may be older than that, so nothing here reads
+ *   it, and nothing looks at the entry that is current, which has moved on. The details are the
+ *   tail of mpv's log (`logTail`); the lines that explain the failure may arrive after `end-file`,
+ *   so for a moment longer the card also takes the lines that come in.
  * - `system:paste-empty` (Ctrl+V found no link) while the view is not the start screen. The start
  *   screen answers that itself, with its paste field (`HomeScreen.tsx`), and is mounted exactly
  *   while the view is `home`; so the two never both react.
@@ -60,6 +62,7 @@ import { selectView } from '../view';
 import ErrorCard from './ErrorCard';
 import styles from './ErrorCards.module.css';
 import { playbackErrorKey } from './playbackError';
+import { streamErrorKey } from './streamError';
 
 /** How long after `end-file` a new line of mpv's log still belongs to the failed file, ms. */
 export const LOG_FOLLOW_MS = 1500;
@@ -73,12 +76,18 @@ function useNoticeFeed(): void {
       if (end !== previous.lastEnd && end?.reason === 'error') {
         const id = useNoticeStore.getState().push({
           kind: 'playback',
-          message: playbackErrorKey(end.error),
+          // A link that failed for a reason Rust knows says that reason, not mpv's word for the error.
+          message:
+            end.streamError !== null ? streamErrorKey(end.streamError) : playbackErrorKey(end.error),
           name: nameOfFile(end.file),
           // Rust read the playlist when the file failed; the UI's copy may be older.
           remedy: end.continues ? 'continues' : 'open',
           error: end.error,
           lines: state.logTail.slice(-DETAIL_LINES),
+          stream: end.streamError,
+          // `file` is the link that failed (Rust names a class only for an http(s) link): what "Try again" opens.
+          url: end.streamError !== null ? end.file : null,
+          retry: 'idle',
         });
         following = { id, until: Date.now() + LOG_FOLLOW_MS };
         return;

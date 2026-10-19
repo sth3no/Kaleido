@@ -1,10 +1,12 @@
 /**
- * The notices the error cards show (spec 10.1, 10.2, 10.4; Ruling R40): a file that cannot be
- * played (`shell/notices/ErrorCards.tsx` makes those from `end-file`), a plugin that reports errors
- * (from `plugins:error`) and the two notices of the app itself, a Ctrl+V that found no link and a
- * dropped link that Rust refused. At most `MAX_NOTICES` are kept, the newest first; the oldest goes
- * when a new one needs its place, but not a plugin's card whose action is running. A notice goes by
- * itself after `NOTICE_MS` (not while its action runs) or when it is closed
+ * The notices the error cards show (spec 10.1, 10.2, 10.3, 10.4; Ruling R40): a file or a link that
+ * cannot be played (`shell/notices/ErrorCards.tsx` makes those from `end-file`; a link that failed
+ * for a reason Rust knows carries its class and its address, for the action of the class), a plugin
+ * that reports errors (from `plugins:error`) and the two notices of the app itself, a Ctrl+V that
+ * found no link and a dropped link that Rust refused. At most `MAX_NOTICES` are kept, the newest
+ * first; the oldest goes when a new one needs its place, but not a card whose action is running
+ * (a plugin being disabled, a link being tried again). A notice goes by itself after `NOTICE_MS`
+ * (not while its action runs, the pointer is over it or the focus is in it) or when it is closed
  * (`shell/notices/ErrorCard.tsx`).
  *
  * Other code adds one with `pushAppNotice` or `pushPluginNotice`; the card stack is the only reader.
@@ -12,7 +14,7 @@
 
 import { create } from 'zustand';
 
-import type { LogLine } from '../ipc/types';
+import type { LogLine, StreamError } from '../ipc/types';
 import type { PluginProblem } from '../plugins/problem';
 
 /** Cards on top of one another. */
@@ -39,7 +41,20 @@ interface NoticeBase {
  */
 export type PlaybackRemedy = 'continues' | 'open';
 
-/** A file that could not be played. */
+/**
+ * Where the action of a link's card stands (spec 10.3), once it has one (`streamErrorAction`):
+ *
+ * - `idle`: the action is offered.
+ * - `working`: it runs ("Update and try again" updates yt-dlp, which downloads; "Use and try again"
+ *   saves the browser first). The card stays until it is done.
+ * - `refused`: Rust did not take the link again (`stream_retry` rejected); the action is offered again.
+ * - `unsaved`: the choice of the browser could not be saved, so nothing was changed.
+ *
+ * When the action succeeds the card goes: the link is with the player, and a new failure is a new card.
+ */
+export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved';
+
+/** A file or a link that could not be played. */
 export interface PlaybackNotice extends NoticeBase {
   kind: 'playback';
   /** The file or the host of the link; empty where Rust could not say which file it was. */
@@ -49,6 +64,11 @@ export interface PlaybackNotice extends NoticeBase {
   error: string | null;
   /** The last lines of mpv's log, oldest first. */
   lines: readonly LogLine[];
+  /** Why yt-dlp failed, where Rust knows (`message` is the sentence of the class); `null` for a file. */
+  stream: StreamError | null;
+  /** The link that failed, for "Try again"; `null` for a file and where Rust did not name it. */
+  url: string | null;
+  retry: RetryPhase;
 }
 
 /**
@@ -99,15 +119,21 @@ export interface NoticeState {
   dismiss: (id: number) => void;
   /** Moves the card of a plugin on (`problem` with `failed`); a card that is gone is left alone. */
   setPluginPhase: (id: number, phase: PluginPhase, problem?: PluginProblem | null) => void;
+  /** Moves the action of a link's card on; a card that is gone, or is no playback card, is left alone. */
+  setRetryPhase: (id: number, retry: RetryPhase) => void;
   /** Adds a line to the details of a playback notice that is still there; the newest `DETAIL_LINES` stay. */
   addLogLine: (id: number, line: LogLine) => void;
 }
 
 let lastId = 0;
 
-/** A plugin's card whose action runs: it is not pushed out and does not go by itself. */
+/**
+ * A card whose action runs (a plugin being disabled, a link being tried again): it is not pushed out
+ * and does not go by itself.
+ */
 export const isWorking = (notice: Notice): boolean =>
-  notice.kind === 'plugin' && notice.phase === 'working';
+  (notice.kind === 'plugin' && notice.phase === 'working') ||
+  (notice.kind === 'playback' && notice.retry === 'working');
 
 /**
  * The newest `MAX_NOTICES`: the oldest go, apart from a card whose action runs, which stays while
@@ -150,6 +176,15 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
         notices: state.notices.map((notice) =>
           notice === target ? { ...target, phase, problem: phase === 'failed' ? problem : null } : notice,
         ),
+      };
+    });
+  },
+  setRetryPhase: (id, retry) => {
+    set((state) => {
+      const target = state.notices.find((notice) => notice.id === id);
+      if (target?.kind !== 'playback' || target.retry === retry) return state;
+      return {
+        notices: state.notices.map((notice) => (notice === target ? { ...target, retry } : notice)),
       };
     });
   },

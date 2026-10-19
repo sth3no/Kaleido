@@ -559,6 +559,27 @@
       "removed": "Video bylo odstraněno nebo už neexistuje.",
       "network": "yt-dlp se nepodařilo spojit s webem. Zkontroluj připojení k internetu."
     },
+    "streamAction": {
+      "update": "Aktualizovat a zkusit znovu",
+      "retry": "Zkusit znovu",
+      "cookies": "Použít cookies z prohlížeče",
+      "updating": "Aktualizuji yt-dlp, pak odkaz zkusím znovu…",
+      "retrying": "Zkouším znovu…",
+      "saving": "Ukládám volbu, pak odkaz zkusím znovu…",
+      "refused": "Odkaz se nepodařilo znovu otevřít.",
+      "unsaved": "Volbu se nepodařilo uložit, nic se nezměnilo. Zkus to znovu."
+    },
+    "browser": {
+      "label": "Brát cookies z",
+      "none": "Nepoužívat cookies",
+      "chromiumCookies": "yt-dlp cookies prohlížečů na Chromiu ve Windows většinou nepřečte a odkaz pak selže celý. Firefox funguje.",
+      "noProfile": "Profil s cookies se nenašel.",
+      "use": "Použít a zkusit znovu",
+      "loading": "Hledám prohlížeče…",
+      "empty": "Nenašel se žádný prohlížeč, jehož cookies jde použít.",
+      "failed": "Prohlížeče se nepodařilo vypsat.",
+      "openSettings": "Nastavení → Přehrávání"
+    },
     "plugin": {
       "title": "Plugin {{name}} hlásí chyby",
       "message": "Dál běží. Kaleido sám nic nevypíná.",

@@ -159,6 +159,42 @@
   opacity: 0.5;
 }
 
+/* A ring with one bright quarter, on the button of an action that runs. With reduced motion it stands still (theme/global.css). */
+.spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* What the action that runs does ("Updating yt-dlp, then trying again…"), under the buttons. */
+.progress {
+  margin: 0;
+  padding-left: calc(20px + var(--k-space-m));
+  font-size: var(--k-font-size-s);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+/* Why the action did not go through: in the weight of what happens now, under the buttons. */
+.problem {
+  margin: 0;
+  padding-left: calc(20px + var(--k-space-m));
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .chevron {
   display: grid;
   transition: rotate var(--k-motion-fast) ease;

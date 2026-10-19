@@ -559,6 +559,27 @@
       "removed": "This video was removed or no longer exists.",
       "network": "yt-dlp could not reach the website. Check your internet connection."
     },
+    "streamAction": {
+      "update": "Update and try again",
+      "retry": "Try again",
+      "cookies": "Use cookies from a browser",
+      "updating": "Updating yt-dlp, then trying again…",
+      "retrying": "Trying again…",
+      "saving": "Saving the choice, then trying again…",
+      "refused": "The link could not be opened again.",
+      "unsaved": "The choice could not be saved, so nothing was changed. Try again."
+    },
+    "browser": {
+      "label": "Take cookies from",
+      "none": "Do not use cookies",
+      "chromiumCookies": "yt-dlp usually cannot read the cookies of browsers based on Chromium on Windows, and the link then fails as a whole. Firefox works.",
+      "noProfile": "No profile with cookies was found.",
+      "use": "Use and try again",
+      "loading": "Looking for browsers…",
+      "empty": "No browser was found whose cookies can be used.",
+      "failed": "The browsers could not be listed.",
+      "openSettings": "Settings → Playback"
+    },
     "plugin": {
       "title": "Plugin {{name}} reports errors",
       "message": "It keeps running. Kaleido turns nothing off by itself.",

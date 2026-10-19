@@ -1,0 +1,59 @@
+/*
+ * The browser chooser (BrowserChooser.tsx) inside a card: under the card's buttons, indented like the
+ * log of the details (ErrorCards.module.css), on the glass' own text colour. The rows of the list are
+ * the panels' options (panels/Panel.module.css), the buttons the card's.
+ */
+
+.chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  margin-left: calc(20px + var(--k-space-m));
+  padding: var(--k-space-s);
+  border-radius: var(--k-radius-s);
+  background: color-mix(in srgb, var(--k-color-on-glass) 10%, transparent);
+}
+
+.label {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  font-weight: 600;
+}
+
+/* A sentence of its own: no browser found, the list could not be read, still looking. */
+.message {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  overflow-wrap: anywhere;
+}
+
+/* The sentence under a browser's name (the warning, or that no profile was found): it wraps. */
+.note {
+  display: block;
+  font-size: var(--k-font-size-xs);
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+/* A browser that cannot be chosen: it is read, not pressed (no tint on hover). */
+.unusable[aria-disabled='true'] {
+  opacity: 0.6;
+}
+
+.unusable[aria-disabled='true']:hover {
+  background: transparent;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-s);
+}
+
+/* High contrast: a plain edge. */
+@media (forced-colors: active) {
+  .chooser {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}

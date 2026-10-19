@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from 'vitest';
 
-import type { LogLine } from '../ipc/types';
+import type { LogLine, StreamError } from '../ipc/types';
 import {
   DETAIL_LINES,
+  isWorking,
   MAX_NOTICES,
   pushAppNotice,
   pushPluginNotice,
@@ -21,6 +22,23 @@ const playback = (name: string, lines: LogLine[] = []) =>
     remedy: 'open',
     error: 'loading failed',
     lines,
+    stream: null,
+    url: null,
+    retry: 'idle',
+  });
+
+/** A link that failed for a reason Rust knows, as the card stack makes it from `end-file`. */
+const link = (url: string, stream: StreamError = 'network') =>
+  store.getState().push({
+    kind: 'playback',
+    message: `errors.stream.${stream}`,
+    name: 'example.com',
+    remedy: 'open',
+    error: 'loading failed',
+    lines: [],
+    stream,
+    url,
+    retry: 'idle',
   });
 
 const line = (text: string): LogLine => ({ level: 'error', prefix: 'cplayer', text });
@@ -202,5 +220,84 @@ describe('the cards of plugins that report errors', () => {
 
     expect(store.getState().notices).toHaveLength(MAX_NOTICES);
     expect(pluginCards()[0]?.name).toBe('d');
+  });
+});
+
+describe('the cards of links that failed (spec 10.3)', () => {
+  const playbackCards = () =>
+    store.getState().notices.filter((notice): notice is PlaybackNotice => notice.kind === 'playback');
+
+  test('a file has no class, no link and no action running', () => {
+    playback('a.mkv');
+
+    expect(playbackCards()[0]).toMatchObject({ stream: null, url: null, retry: 'idle' });
+  });
+
+  test('a link keeps its class and its address for the action of its class', () => {
+    link('https://example.com/watch?v=abc', 'outdated');
+
+    expect(playbackCards()[0]).toMatchObject({
+      message: 'errors.stream.outdated',
+      stream: 'outdated',
+      url: 'https://example.com/watch?v=abc',
+      retry: 'idle',
+    });
+  });
+
+  test('the same link failing twice is two cards: a new failure is a new card', () => {
+    link('https://example.com/a');
+    link('https://example.com/a');
+
+    expect(playbackCards()).toHaveLength(2);
+  });
+
+  test('setRetryPhase moves the action of a link on, one card only', () => {
+    const first = link('https://example.com/a');
+    const second = link('https://example.com/b');
+
+    store.getState().setRetryPhase(first, 'working');
+    expect(playbackCards().map((notice) => notice.retry)).toEqual(['idle', 'working']);
+
+    store.getState().setRetryPhase(first, 'refused');
+    store.getState().setRetryPhase(second, 'unsaved');
+    expect(playbackCards().map((notice) => notice.retry)).toEqual(['unsaved', 'refused']);
+  });
+
+  test('setRetryPhase leaves a card that is gone, the notices of other kinds and a same phase alone', () => {
+    const id = link('https://example.com/a');
+    pushPluginNotice('thumbfast');
+    pushAppNotice('errors.dropLink');
+    const before = store.getState().notices;
+
+    store.getState().setRetryPhase(9999, 'working');
+    store.getState().setRetryPhase(before[0]?.id ?? 0, 'working');
+    store.getState().setRetryPhase(before[1]?.id ?? 0, 'working');
+    store.getState().setRetryPhase(id, 'idle');
+
+    expect(store.getState().notices).toBe(before);
+  });
+
+  test('a link whose action runs is at work, like a plugin being disabled', () => {
+    const id = link('https://example.com/a');
+    const card = () => store.getState().notices.find((notice) => notice.id === id) as PlaybackNotice;
+    expect(isWorking(card())).toBe(false);
+
+    store.getState().setRetryPhase(id, 'working');
+    expect(isWorking(card())).toBe(true);
+
+    store.getState().setRetryPhase(id, 'refused');
+    expect(isWorking(card())).toBe(false);
+  });
+
+  test('a fourth notice does not push out the link whose action runs', () => {
+    const first = link('https://example.com/a');
+    store.getState().setRetryPhase(first, 'working');
+    playback('b.mkv');
+    playback('c.mkv');
+
+    playback('d.mkv');
+
+    expect(playbackCards().map((notice) => notice.name)).toEqual(['d.mkv', 'c.mkv', 'example.com']);
+    expect(store.getState().notices.some((notice) => notice.id === first)).toBe(true);
   });
 });
