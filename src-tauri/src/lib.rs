@@ -17,8 +17,8 @@ pub mod tools;
 #[cfg(test)]
 mod ipc_contract_tests;
 
-use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Context;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
@@ -29,7 +29,7 @@ use paths::AppPaths;
 use player::command::ScreenshotMode;
 use player::{
     Engine, EngineConfig, EventSink, PlayerEvent, QUIT_TIMEOUT, Request, Restart, RestartError,
-    StateLoop,
+    StateLoop, StreamError,
 };
 use surface::{Surface, WindowSync};
 use system::OpenThread;
@@ -459,14 +459,15 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
             }
             false
         }
-        // A link that failed for want of a (newer) yt-dlp: yt-dlp is checked now (spec 6.6). The UI
-        // hears the end all the same, and its card offers the update.
+        // A link that failed for want of a (newer) yt-dlp: yt-dlp is checked in the background
+        // (spec 6.6; `check_yt_dlp` says how). The UI hears the end all the same, and its card
+        // offers the update.
         PlayerEvent::EndFile {
             stream_error: Some(class),
             ..
         } => {
             if class.wants_new_yt_dlp() {
-                check_yt_dlp(app);
+                check_yt_dlp(app, *class);
             }
             false
         }
@@ -512,17 +513,50 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
     }
 }
 
-/// Checks yt-dlp if it is due (a missing one at once, see `tools::Service::check_if_due`) on a
-/// thread of its own: this is the mpv event thread, which waits for nothing, and the check may
-/// download. A check that runs already is waited for there, so a failure that comes twice makes
-/// one check.
-fn check_yt_dlp(app: &AppHandle) {
+/// The least time between two forced checks of yt-dlp that failed links ask for.
+const FORCED_CHECK_GAP: Duration = Duration::from_secs(10 * 60);
+
+/// When the last forced check of yt-dlp was asked for by a link (in this run of Kaleido).
+static LAST_FORCED_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Whether a link whose extractor is out of date forces the check of yt-dlp at `now`, `last` being
+/// when it last did (Ruling R11): the first time, and then once in [`FORCED_CHECK_GAP`], so that a
+/// playlist of broken links asks the release once and not for every link.
+fn outdated_check_is_forced(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|last| now.saturating_duration_since(last) >= FORCED_CHECK_GAP)
+}
+
+/// [`outdated_check_is_forced`] for `now`, noting the time in `last` when it is.
+fn claim_forced_check(last: &Mutex<Option<Instant>>, now: Instant) -> bool {
+    // A time is replaced in one step, so a panic elsewhere leaves it whole.
+    let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
+    let forced = outdated_check_is_forced(*last, now);
+    if forced {
+        *last = Some(now);
+    }
+    forced
+}
+
+/// Checks yt-dlp in the background after a link failed with `class` (`Outdated` or `Missing`;
+/// spec 6.6). An out-of-date extractor forces the check (`tools::Service::check_now`: it reads the
+/// release's checksum list, and downloads only when there is a newer yt-dlp), but at most once in
+/// [`FORCED_CHECK_GAP`]; otherwise, and for a missing yt-dlp, the check is made only when it is due
+/// (`tools::Service::check_if_due`: a missing yt-dlp at once, unless a failed attempt still backs
+/// off). On a thread of its own: this is the mpv event thread, which waits for nothing, and the
+/// check may download. A check that runs already is waited for there.
+fn check_yt_dlp(app: &AppHandle, class: StreamError) {
+    let forced =
+        class == StreamError::Outdated && claim_forced_check(&LAST_FORCED_CHECK, Instant::now());
     let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("yt-dlp-check".to_owned())
         .spawn(move || {
             if let Some(tools) = app.try_state::<tools::Service>() {
-                tools.check_if_due(tools::ToolId::YtDlp);
+                if forced {
+                    tools.check_now(tools::ToolId::YtDlp);
+                } else {
+                    tools.check_if_due(tools::ToolId::YtDlp);
+                }
             }
         });
     if let Err(error) = spawned {
@@ -540,5 +574,45 @@ fn screenshot(app: &AppHandle, mode: Option<&str>) {
         (Some(mode), Some(glass)) => glass.screenshot(mode),
         (None, _) => tracing::warn!("no such screenshot mode: {mode:?}"),
         (_, None) => tracing::warn!("no screenshot: the glass is not set up yet"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINUTE: Duration = Duration::from_secs(60);
+
+    /// Ruling R11: a link with an out-of-date extractor forces the check of yt-dlp, but not more
+    /// than once in ten minutes.
+    #[test]
+    fn a_forced_check_for_an_outdated_extractor_comes_at_most_every_ten_minutes() {
+        let start = Instant::now();
+        assert!(outdated_check_is_forced(None, start));
+        assert!(!outdated_check_is_forced(Some(start), start));
+        assert!(!outdated_check_is_forced(Some(start), start + 9 * MINUTE));
+        assert!(outdated_check_is_forced(Some(start), start + 10 * MINUTE));
+        assert!(outdated_check_is_forced(Some(start), start + 60 * MINUTE));
+        // A time that is before the last one is no reason to force.
+        assert!(!outdated_check_is_forced(Some(start + 5 * MINUTE), start));
+    }
+
+    /// The first failure claims the forced check, and the ones after it fall back to the check
+    /// that is made when it is due, until the gap is over.
+    #[test]
+    fn a_playlist_of_broken_links_forces_one_check() {
+        let last = Mutex::new(None);
+        let start = Instant::now();
+        assert!(claim_forced_check(&last, start));
+        for seconds in [0, 1, 30, 599] {
+            assert!(
+                !claim_forced_check(&last, start + Duration::from_secs(seconds)),
+                "{seconds} s"
+            );
+        }
+        // The gap counts from the check that was forced, not from the failures after it.
+        assert!(claim_forced_check(&last, start + 10 * MINUTE));
+        assert!(!claim_forced_check(&last, start + 19 * MINUTE));
+        assert!(claim_forced_check(&last, start + 20 * MINUTE));
     }
 }

@@ -58,7 +58,8 @@ pub enum StreamError {
 
 impl StreamError {
     /// Whether a newer yt-dlp may mend it: the extractor is out of date, or there is no yt-dlp
-    /// (spec 6.6: the check of yt-dlp that is made at every such failure).
+    /// (spec 6.6). Kaleido then checks yt-dlp in the background, and the error card offers the
+    /// update (`check_yt_dlp` in lib.rs says when that check is forced).
     pub fn wants_new_yt_dlp(self) -> bool {
         matches!(self, StreamError::Outdated | StreamError::Missing)
     }

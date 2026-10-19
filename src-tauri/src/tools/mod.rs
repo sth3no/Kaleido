@@ -1028,20 +1028,22 @@ impl Service {
     /// the channel of the settings, and returns its state after; a check that runs already is
     /// waited for. Blocks for as long as the downloads take: not for the main thread.
     pub fn check_now(&self, tool: ToolId) -> ToolStatus {
-        let status = self.shared.check(tool, self.shared.host.channel(), true);
-        // When the next check is due may be another time now (a failure backs off).
-        self.shared.wake();
-        status
+        self.check_from_settings(tool, true)
     }
 
     /// Checks `tool` if it is due, as the scheduler would now, from the channel of the settings,
     /// and returns its state after; a check that runs already is waited for. For a link that
-    /// failed because yt-dlp is missing or out of date (spec 6.6: yt-dlp is checked at such a
-    /// failure): a missing yt-dlp is due at once unless a failed attempt still backs off, and an
+    /// failed because yt-dlp is missing or out of date, when a forced check is not wanted
+    /// (spec 6.6): a missing yt-dlp is due at once unless a failed attempt still backs off, and an
     /// installed one only by its schedule, so that a link that keeps failing does not ask the
     /// release over and over. Blocks for as long as the downloads take: not for the event thread.
     pub fn check_if_due(&self, tool: ToolId) -> ToolStatus {
-        let status = self.shared.check(tool, self.shared.host.channel(), false);
+        self.check_from_settings(tool, false)
+    }
+
+    /// [`Shared::check`] from the channel of the settings, then the scheduler looks again.
+    fn check_from_settings(&self, tool: ToolId, force: bool) -> ToolStatus {
+        let status = self.shared.check(tool, self.shared.host.channel(), force);
         // When the next check is due may be another time now (a failure backs off).
         self.shared.wake();
         status
