@@ -14,9 +14,6 @@ import { onToolsStatus } from '../ipc/events';
 import { listenTo } from '../ipc/listen';
 import type { ToolId, ToolStatus } from '../ipc/types';
 
-/** The tools in the order the section lists them. */
-export const TOOLS: readonly ToolId[] = ['ytDlp', 'deno'];
-
 export type ToolStatuses = Readonly<Partial<Record<ToolId, ToolStatus>>>;
 
 /** Whether `value` is a tool's state as Rust gives it (a mock that answers with nothing is not). */

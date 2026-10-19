@@ -21,7 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import { systemBrowsers } from '../../ipc/commands';
 import type { Browser } from '../../ipc/types';
-import { isUnusable, orderBrowsers } from '../../shell/notices/BrowserChooser';
+import { isUnusable, noteKeyOf, orderBrowsers } from '../../shell/notices/browsers';
 import Dropdown, { type DropdownOption } from './Dropdown';
 import type { FieldProps } from './FieldProps';
 import styles from './Fields.module.css';
@@ -30,14 +30,6 @@ import { useRustList } from './useRustList';
 
 /** Starts the value of an entry that cannot be chosen: it has no spec of its own, and no spec starts with `#`. */
 const NO_PROFILE = '#no-profile:';
-
-/** The key of the sentence that goes with the browser, if it has one. */
-const warningOf = (browser: Browser): string | null =>
-  isUnusable(browser)
-    ? 'errors.browser.noProfile'
-    : browser.warning === 'chromiumCookies'
-      ? 'errors.browser.chromiumCookies'
-      : null;
 
 export default function BrowserField({ describedBy, ...props }: FieldProps<string>) {
   const { t } = useTranslation();
@@ -54,12 +46,12 @@ export default function BrowserField({ describedBy, ...props }: FieldProps<strin
   const options = useMemo<DropdownOption[]>(() => {
     const list: DropdownOption[] = [{ value: '', label: t('settings.fields.browser.none') }];
     for (const browser of browsers ?? []) {
-      const warning = warningOf(browser);
+      const noteKey = noteKeyOf(browser);
       const unusable = isUnusable(browser);
       list.push({
         value: unusable ? `${NO_PROFILE}${browser.id}` : browser.spec,
         label: browser.label,
-        note: warning === null ? undefined : t(warning),
+        note: noteKey === null ? undefined : t(noteKey),
         disabled: unusable,
       });
     }
@@ -71,7 +63,7 @@ export default function BrowserField({ describedBy, ...props }: FieldProps<strin
   const note = gone
     ? 'settings.fields.browser.gone'
     : chosen !== undefined
-      ? warningOf(chosen)
+      ? noteKeyOf(chosen)
       : browsers !== null && browsers.length === 0
         ? 'errors.browser.empty'
         : null;

@@ -3,9 +3,9 @@
  *
  * - A row for yt-dlp and one for Deno, each with the version that is installed (or "Not installed"),
  *   when the release was last checked (told by `Intl`, relative to now: "3 hours ago"), what the tool is
- *   doing (downloading, checking, up to date, or that the last check failed, with Rust's reason under
- *   it) and "Check now". The state is read when the section opens and follows `tools:status`, so a check
- *   that runs in the background shows here. "Check now" is busy until Rust has answered, and keeps the
+ *   doing (downloading, checking, up to date, or that it needs attention: the last check failed, or the
+ *   Deno that is there is too old; Rust's reason is under it) and "Check now". The state is read when the
+ *   section opens and follows `tools:status`, so a check that runs in the background shows here. "Check now" is busy until Rust has answered, and keeps the
  *   focus meanwhile (`aria-disabled`, not `disabled`).
  * - Between them the channel of yt-dlp (`updates.ytdlpChannel`, Stable or Nightly), an ordinary
  *   setting row: nightly gets yt-dlp's fixes for websites sooner. Changing it makes Rust check at once,
@@ -67,6 +67,7 @@ function ToolRow({ tool, status, unreadable, onStatus, onRetry }: ToolRowProps) 
     toolsCheck(tool).then(
       (answer) => {
         if (isToolStatus(answer)) onStatus(answer);
+        else console.warn(`tools_check did not answer with a state of ${tool}`, answer);
         setPending(false);
       },
       (reason: unknown) => {

@@ -9,7 +9,8 @@
  *   ones, each with the warning Rust gives it (on Windows yt-dlp mostly cannot read their cookies, and
  *   the link then fails as a whole), then the ones without a profile, which are shown with their
  *   sentence and cannot be chosen: an entry with an empty `spec` is never saved. The order within
- *   those groups is Rust's.
+ *   those groups is Rust's. The order, which entries cannot be chosen and the sentence of each are the
+ *   rules of `browsers.ts`, which Settings → Playback uses as well.
  * - With `offerNone` the list ends with "Do not use cookies" (`null`), the way out of a choice yt-dlp
  *   cannot read (the class `cookies`).
  * - No browser found, or a list that could not be read: a sentence and a link to Settings → Playback,
@@ -30,24 +31,9 @@ import { systemBrowsers } from '../../ipc/commands';
 import type { Browser } from '../../ipc/types';
 import panel from '../../panels/Panel.module.css';
 import Icon, { CHECK } from '../Icon';
+import { isUnusable, noteKeyOf, orderBrowsers } from './browsers';
 import styles from './BrowserChooser.module.css';
 import card from './ErrorCards.module.css';
-
-/** An entry with nothing to save: yt-dlp knows no profile of it. Settings → Playback tells them the same way. */
-export const isUnusable = (browser: Browser): boolean =>
-  browser.spec === '' || browser.warning === 'noProfile';
-
-/** A browser that cannot be chosen sorts after the ones that can; one with a warning after those without. */
-const rank = (browser: Browser): number => (isUnusable(browser) ? 2 : browser.warning === null ? 0 : 1);
-
-/**
- * Rust's list in the order the chooser shows it: Firefox and its forks (no warning), the Chromium
- * browsers (with the warning), then the entries without a profile. Rust's order is kept within each.
- */
-export function orderBrowsers(browsers: readonly Browser[]): Browser[] {
-  // `sort` is stable.
-  return [...browsers].sort((a, b) => rank(a) - rank(b));
-}
 
 /** What a row of the list stands for. */
 interface Choice {
@@ -69,11 +55,7 @@ function choiceOf(browser: Browser): Choice {
     key: `browser:${browser.id}`,
     label: browser.label,
     spec: browser.spec,
-    note: unusable
-      ? 'errors.browser.noProfile'
-      : browser.warning === 'chromiumCookies'
-        ? 'errors.browser.chromiumCookies'
-        : null,
+    note: noteKeyOf(browser),
     unusable,
   };
 }

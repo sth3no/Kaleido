@@ -166,7 +166,7 @@ describe('the tools', () => {
     });
     expect(stateOf('yt-dlp').textContent).toBe('Checking for a new version…');
     expect(stateOf('Deno').textContent).toBe(
-      'The last check failed Deno 2.1.0 is older than 2.3.0, which yt-dlp needs.',
+      'Needs attention Deno 2.1.0 is older than 2.3.0, which yt-dlp needs.',
     );
     // The reason is Rust's, in English; it is marked so, for a screen reader reading Czech.
     expect(within(stateOf('Deno')).getByText(/older than 2\.3\.0/).getAttribute('lang')).toBe('en');
@@ -179,7 +179,7 @@ describe('the tools', () => {
 
   test('a failed state without a reason has no detail', async () => {
     await open({ tools_status: () => [{ ...YT_DLP, state: 'failed', error: null }, DENO] });
-    expect(stateOf('yt-dlp').textContent).toBe('The last check failed');
+    expect(stateOf('yt-dlp').textContent).toBe('Needs attention');
     expect(stateOf('yt-dlp').querySelector('[lang]')).toBeNull();
   });
 });
@@ -231,6 +231,22 @@ describe('Check now', () => {
     expect(sent('tools_check')).toEqual([['tools_check', { tool: 'deno' }]]);
   });
 
+  test('an answer that is no state is told to the console, and ends the wait without changing the row', async () => {
+    await open({ tools_check: () => ({ not: 'a state' }) });
+    fireEvent.click(checkButton('yt-dlp'));
+
+    await waitFor(() => {
+      expect(checkButton('yt-dlp').getAttribute('aria-disabled')).toBe('false');
+    });
+    expect(console.warn).toHaveBeenCalledWith(
+      'tools_check did not answer with a state of ytDlp',
+      { not: 'a state' },
+    );
+    expect(within(tool('yt-dlp')).getByText('Version 2026.08.19')).toBeTruthy();
+    expect(stateOf('yt-dlp').textContent).toBe('Up to date');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   test('a check that failed ends in the failed state with the reason', async () => {
     await open({
       tools_check: () => ({
@@ -242,7 +258,7 @@ describe('Check now', () => {
     fireEvent.click(checkButton('yt-dlp'));
     await waitFor(() => {
       expect(stateOf('yt-dlp').textContent).toBe(
-        'The last check failed The download of yt-dlp.exe failed: no connection',
+        'Needs attention The download of yt-dlp.exe failed: no connection',
       );
     });
     // The tool that is there is still shown, and can be checked again.

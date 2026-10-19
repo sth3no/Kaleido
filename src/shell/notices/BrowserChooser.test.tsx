@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import { initI18n, setLanguage } from '../../i18n';
 import type { Browser } from '../../ipc/types';
 import { useUiStore } from '../../state/uiStore';
-import BrowserChooser, { orderBrowsers, type BrowserChooserProps } from './BrowserChooser';
+import BrowserChooser, { type BrowserChooserProps } from './BrowserChooser';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -81,32 +81,6 @@ const noteOf = (name: string): string | null => {
   const id = radio(name).getAttribute('aria-describedby');
   return id === null ? null : (document.getElementById(id)?.textContent ?? null);
 };
-
-describe('orderBrowsers', () => {
-  test('Firefox and its forks come first, the Chromium browsers after, the ones without a profile last', () => {
-    expect(orderBrowsers(FOUND).map((item) => item.id)).toEqual([
-      'firefox',
-      'librewolf',
-      'edge',
-      'chrome',
-      'zen',
-    ]);
-  });
-
-  test('Rust\'s order is kept within each group, and the list it was given is not changed', () => {
-    const list = [CHROME, EDGE, ZEN, FIREFOX];
-    const before = [...list];
-
-    expect(orderBrowsers(list).map((item) => item.id)).toEqual(['firefox', 'chrome', 'edge', 'zen']);
-    expect(list).toEqual(before);
-  });
-
-  test('an entry with nothing to save goes last, whatever its warning says', () => {
-    const odd = browser('arc', 'Arc', '', null);
-
-    expect(orderBrowsers([odd, EDGE, FIREFOX]).map((item) => item.id)).toEqual(['firefox', 'edge', 'arc']);
-  });
-});
 
 describe('the list', () => {
   test('is a radio group of the browsers Rust found, Firefox and its forks first', async () => {

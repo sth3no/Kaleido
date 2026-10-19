@@ -1110,7 +1110,8 @@ describe('updates', () => {
   test('the channel is saved from the page, and a check is asked for from it', async () => {
     rust({
       settings_set: () => ({ ...SETTINGS, updates: { ytdlpChannel: 'nightly' } }),
-      tools_check: () => TOOLS[0],
+      // The answer of a check of Deno is the state of Deno.
+      tools_check: () => TOOLS[1],
     });
     await open();
     fireEvent.click(sectionButton('Updates'));

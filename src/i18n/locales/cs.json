@@ -337,7 +337,7 @@
       "cookiesFromBrowser": {
         "label": "Cookies z prohlížeče",
         "keywords": "cookies, prohlížeč, přihlášení, účet, relace, věk, firefox, chrome, edge, yt-dlp, odkazy, soukromá videa",
-        "hint": "yt-dlp použije cookies tohoto prohlížeče pro odkazy, aby přehrál to, co vidíš po přihlášení."
+        "hint": "yt-dlp použije cookies tohoto prohlížeče pro odkazy, aby mohl přehrát i to, co je vidět jen po přihlášení."
       },
       "subFont": {
         "label": "Písmo titulků",
@@ -557,12 +557,12 @@
         "checking": "Hledám novou verzi…",
         "downloading": "Stahuji novou verzi…",
         "ready": "Aktuální",
-        "failed": "Poslední kontrola selhala"
+        "failed": "Vyžaduje pozornost"
       },
       "check": "Zkontrolovat teď",
       "checkFailed": "Kontrolu se nepodařilo spustit.",
       "unreadable": "Stav tohoto nástroje se nepodařilo načíst.",
-      "libmpvHint": "Přehrávací jádro, se kterým Kaleido přehrává. Je součástí Kaleida a mění se s jeho vydáními."
+      "libmpvHint": "Jádro, které Kaleido používá k přehrávání. Je součástí Kaleida a mění se s jeho vydáními."
     },
     "about": {
       "versions": {

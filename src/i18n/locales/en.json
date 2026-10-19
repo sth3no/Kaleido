@@ -557,7 +557,7 @@
         "checking": "Checking for a new version…",
         "downloading": "Downloading a new version…",
         "ready": "Up to date",
-        "failed": "The last check failed"
+        "failed": "Needs attention"
       },
       "check": "Check now",
       "checkFailed": "The check could not be started.",
