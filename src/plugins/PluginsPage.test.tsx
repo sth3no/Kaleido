@@ -369,6 +369,42 @@ describe('the switch and the apply bar', () => {
     expect(document.activeElement).toBe(heading());
   });
 
+  test('the card scrolls a focused row clear of the apply bar: the bar says how tall it is', async () => {
+    let height = 64;
+    let measured: () => void = () => undefined;
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => height);
+    vi.stubGlobal(
+      'ResizeObserver',
+      vi.fn(function (callback: () => void) {
+        measured = callback;
+        return { observe: vi.fn(), disconnect: vi.fn() };
+      }),
+    );
+    try {
+      current = state(LIST, { restartNeeded: true });
+      await open();
+      const card = applyRegion().closest<HTMLElement>('[aria-busy]');
+      expect(card?.style.getPropertyValue('--plugins-bar-height')).toBe('64px');
+
+      // The bar grows when the window narrows (its text wraps) ...
+      height = 96;
+      act(() => {
+        measured();
+      });
+      expect(card?.style.getPropertyValue('--plugins-bar-height')).toBe('96px');
+
+      // ... and is nothing once there is nothing to apply.
+      height = 0;
+      emit('plugins:changed', state(LIST));
+      act(() => {
+        measured();
+      });
+      expect(card?.style.getPropertyValue('--plugins-bar-height')).toBe('0px');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   test('the page does not react to the player being idle and empty during the restart', async () => {
     current = state(LIST, { restartNeeded: true, applying: true });
     await open();
@@ -496,6 +532,20 @@ describe('uninstall', () => {
 
     expect(names()).toEqual([]);
     expect(document.activeElement).toBe(heading());
+  });
+
+  test('an uninstall leaves the focus where the user put it meanwhile', async () => {
+    rust({ plugins_uninstall: () => state([UOSC, COPY, RELOAD, SUB_SELECT]) });
+    await open();
+    fireEvent.click(uninstallOf('thumbfast'));
+    fireEvent.click(within(row('thumbfast')).getByRole('button', { name: 'Confirm' }));
+
+    // Rust is still moving the files; the user goes on to another row.
+    switchOf('reload').focus();
+    await settle();
+
+    expect(names()).toEqual(['uosc', 'thumbfast.lua', 'reload', 'sub-select']);
+    expect(document.activeElement).toBe(switchOf('reload'));
   });
 
   test('a refused uninstall keeps the row and the question, and says why', async () => {
@@ -652,6 +702,21 @@ describe('restore essentials', () => {
     expect(screen.queryByRole('button', { name: 'Restore essentials' })).toBeNull();
   });
 
+  test('an essential that fails to install with nothing of the user’s in the way is sent to the log', async () => {
+    current = state([UOSC], { removedEssentials: ['thumbfast', 'reload'] });
+    // thumbfast is neither listed nor offered, and no row is a copy of it: the install failed.
+    rust({ plugins_restore_essentials: () => state([UOSC, RELOAD]) });
+    await open();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore essentials' }));
+    await settle();
+
+    const lines = Array.from(restoreRegion().querySelectorAll('p')).map((line) => line.textContent);
+    expect(lines).toEqual(['Restored: reload.', 'Could not be put back: thumbfast. The log says why.']);
+    // It does not blame a script that is not there.
+    expect(restoreRegion().textContent).not.toContain('added by hand');
+  });
+
   test('a restore that changes nothing leaves no report', async () => {
     current = state([THUMBFAST], { removedEssentials: ['reload'] });
     // Rust brought nothing back and blocked nothing: reload is still offered.
@@ -776,6 +841,61 @@ describe('the keyboard', () => {
     fireEvent.keyDown(ask, { key: 'ArrowDown' });
 
     expect(document.activeElement).toBe(switchOf('uosc'));
+  });
+
+  test('the arrows scroll an open log, and neither move between the rows nor reach mpv', async () => {
+    rust({ plugins_log: () => [{ level: 'error', prefix: 'reload', text: 'cannot find the file' }] });
+    await open();
+    fireEvent.click(within(row('reload')).getByRole('button', { name: 'Reports errors: 3' }));
+    await settle();
+    const log = within(row('reload')).getByRole('region');
+    // jsdom lays nothing out: the scroll position is a plain number here.
+    Object.defineProperty(log, 'scrollTop', { value: 0, writable: true, configurable: true });
+    Object.defineProperty(log, 'scrollHeight', { value: 500, configurable: true });
+    Object.defineProperty(log, 'clientHeight', { value: 100, configurable: true });
+    log.focus();
+
+    // Handled by the log (so mpv does not seek with the arrow) ...
+    expect(fireEvent.keyDown(log, { key: 'ArrowDown' })).toBe(false);
+    expect(log.scrollTop).toBe(32);
+    expect(fireEvent.keyDown(log, { key: 'PageDown' })).toBe(false);
+    expect(log.scrollTop).toBe(132);
+    fireEvent.keyDown(log, { key: 'ArrowUp' });
+    expect(log.scrollTop).toBe(100);
+    fireEvent.keyDown(log, { key: 'End' });
+    expect(log.scrollTop).toBe(500);
+    fireEvent.keyDown(log, { key: 'Home' });
+    expect(log.scrollTop).toBe(0);
+    // ... never above the top ...
+    fireEvent.keyDown(log, { key: 'ArrowUp' });
+    expect(log.scrollTop).toBe(0);
+    // ... and the focus stays in the log: the row did not move on to the next one.
+    expect(document.activeElement).toBe(log);
+    // Other keys are not its own.
+    expect(fireEvent.keyDown(log, { key: 'a' })).toBe(true);
+  });
+
+  test('the arrows trade the focus between the two buttons of the question', async () => {
+    await open();
+    fireEvent.click(uninstallOf('uosc'));
+    const group = within(row('uosc')).getByRole('group');
+    const confirm = within(group).getByRole('button', { name: 'Confirm' });
+    const cancel = within(group).getByRole('button', { name: 'Cancel' });
+    expect(document.activeElement).toBe(cancel);
+
+    expect(fireEvent.keyDown(cancel, { key: 'ArrowUp' })).toBe(false);
+    expect(document.activeElement).toBe(confirm);
+    expect(fireEvent.keyDown(confirm, { key: 'ArrowRight' })).toBe(false);
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(confirm);
+
+    // Not on to the next row.
+    expect(document.activeElement).not.toBe(switchOf('thumbfast.lua'));
+    // Esc still closes the question from either.
+    expect(fireEvent.keyDown(confirm, { key: 'Escape' })).toBe(false);
+    expect(within(row('uosc')).queryByRole('group')).toBeNull();
+    expect(document.activeElement).toBe(uninstallOf('uosc'));
   });
 
   test('Tab reaches the switch, the badge and the buttons of a row in the order they are drawn', async () => {

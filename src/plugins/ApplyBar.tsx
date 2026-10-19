@@ -14,9 +14,12 @@
  *   focus goes to the page's heading, so that the keyboard starts again from the top.
  * - A refused Apply (the player could not be restarted) is said under the bar as an alert; the
  *   changes still wait, and the bar stays.
+ * - The bar covers the top of the scrolled list, so it tells the page how tall it is (`onHeight`,
+ *   0 while it shows nothing): the card scrolls a focused row clear of it (`scroll-padding-top`,
+ *   WCAG 2.4.11).
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { blurAfterPointer } from '../input/forward';
@@ -33,12 +36,38 @@ export interface ApplyBarProps {
   onApply: () => void;
   /** Apply is done and the bar is gone: where the focus was in it, it is lost. */
   onDone: () => void;
+  /** How tall the bar is now (CSS px), with what it says under it; 0 while there is nothing. */
+  onHeight: (height: number) => void;
 }
 
-export default function ApplyBar({ waiting, applying, problem, onApply, onDone }: ApplyBarProps) {
+export default function ApplyBar({
+  waiting,
+  applying,
+  problem,
+  onApply,
+  onDone,
+  onHeight,
+}: ApplyBarProps) {
   const { t } = useTranslation();
+  const area = useRef<HTMLDivElement>(null);
   const slot = useRef<HTMLDivElement>(null);
   const ran = useRef(false);
+
+  // Measured before the paint, and again whenever it changes size (a narrow window wraps it).
+  useLayoutEffect(() => {
+    const element = area.current;
+    if (!element) return undefined;
+    const report = () => {
+      onHeight(element.offsetHeight);
+    };
+    report();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [onHeight]);
 
   useEffect(() => {
     if (applying) {
@@ -61,7 +90,7 @@ export default function ApplyBar({ waiting, applying, problem, onApply, onDone }
   }, [applying, waiting, onDone]);
 
   return (
-    <div className={styles.applyArea}>
+    <div ref={area} className={styles.applyArea}>
       <div ref={slot} role="status" aria-label={t('plugins.apply.label')} className={styles.applySlot}>
         {(waiting || applying) && (
           <div className={styles.apply} data-applying={applying}>

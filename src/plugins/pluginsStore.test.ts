@@ -305,15 +305,19 @@ describe('apply', () => {
 });
 
 describe('restore essentials', () => {
-  test('restoreReport names what came back and what is blocked', () => {
-    const after = state([plugin('reload'), plugin('thumbfast.lua', { source: 'manual' })], {
-      removedEssentials: ['sub-select'],
-    });
+  test('restoreReport names what came back, what the user’s own script keeps out, and what failed', () => {
+    const after = state(
+      [plugin('reload'), plugin('thumbfast.lua', { source: 'manual', copyOf: 'thumbfast' })],
+      { removedEssentials: ['sub-select'] },
+    );
 
-    expect(restoreReport(['reload', 'thumbfast', 'sub-select'], after)).toEqual({
+    expect(restoreReport(['reload', 'thumbfast', 'sub-select', 'pocket'], after)).toEqual({
       back: ['reload'],
-      // thumbfast is neither listed as an essential nor offered; sub-select is still offered.
+      // thumbfast is neither listed as an essential nor offered, and a row says it is the user's
+      // copy of it. pocket is neither listed nor offered, and nobody's copy: its install failed.
+      // sub-select is still offered, so it is not in the report.
       blocked: ['thumbfast'],
+      failed: ['pocket'],
     });
     expect(restoreReport(['sub-select'], after)).toBeNull();
     expect(restoreReport([], after)).toBeNull();
@@ -323,12 +327,20 @@ describe('restore essentials', () => {
     store.getState().setState(state([plugin('thumbfast')], { removedEssentials: ['reload', 'sub-select'] }));
     rust({
       plugins_restore_essentials: () =>
-        state([plugin('thumbfast'), plugin('reload'), plugin('sub-select.lua', { source: 'manual' })]),
+        state([
+          plugin('thumbfast'),
+          plugin('reload'),
+          plugin('sub-select.lua', { source: 'manual', copyOf: 'sub-select' }),
+        ]),
     });
 
     await store.getState().restoreEssentials();
 
-    expect(store.getState().restored).toEqual({ back: ['reload'], blocked: ['sub-select'] });
+    expect(store.getState().restored).toEqual({
+      back: ['reload'],
+      blocked: ['sub-select'],
+      failed: [],
+    });
     expect(store.getState().restoring).toBe(false);
     expect(store.getState().state?.removedEssentials).toEqual([]);
   });
@@ -336,7 +348,7 @@ describe('restore essentials', () => {
   test('a second restore while one runs is not sent, and the old report goes when a new one starts', async () => {
     const answer = deferred<PluginsState>();
     store.getState().setState(state([], { removedEssentials: ['reload'] }));
-    store.setState({ restored: { back: ['sub-select'], blocked: [] } });
+    store.setState({ restored: { back: ['sub-select'], blocked: [], failed: [] } });
     rust({ plugins_restore_essentials: () => answer.promise });
 
     const first = store.getState().restoreEssentials();
@@ -346,7 +358,7 @@ describe('restore essentials', () => {
 
     answer.resolve(state([plugin('reload')]));
     await first;
-    expect(store.getState().restored).toEqual({ back: ['reload'], blocked: [] });
+    expect(store.getState().restored).toEqual({ back: ['reload'], blocked: [], failed: [] });
   });
 
   test('a restore Rust refuses is kept for the button', async () => {
@@ -369,7 +381,7 @@ describe('restore essentials', () => {
       error: { name: 'uosc', code: 'busy', message: '' },
       applyProblem: { code: 'unavailable', message: '' },
       restoreProblem: { code: 'io', message: 'x' },
-      restored: { back: ['reload'], blocked: [] },
+      restored: { back: ['reload'], blocked: [], failed: [] },
     });
 
     store.getState().leave();

@@ -18,9 +18,11 @@
  * - While an action on the row runs, or Apply does, the controls are `aria-disabled` and do
  *   nothing; they are not `disabled`, which would take the focus from the keyboard user who just
  *   pressed one. What Rust refused is said in the row, as an alert.
- * - The arrow keys move between the rows (to the next row's switch; they wrap), Esc closes an open
- *   confirmation or log. Both say so with `preventDefault`, so that mpv does not get them (a seek,
- *   leaving the fullscreen).
+ * - The arrow keys of the row's own controls (the switch, the errors badge, "Uninstall") move
+ *   between the rows (to the next row's switch; they wrap). The log and the open question have the
+ *   arrows for themselves: the log scrolls (`PluginLog`), the question's two buttons trade the
+ *   focus. Esc closes an open confirmation or log. All of them say so with `preventDefault`, so
+ *   that mpv does not get the key (a seek, leaving the fullscreen).
  *
  * The "Settings" button is Task 14's: there is none until it exists.
  */
@@ -36,6 +38,12 @@ import { localized } from './localized';
 import PluginLog from './PluginLog';
 import styles from './PluginsPage.module.css';
 import { problemText, type PluginProblem } from './problem';
+
+/** The log and the open question: what in a row has keys of its own. */
+const EXTRA = '[role="region"], [role="group"]';
+
+/** The arrows that trade the focus between the question's two buttons. */
+const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 
 export interface PluginRowProps {
   plugin: PluginInfo;
@@ -79,6 +87,7 @@ export default function PluginRow({
   const logId = `${ids}-log`;
   const [logOpen, setLogOpen] = useState(false);
   const uninstallButton = useRef<HTMLButtonElement>(null);
+  const confirmButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const logToggle = useRef<HTMLButtonElement>(null);
   const idle = !busy && !locked;
@@ -98,9 +107,22 @@ export default function PluginRow({
   if (plugin.duplicate) notes.push(t('plugins.row.duplicateText'));
   if (!plugin.enabled && plugin.running) notes.push(t('plugins.row.stopsOnApply'));
 
+  // From the log or the question: those have the arrows for themselves.
+  const fromExtra = (e: KeyboardEvent<HTMLLIElement>): boolean =>
+    e.target instanceof Element && e.currentTarget.contains(e.target.closest(EXTRA));
+
+  const onConfirmKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !ARROWS.has(e.key)) return;
+    // Two buttons: any arrow goes to the other one. Handled here, so mpv does not seek.
+    e.preventDefault();
+    const other = document.activeElement === cancelButton.current ? confirmButton : cancelButton;
+    other.current?.focus();
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>) => {
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (fromExtra(e)) return;
       // Handled here: mpv does not get the arrow too.
       e.preventDefault();
       onMove(e.key === 'ArrowDown' ? 1 : -1);
@@ -213,7 +235,13 @@ export default function PluginRow({
       </div>
 
       {confirming && (
-        <div id={confirmId} role="group" aria-labelledby={questionId} className={styles.confirm}>
+        <div
+          id={confirmId}
+          role="group"
+          aria-labelledby={questionId}
+          className={styles.confirm}
+          onKeyDown={onConfirmKeyDown}
+        >
           <p id={questionId} className={styles.confirmText}>
             {t('plugins.confirm.question', { name: plugin.name })}
           </p>
@@ -222,6 +250,7 @@ export default function PluginRow({
           )}
           <div className={styles.confirmActions}>
             <button
+              ref={confirmButton}
               type="button"
               className={styles.danger}
               aria-disabled={!idle}

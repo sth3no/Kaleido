@@ -14,11 +14,12 @@
  *   never in a popover or any layer of their own: the page layer is clipped around the mini player
  *   (Ruling R46). Only one row asks at a time; the page holds which.
  * - Uninstall takes a row away, and the focus with it; it goes to the row next to it, or to the
- *   heading when there is none.
- * - "Restore essentials" brings back the essentials the user removed. When a script of the user's
- *   own of the same name is in the way, Rust drops the stale record and installs nothing: that
- *   essential is then neither listed nor offered, so the page says so after the action instead of
- *   saying nothing (`restoreReport`).
+ *   heading when there is none. A focus that is somewhere else by then stays there.
+ * - "Restore essentials" brings back the essentials the user removed. An essential that does not
+ *   come back is then neither listed nor offered (Rust drops the stale record), so the page says
+ *   so after the action instead of saying nothing (`restoreReport`): a script of the user's own of
+ *   the same name in the way (a row whose `copyOf` names it) has its own sentence, any other
+ *   failure sends the user to the log.
  * - The top of a docked page is the window's title bar (a drag strip over it), so nothing of the
  *   page is there. While a video plays, the mini player is in the corner and the shell clips the
  *   page around it: the card keeps room at its end (`--plugins-mini-reserve`) so that the last rows
@@ -70,6 +71,8 @@ export default function PluginsPage() {
   const report = useRef<HTMLDivElement>(null);
   /** "Restore essentials" was pressed with the keyboard: the focus goes to the report if the button goes. */
   const reportFocus = useRef(false);
+  /** How tall the apply bar is: the card scrolls a focused row clear of it. */
+  const [barHeight, setBarHeight] = useState(0);
   const hintId = useId();
 
   // Subscribed before the plugins are read: a change in between is not lost.
@@ -88,11 +91,15 @@ export default function PluginsPage() {
   // A row that is gone cannot be asking.
   const askingName = plugins.some((plugin) => plugin.name === asking) ? asking : null;
 
-  // The plugin that was uninstalled is gone: the focus it had goes on to the next row.
+  // The plugin that was uninstalled is gone, and so is the focus that was in its row: it goes on to
+  // the next row. A focus that is somewhere else (the user went on while Rust moved the files) stays.
   useEffect(() => {
     const pending = removal.current;
     if (pending === null || plugins.some((plugin) => plugin.name === pending.name)) return;
     removal.current = null;
+    const active = document.activeElement;
+    // Lost, or in the row that went (it is not in the page any more).
+    if (active !== null && active !== document.body && active.isConnected) return;
     const next = pending.next === null ? undefined : switches.current.get(pending.next);
     (next ?? heading.current)?.focus();
   }, [plugins]);
@@ -106,6 +113,9 @@ export default function PluginsPage() {
 
   const focusHeading = useCallback(() => {
     heading.current?.focus();
+  }, []);
+  const barMeasured = useCallback((height: number) => {
+    setBarHeight(height);
   }, []);
 
   const move = (from: string, step: -1 | 1) => {
@@ -147,6 +157,7 @@ export default function PluginsPage() {
       </header>
       <div
         className={`${glass.glass} ${styles.content}`}
+        style={{ '--plugins-bar-height': `${barHeight}px` } as CSSProperties}
         aria-busy={state === null && !loadFailed}
       >
         <ApplyBar
@@ -157,6 +168,7 @@ export default function PluginsPage() {
             void usePluginsStore.getState().apply();
           }}
           onDone={focusHeading}
+          onHeight={barMeasured}
         />
 
         {state === null &&
@@ -260,6 +272,11 @@ export default function PluginsPage() {
             {restored !== null && restored.blocked.length > 0 && (
               <p className={styles.reportLine}>
                 {t('plugins.restore.blocked', { names: listOf(restored.blocked, i18n.language) })}
+              </p>
+            )}
+            {restored !== null && restored.failed.length > 0 && (
+              <p className={styles.reportLine}>
+                {t('plugins.restore.failed', { names: listOf(restored.failed, i18n.language) })}
               </p>
             )}
           </div>

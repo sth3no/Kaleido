@@ -153,7 +153,8 @@
       "label": "Výsledek obnovení",
       "hint": "Vrátí odebrané essentials: {{names}}.",
       "back": "Obnoveno: {{names}}.",
-      "blocked": "Neobnoveno: {{names}}. Brání tomu ručně přidaný skript stejného jména. Odstraň ho nebo přejmenuj a Kaleido essential nainstaluje při dalším spuštění."
+      "blocked": "Neobnoveno: {{names}}. Brání tomu ručně přidaný skript stejného jména. Odstraň ho nebo přejmenuj a Kaleido essential nainstaluje při dalším spuštění.",
+      "failed": "Nepodařilo se vrátit: {{names}}. Důvod je v logu."
     },
     "errors": {
       "busy": "Změny počkají, až Použít skončí.",

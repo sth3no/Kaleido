@@ -40,14 +40,19 @@ export interface RowError extends PluginProblem {
 }
 
 /**
- * What "Restore essentials" did, by name: the essentials that are installed again, and the ones
- * that are not. The ones that are not are the essentials a script of the user's own of the same
- * name is in the way of: Rust drops the stale record and leaves the file alone, so the essential
- * is neither in the list nor offered any more.
+ * What "Restore essentials" did, by name. The essentials that are not installed again are neither
+ * in the list nor offered any more (Rust dropped the stale record), for one of two reasons that the
+ * list tells apart:
+ *
+ * - `blocked`: a script of the user's own of the same name is in the way. Rust leaves it alone and
+ *   installs nothing, and says whose copy it is (`PluginInfo.copyOf` names the essential).
+ * - `failed`: nothing of the user's is in the way, and the install failed all the same (or something
+ *   that is not a script sits where the essential goes). Rust's log says why.
  */
 export interface RestoreReport {
   back: readonly string[];
   blocked: readonly string[];
+  failed: readonly string[];
 }
 
 export interface PluginsData {
@@ -80,17 +85,21 @@ export interface PluginsData {
   leave: () => void;
 }
 
-/** The essentials of `before` that came back in `after`, and the ones that did not. */
+/**
+ * The essentials of `before` that came back in `after`, the ones a script of the user's own keeps
+ * out, and the ones that did not come back for another reason. One that is still offered is left
+ * out of the report: the button is still there for it.
+ */
 export function restoreReport(before: readonly string[], after: PluginsState): RestoreReport | null {
   const installed = new Set(
     after.plugins.filter((plugin) => plugin.source === 'bundled').map((plugin) => plugin.name),
   );
+  const copied = new Set(after.plugins.map((plugin) => plugin.copyOf));
   const back = before.filter((name) => installed.has(name));
-  // Not listed, and not offered either: the user's own script is in the way.
-  const blocked = before.filter(
-    (name) => !installed.has(name) && !after.removedEssentials.includes(name),
-  );
-  return back.length === 0 && blocked.length === 0 ? null : { back, blocked };
+  const gone = before.filter((name) => !installed.has(name) && !after.removedEssentials.includes(name));
+  const blocked = gone.filter((name) => copied.has(name));
+  const failed = gone.filter((name) => !copied.has(name));
+  return back.length + blocked.length + failed.length === 0 ? null : { back, blocked, failed };
 }
 
 const isState = (value: unknown): value is PluginsState =>

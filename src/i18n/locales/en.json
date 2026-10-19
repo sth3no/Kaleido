@@ -153,7 +153,8 @@
       "label": "Result of restoring",
       "hint": "Brings back the essentials you removed: {{names}}.",
       "back": "Restored: {{names}}.",
-      "blocked": "Not restored: {{names}}. A script of the same name that was added by hand is in the way. Remove or rename it, and Kaleido installs the essential at its next start."
+      "blocked": "Not restored: {{names}}. A script of the same name that was added by hand is in the way. Remove or rename it, and Kaleido installs the essential at its next start.",
+      "failed": "Could not be put back: {{names}}. The log says why."
     },
     "errors": {
       "busy": "Changes wait until Apply finishes.",

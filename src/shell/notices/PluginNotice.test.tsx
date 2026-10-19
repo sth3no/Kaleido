@@ -302,10 +302,11 @@ describe('a plugin that reports errors (spec 10.4)', () => {
 
     // The oldest card that is not at work goes: the second.
     expect(cards()).toHaveLength(3);
-    expect(screen.queryByText('Plugin second reports errors')).toBeNull();
-    expect(screen.getByText('Plugin first reports errors')).toBeTruthy();
-    expect(screen.getByText('Plugin third reports errors')).toBeTruthy();
-    expect(screen.getByText('Plugin fourth reports errors')).toBeTruthy();
+    // Scoped to the cards: the polite live region repeats the title of the newest one.
+    expect(() => card('second')).toThrow();
+    expect(within(card('first')).getByText('Plugin first reports errors')).toBeTruthy();
+    expect(within(card('third')).getByText('Plugin third reports errors')).toBeTruthy();
+    expect(within(card('fourth')).getByText('Plugin fourth reports errors')).toBeTruthy();
   });
 
   test('Esc on the card closes it and does not reach mpv', () => {
@@ -327,9 +328,12 @@ describe('a plugin that reports errors (spec 10.4)', () => {
       setLanguage('cs');
     });
 
-    expect(screen.getByText('Plugin thumbfast hlásí chyby')).toBeTruthy();
-    expect(screen.getByText('Dál běží. Kaleido sám nic nevypíná.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Vypnout' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Moje pluginy' })).toBeTruthy();
+    // Scoped to the card: the polite live region repeats its title. (`card()` looks for English.)
+    const czech = within(cards()[0] as HTMLElement);
+    expect(czech.getByText('Plugin thumbfast hlásí chyby')).toBeTruthy();
+    expect(czech.getByText('Dál běží. Kaleido sám nic nevypíná.')).toBeTruthy();
+    expect(czech.getByRole('button', { name: 'Vypnout' })).toBeTruthy();
+    expect(czech.getByRole('button', { name: 'Moje pluginy' })).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toBe('Plugin thumbfast hlásí chyby');
   });
 });

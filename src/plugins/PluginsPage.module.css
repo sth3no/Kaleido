@@ -47,13 +47,18 @@
   color: color-mix(in srgb, currentColor 72%, transparent);
 }
 
-/* The card the list is on; it scrolls, the page around it does not. */
+/*
+ * The card the list is on; it scrolls, the page around it does not. The apply bar sticks to its
+ * top and covers the first rows of a scrolled list, so a row that takes the focus is scrolled clear
+ * of it (--plugins-bar-height is the bar's, measured by ApplyBar.tsx; 0 while there is none).
+ */
 .content {
   flex: 1;
   box-sizing: border-box;
   min-height: 0;
   overflow-y: auto;
   padding: var(--k-space-l) var(--k-space-xl);
+  scroll-padding-top: calc(var(--plugins-bar-height, 0px) + var(--k-space-s));
 }
 
 /*
