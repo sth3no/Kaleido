@@ -8,11 +8,18 @@
 //! ([`Streams::entry_options`]). What every link loads with otherwise is mpv's `ytdl-format` from
 //! the settings ([`crate::settings::mpv_keys::STREAM_QUALITY_PRESETS`]).
 //!
+//! The choice is what the entry that plays loaded with (final review I-4, Ruling R17): the entries
+//! Kaleido loads with it are known by their playlist ids ([`Reload::run`], [`Streams::restored`]),
+//! and when another entry of the link starts (the `reload` essential's Ctrl+R or its recovery from
+//! a stall, going back in the playlist), which loads with the default, the choice goes and the UI
+//! is told ([`Streams::on_playlist`]). A choice whose reload was not made (another entry plays by
+//! then) goes back to what plays the same way.
+//!
 //! A failed probe says why in the classes of the error card ([`classify`] over yt-dlp's stderr)
 //! and with the last line yt-dlp wrote, cleaned of paths and links as the diagnostics are
 //! ([`sanitize`]): the UI shows it.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -34,6 +41,9 @@ pub const FORMATS_EVENT: &str = "stream:formats";
 /// mpv's property with the path or link of what plays, as it was loaded.
 pub const PATH: &str = "path";
 
+/// mpv's playlist, with the id of each entry and the one that plays.
+pub const PLAYLIST: &str = "playlist";
+
 /// How many links the qualities are kept for: the one played longest ago goes first.
 pub const CACHE_SIZE: usize = 32;
 
@@ -45,6 +55,11 @@ pub const PROBES_AT_ONCE: usize = 2;
 
 /// mpv's option for yt-dlp's format selection, per file here.
 const YTDL_FORMAT: &str = "ytdl-format";
+
+/// How many entries loaded with a chosen quality are remembered ([`State::made`]): the newest,
+/// mpv's ids only grow. A playlist with more entries of links with a choice than this loses the
+/// choice when one of the oldest plays again.
+const MADE_KEPT: usize = 256;
 
 /// What is known of the qualities of a link: the payload of `stream:formats` and what
 /// `stream_formats` returns.
@@ -97,7 +112,9 @@ pub type Probe = Arc<dyn Fn(&str) -> Result<StreamInfo, ProbeError> + Send + Syn
 pub type Emit = Arc<dyn Fn(&StreamFormats) + Send + Sync>;
 
 /// The qualities of the links that played (managed by the app; Ruling R4: the probe and the emit
-/// are given, so that the tests give fakes).
+/// are given, so that the tests give fakes). A clone is the same streams (a [`Reload`] on the
+/// request thread holds one).
+#[derive(Clone)]
 pub struct Streams {
     shared: Arc<Shared>,
 }
@@ -123,6 +140,16 @@ struct State {
     current: Option<String>,
     /// How many probes run.
     probing: usize,
+    /// The playlist entries Kaleido loaded a link with a chosen quality, by mpv's id of the entry
+    /// in the running core, with that `ytdl-format`: the new entry of a change of quality
+    /// ([`Reload::run`]) and the entries a restart of the core loaded again
+    /// ([`Streams::restored`]). Every other entry of a link loads with the default.
+    made: BTreeMap<i64, String>,
+    /// The entry mpv plays, by its id and `filename`, as its `playlist` last said.
+    playing: Option<(i64, String)>,
+    /// A restart of the core runs: the ids of the new core's entries are not known yet, and the
+    /// entries that start meanwhile are not judged ([`Streams::restarting`]).
+    restarting: bool,
 }
 
 struct Link {
@@ -184,6 +211,47 @@ impl State {
             chosen: self.chosen.get(url).cloned(),
         })
     }
+
+    /// Kaleido loaded the entry `id` with the quality `format` ([`State::made`]).
+    fn remember(&mut self, id: i64, format: &str) {
+        self.made.insert(id, format.to_owned());
+        while self.made.len() > MADE_KEPT {
+            self.made.pop_first();
+        }
+    }
+
+    /// The entry `id` of the link `url` plays: the link's choice is what that entry loaded with,
+    /// its chosen quality if Kaleido loaded it with one, the default otherwise. Whether the choice
+    /// changed.
+    fn settle(&mut self, id: i64, url: &str) -> bool {
+        let loaded = self.made.get(&id).cloned();
+        if self.chosen.get(url) == loaded.as_ref() {
+            return false;
+        }
+        match loaded {
+            Some(format) => {
+                self.chosen.insert(url.to_owned(), format);
+            }
+            None => {
+                self.chosen.remove(url);
+            }
+        }
+        true
+    }
+}
+
+/// The entry that plays in mpv's `playlist` (its JSON), by its id and `filename`; `None` while
+/// none does (between two files, idle) or where the playlist cannot be read.
+fn playing_entry(playlist: &Value) -> Option<(i64, String)> {
+    playlist.as_array()?.iter().find_map(|entry| {
+        if entry.get("playing").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        Some((
+            entry.get("id").and_then(Value::as_i64)?,
+            entry.get("filename").and_then(Value::as_str)?.to_owned(),
+        ))
+    })
 }
 
 impl Shared {
@@ -345,17 +413,130 @@ impl Streams {
 
     /// `sources` are opened (Ruling R12; every way of opening goes through
     /// `system::open_on_player`, which tells this first): a link among them is opened anew and plays
-    /// in the default quality, so a quality chosen for it before is forgotten, and the UI is told
-    /// where its formats are known. The entries a change of quality loads are no open: they keep
-    /// theirs, and a restart of the core loads the link's entries with a choice that is still there.
+    /// in the default quality, so a quality chosen for it before is forgotten. What was known of
+    /// its qualities goes too (final review minor 1: a fresh start; a new yt-dlp, Deno or other
+    /// cookies may know more now), and it is asked again when it plays, at once when it plays
+    /// already (mpv may not report the same `path` again). A probe of it that runs stays, one at a
+    /// time. The UI is told where its formats are known then. An entry of the link that plays
+    /// goes on with what it loaded with, until the new one starts (a link appended while it plays
+    /// keeps its choice: [`Streams::on_playlist`]). The entries a change of quality loads are no
+    /// open: they keep theirs, and a restart of the core loads the link's entries with a choice
+    /// that is still there.
     pub fn opened(&self, sources: &[Source]) {
         let mut state = self.shared.lock();
         for source in sources {
-            if let Source::Url(url) = source
-                && state.chosen.remove(url.as_str()).is_some()
+            let Source::Url(url) = source else {
+                continue;
+            };
+            let url = url.as_str();
+            let before = state.chosen.remove(url);
+            if let Some((id, playing)) = state.playing.clone()
+                && playing == url
             {
-                self.shared.tell(&state, url.as_str());
+                state.settle(id, url);
             }
+            let changed = state.chosen.get(url) != before.as_ref();
+            let known = matches!(
+                state.link(url),
+                Some(FormatsState::Ready { .. } | FormatsState::Failed { .. })
+            );
+            if known && let Some(at) = state.position(url) {
+                state.links.remove(at);
+            }
+            if known && state.current.as_deref() == Some(url) {
+                state.put(url, FormatsState::Loading);
+                self.shared.tell(&state, url);
+                self.spawn_probe(&mut state, url);
+            } else if changed {
+                self.shared.tell(&state, url);
+            }
+        }
+    }
+
+    /// mpv's `playlist` changed to `playlist` (its JSON, as the player's state reports it). Called
+    /// on the mpv event thread (lib.rs, `route`): it only looks. When another entry plays than
+    /// before and it is a link, the link's choice becomes what that entry loaded with
+    /// ([`State::made`]): an entry Kaleido did not load with a chosen quality (the `reload`
+    /// essential's, an earlier one of the playlist) plays the default, and the UI hears that the
+    /// choice is gone. While a restart of the core runs, nothing is judged.
+    pub fn on_playlist(&self, playlist: &Value) {
+        let mut state = self.shared.lock();
+        let playing = playing_entry(playlist);
+        if state.playing == playing {
+            return;
+        }
+        state.playing.clone_from(&playing);
+        if state.restarting {
+            return;
+        }
+        if let Some((id, url)) = playing
+            && is_link(&url)
+            && state.settle(id, &url)
+        {
+            self.shared.tell(&state, &url);
+        }
+    }
+
+    /// A change of quality loaded the entry `id` with `format` (on the request thread,
+    /// [`Reload::run`], before the old entry goes and the new one can start).
+    fn loaded(&self, id: i64, format: &str) {
+        self.shared.lock().remember(id, format);
+    }
+
+    /// The change of quality of `url` loaded nothing ([`Reload::run`]): the choice goes back to
+    /// what the entry that plays loaded with, where that is the link (Task 12's second pick that
+    /// came while the first was on its way). The UI is told when it changed.
+    fn not_loaded(&self, url: &str) {
+        let mut state = self.shared.lock();
+        if let Some((id, playing)) = state.playing.clone()
+            && playing == url
+            && state.settle(id, url)
+        {
+            self.shared.tell(&state, url);
+        }
+    }
+
+    /// A restart of the core begins (lib.rs, `restart_engine`): the old core's entry ids mean
+    /// nothing in the new one, and the entries that start before [`Streams::restored`] are not
+    /// judged.
+    pub fn restarting(&self) {
+        let mut state = self.shared.lock();
+        state.restarting = true;
+        state.playing = None;
+    }
+
+    /// The restart is over (lib.rs, `restart_engine`); `playlist` is the new core's (its JSON
+    /// text), or `None` where no new core runs. Its entries of a link with a choice were loaded
+    /// with it ([`Streams::entry_options`]): they are the ones Kaleido made now. The entry that
+    /// plays is judged as any that starts ([`Streams::on_playlist`]).
+    pub fn restored(&self, playlist: Option<&str>) {
+        let mut state = self.shared.lock();
+        state.restarting = false;
+        let Some(playlist) = playlist else {
+            return;
+        };
+        let Ok(playlist) = serde_json::from_str::<Value>(playlist) else {
+            tracing::warn!("the new core's playlist cannot be read for the chosen qualities");
+            return;
+        };
+        state.made.clear();
+        for entry in playlist.as_array().into_iter().flatten() {
+            let (Some(id), Some(filename)) = (
+                entry.get("id").and_then(Value::as_i64),
+                entry.get("filename").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            if let Some(format) = state.chosen.get(filename).cloned() {
+                state.remember(id, &format);
+            }
+        }
+        state.playing = playing_entry(&playlist);
+        if let Some((id, url)) = state.playing.clone()
+            && is_link(&url)
+            && state.settle(id, &url)
+        {
+            self.shared.tell(&state, &url);
         }
     }
 
@@ -384,32 +565,54 @@ impl Reload {
     /// Loads the link again in place ([`quality_commands`]), with the `mpv` of a `Request::Call`
     /// (never `Engine::call` on this thread). Reads where it is now, and loads only the entry that
     /// plays when it is the link ([`playing_index`]): when another entry plays by then, or the
-    /// switch to the next one is on its way, nothing is loaded and the log says why (the quality
-    /// stays chosen for the link, for a restart of the core). The new entry starts where the old
-    /// one is ([`Reload::start`]). The old entry goes only once the new one is in the playlist.
-    pub fn run(&self, mpv: &Mpv) {
+    /// switch to the next one is on its way, nothing is loaded and the log says why, and the
+    /// link's choice in `streams` goes back to what the entry that plays loaded with (Task 12's
+    /// second pick; a restart of the core loads it with that). The new entry starts where the old
+    /// one is ([`Reload::start`]); `streams` knows it as one loaded with the quality before the old
+    /// entry goes, which is only once the new one is in the playlist.
+    pub fn run(&self, mpv: &Mpv, streams: &Streams) {
+        if !self.load(mpv, streams) {
+            streams.not_loaded(&self.url);
+        }
+    }
+
+    /// [`Reload::run`]: whether a new entry was put in the playlist.
+    fn load(&self, mpv: &Mpv, streams: &Streams) -> bool {
         let index = match mpv.get_string("playlist") {
             Ok(playlist) => playing_index(&playlist, &self.url),
             Err(error) => {
                 tracing::warn!("cannot read mpv's playlist for a new quality: {error}");
-                return;
+                return false;
             }
         };
         let index = match index {
             Ok(index) => index,
             Err(why) => {
                 tracing::info!("the link is not loaded with its new quality: {why}");
-                return;
+                return false;
             }
         };
         let start = self.start(mpv);
-        for args in quality_commands(&self.url, self.format.as_deref(), start.as_deref(), index) {
-            let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            if let Err(error) = mpv.command(&args) {
-                tracing::warn!("mpv refuses the {} of a new quality: {error}", args[0]);
-                return;
+        let [load, remove] =
+            quality_commands(&self.url, self.format.as_deref(), start.as_deref(), index);
+        if let Err(error) = run_command(mpv, &load) {
+            tracing::warn!("mpv refuses the loadfile of a new quality: {error}");
+            return false;
+        }
+        // `insert-next-play` put it right after the entry that plays.
+        let new = format!("playlist/{}/id", index + 1);
+        match (mpv.get_i64(&new), &self.format) {
+            (Ok(id), Some(format)) => streams.loaded(id, format),
+            // The default is what an entry Kaleido does not know loads with too.
+            (Ok(_), None) => {}
+            (Err(error), _) => {
+                tracing::warn!("cannot read the id of the entry of a new quality: {error}");
             }
         }
+        if let Err(error) = run_command(mpv, &remove) {
+            tracing::warn!("mpv refuses the playlist-remove of a new quality: {error}");
+        }
+        true
     }
 
     /// Where the new entry starts, as mpv's `start` takes it. Once the entry plays (mpv has a
@@ -482,7 +685,7 @@ pub(crate) fn quality_commands(
     format: Option<&str>,
     start: Option<&str>,
     index: usize,
-) -> Vec<Vec<String>> {
+) -> [Vec<String>; 2] {
     let mut options = vec![NO_FOLDER_PLAYLIST.to_owned()];
     if let Some(start) = start {
         options.push(per_file_option("start", start));
@@ -490,7 +693,7 @@ pub(crate) fn quality_commands(
     if let Some(format) = format {
         options.push(per_file_option(YTDL_FORMAT, format));
     }
-    vec![
+    [
         vec![
             "loadfile".to_owned(),
             path.to_owned(),
@@ -501,6 +704,12 @@ pub(crate) fn quality_commands(
         ],
         vec!["playlist-remove".to_owned(), index.to_string()],
     ]
+}
+
+/// Runs one command of [`quality_commands`] on `mpv`.
+fn run_command(mpv: &Mpv, args: &[String]) -> mpv_ffi::Result<()> {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    mpv.command(&args)
 }
 
 /// What a probe's answer tells the UI. A failure has the class of the error card where yt-dlp's
@@ -1017,11 +1226,13 @@ mod tests {
         );
     }
 
-    /// Ruling R12: a link opened again (any open path) plays in the default quality, so the
-    /// choice made for it before goes, and the UI hears it; other links keep theirs.
+    /// Ruling R12 and final review minor 1: a link opened again (any open path) is a fresh start.
+    /// It plays in the default quality, so the choice made for it before goes; what was known of
+    /// its qualities goes too, and it is asked again, at once when it plays already (mpv may not
+    /// report the same path again). Other links keep their choice. Needs nothing.
     #[test]
-    fn a_link_opened_again_plays_the_default_quality() {
-        let (probe, _) = answering(Ok(info("x")));
+    fn a_link_opened_again_plays_the_default_quality_and_is_asked_again() {
+        let (probe, calls) = answering(Ok(info("x")));
         let (emit, told) = telling();
         let streams = Streams::new(probe, emit);
         let other = "https://example.com/other";
@@ -1033,21 +1244,213 @@ mod tests {
             streams.choose(Some("ba/b")).unwrap();
             told_until(&told, link, |formats| formats.chosen.is_some());
         }
+        assert_eq!(*calls.lock().unwrap(), [other, LINK]);
 
         streams.opened(&[
             Source::File(r"C:\Videa\film.mkv".into()),
             Source::Url(url::Url::parse(LINK).unwrap()),
         ]);
+        assert_eq!(next(&told), formats(LINK, FormatsState::Loading, None));
         assert_eq!(next(&told), formats(LINK, ready("x"), None));
+        assert_eq!(*calls.lock().unwrap(), [other, LINK, LINK]);
         assert!(streams.entry_options()(LINK).is_empty());
         assert_eq!(streams.current().unwrap().chosen, None);
         assert_eq!(
             streams.entry_options()(other),
             [(YTDL_FORMAT.to_owned(), "ba/b".to_owned())]
         );
-        // Opened once more: nothing was chosen, so nothing is told.
+        // Opened once more: nothing was chosen, but it is asked again all the same.
         streams.opened(&[Source::Url(url::Url::parse(LINK).unwrap())]);
+        assert_eq!(next(&told), formats(LINK, FormatsState::Loading, None));
+        assert_eq!(next(&told), formats(LINK, ready("x"), None));
+        assert_eq!(calls.lock().unwrap().len(), 4);
+
+        // A link that does not play now: its formats go without a word, its choice too, and it is
+        // asked when it plays.
+        streams.opened(&[Source::Url(url::Url::parse(other).unwrap())]);
         assert!(told.try_recv().is_err());
+        assert!(streams.entry_options()(other).is_empty());
+        streams.on_path(Some(other));
+        assert_eq!(next(&told), formats(other, FormatsState::Loading, None));
+        assert_eq!(next(&told), formats(other, ready("x"), None));
+        assert_eq!(calls.lock().unwrap().len(), 5);
+    }
+
+    /// One entry of mpv's playlist as it reports it: `id`, `filename`, and whether it plays.
+    fn entry(id: i64, filename: &str, playing: bool) -> Value {
+        if playing {
+            serde_json::json!({ "filename": filename, "id": id, "current": true, "playing": true })
+        } else {
+            serde_json::json!({ "filename": filename, "id": id })
+        }
+    }
+
+    /// A link that plays and has its formats; nothing told is left over.
+    fn playing_link(told: &mpsc::Receiver<StreamFormats>, streams: &Streams) {
+        streams.on_path(Some(LINK));
+        told_until(told, LINK, |formats| {
+            matches!(formats.state, FormatsState::Ready { .. })
+        });
+    }
+
+    /// Final review I-4 (Ruling R17): the choice of a link is what the entry that plays loaded
+    /// with. Kaleido's own entry keeps it; an entry the reload essential makes (Ctrl+R, a stall)
+    /// plays the default, so the choice goes and the UI hears it; going back to Kaleido's entry
+    /// brings it back. Needs nothing (the playlist is given as mpv reports it).
+    #[test]
+    fn an_entry_kaleido_did_not_load_with_the_choice_plays_the_default() {
+        let (probe, _) = answering(Ok(info("x")));
+        let (emit, told) = telling();
+        let streams = Streams::new(probe, emit);
+        playing_link(&told, &streams);
+        streams.on_playlist(&serde_json::json!([entry(1, LINK, true)]));
+        let format = STREAM_QUALITY_PRESETS[2];
+
+        streams.choose(Some(format)).unwrap();
+        assert_eq!(next(&told), formats(LINK, ready("x"), Some(format)));
+        // The reload put entry 2 in place with the quality; it starts: nothing changes.
+        streams.loaded(2, format);
+        streams.on_playlist(&serde_json::json!([entry(2, LINK, true)]));
+        assert!(told.try_recv().is_err());
+        assert_eq!(streams.current().unwrap().chosen.as_deref(), Some(format));
+
+        // reload.lua puts entry 3 in its place, without the quality.
+        streams.on_playlist(&serde_json::json!([
+            entry(2, LINK, true),
+            entry(3, LINK, false)
+        ]));
+        assert!(told.try_recv().is_err(), "it has not started yet");
+        streams.on_playlist(&serde_json::json!([entry(3, LINK, true)]));
+        assert_eq!(next(&told), formats(LINK, ready("x"), None));
+        assert!(streams.entry_options()(LINK).is_empty());
+        // Between two files, nothing plays; a file on a disk has no choice to lose.
+        streams.on_playlist(&serde_json::json!([entry(3, LINK, false)]));
+        streams.on_playlist(&serde_json::json!([entry(4, r"C:\Videa\a.mkv", true)]));
+        assert!(told.try_recv().is_err());
+
+        // Back to Kaleido's entry 2 (it is still in the playlist): it loads with the quality.
+        streams.on_playlist(&serde_json::json!([
+            entry(2, LINK, true),
+            entry(4, r"C:\Videa\a.mkv", false)
+        ]));
+        assert_eq!(next(&told), formats(LINK, ready("x"), Some(format)));
+        // The same report again changes nothing.
+        streams.on_playlist(&serde_json::json!([
+            entry(2, LINK, true),
+            entry(4, r"C:\Videa\a.mkv", false)
+        ]));
+        assert!(told.try_recv().is_err());
+    }
+
+    /// Task 12's deferred minor, under the same rule: a second pick whose reload loads nothing
+    /// (the first one's entry is still on its way, or another entry plays by then) leaves the
+    /// choice at what the entry that plays loaded with, and the UI hears it. Needs nothing.
+    #[test]
+    fn a_pick_that_loads_nothing_goes_back_to_what_plays() {
+        let (probe, _) = answering(Ok(info("x")));
+        let (emit, told) = telling();
+        let streams = Streams::new(probe, emit);
+        playing_link(&told, &streams);
+        let [first, second] = [STREAM_QUALITY_PRESETS[2], STREAM_QUALITY_PRESETS[1]];
+        streams.choose(Some(first)).unwrap();
+        streams.loaded(7, first);
+        streams.on_playlist(&serde_json::json!([entry(7, LINK, true)]));
+        told_until(&told, LINK, |formats| {
+            formats.chosen.as_deref() == Some(first)
+        });
+
+        streams.choose(Some(second)).unwrap();
+        assert_eq!(next(&told).chosen.as_deref(), Some(second));
+        // The request thread finds no entry to load again.
+        streams.not_loaded(LINK);
+        assert_eq!(next(&told), formats(LINK, ready("x"), Some(first)));
+        assert_eq!(
+            streams.entry_options()(LINK),
+            [(YTDL_FORMAT.to_owned(), first.to_owned())]
+        );
+        // Nothing to go back to: no word.
+        streams.not_loaded(LINK);
+        streams.not_loaded("https://example.com/other");
+        assert!(told.try_recv().is_err());
+    }
+
+    /// The same rule for a link opened again while an entry of it plays that Kaleido loaded with
+    /// the choice (appended to the playlist; Task 12's deferred minor): that entry keeps it, and
+    /// the new one plays the default when it starts. Its qualities are asked again all the same
+    /// (minor 1). Needs nothing.
+    #[test]
+    fn a_link_appended_while_it_plays_keeps_what_plays() {
+        let (probe, calls) = answering(Ok(info("x")));
+        let (emit, told) = telling();
+        let streams = Streams::new(probe, emit);
+        playing_link(&told, &streams);
+        let format = STREAM_QUALITY_PRESETS[2];
+        streams.choose(Some(format)).unwrap();
+        streams.loaded(2, format);
+        streams.on_playlist(&serde_json::json!([entry(2, LINK, true)]));
+        told_until(&told, LINK, |formats| formats.chosen.is_some());
+
+        streams.opened(&[Source::Url(url::Url::parse(LINK).unwrap())]);
+
+        assert_eq!(
+            next(&told),
+            formats(LINK, FormatsState::Loading, Some(format))
+        );
+        assert_eq!(next(&told), formats(LINK, ready("x"), Some(format)));
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        // The appended entry starts later: the default.
+        streams.on_playlist(&serde_json::json!([
+            entry(2, LINK, false),
+            entry(3, LINK, true)
+        ]));
+        assert_eq!(next(&told), formats(LINK, ready("x"), None));
+    }
+
+    /// Final review I-4: after a restart of the core, the entries it loaded again with a link's
+    /// choice are Kaleido's (the new core numbers its entries anew); entries that start while it
+    /// runs are not judged, and one that starts after it is. Needs nothing.
+    #[test]
+    fn a_restart_knows_the_entries_it_loaded_with_the_choice() {
+        let (probe, _) = answering(Ok(info("x")));
+        let (emit, told) = telling();
+        let streams = Streams::new(probe, emit);
+        playing_link(&told, &streams);
+        let format = STREAM_QUALITY_PRESETS[3];
+        streams.choose(Some(format)).unwrap();
+        streams.loaded(9, format);
+        streams.on_playlist(&serde_json::json!([entry(9, LINK, true)]));
+        told_until(&told, LINK, |formats| formats.chosen.is_some());
+
+        streams.restarting();
+        // The new core's first entries, numbered from 1, start before the restart is over.
+        streams.on_playlist(&serde_json::json!([entry(1, LINK, true)]));
+        assert!(told.try_recv().is_err());
+        streams.restored(Some(
+            &serde_json::json!([
+                entry(1, LINK, true),
+                entry(2, "https://example.com/b", false)
+            ])
+            .to_string(),
+        ));
+        assert!(told.try_recv().is_err(), "entry 1 loaded with the choice");
+        assert_eq!(streams.current().unwrap().chosen.as_deref(), Some(format));
+        // The old core's entry 9 means nothing now; reload.lua's entry 3 plays the default.
+        streams.on_playlist(&serde_json::json!([entry(3, LINK, true)]));
+        assert_eq!(next(&told), formats(LINK, ready("x"), None));
+
+        // A restart whose new core did not start, or whose playlist cannot be read, judges again
+        // from then on with what it knew.
+        streams.choose(Some(format)).unwrap();
+        streams.loaded(4, format);
+        told_until(&told, LINK, |formats| formats.chosen.is_some());
+        streams.restarting();
+        streams.restored(None);
+        streams.on_playlist(&serde_json::json!([entry(4, LINK, true)]));
+        assert!(told.try_recv().is_err());
+        streams.restarting();
+        streams.restored(Some("not json"));
+        streams.on_playlist(&serde_json::json!([entry(5, LINK, true)]));
+        assert_eq!(next(&told).chosen, None);
     }
 
     /// What `stream_formats` and `stream:formats` carry, as the UI reads them.
@@ -1124,14 +1527,20 @@ mod tests {
         (engine, [a, b], old)
     }
 
+    /// Streams that ask nothing and tell nothing, for a reload to note its entry in.
+    fn quiet_streams() -> Streams {
+        Streams::new(Arc::new(|_| Err(ProbeError::Missing)), Arc::new(|_| {}))
+    }
+
     /// The request that loads `url` again with `format`, as `player_set_quality` queues it.
-    fn reload(url: &str, format: &str) -> Request {
+    fn reload(url: &str, format: &str, streams: &Streams) -> Request {
         let reload = Reload {
             url: url.to_owned(),
             format: Some(format.to_owned()),
             live: Some(false),
         };
-        Request::Call(Box::new(move |mpv| reload.run(mpv)))
+        let streams = streams.clone();
+        Request::Call(Box::new(move |mpv| reload.run(mpv, &streams)))
     }
 
     /// Waits until [a, b] is the playlist again, b a new entry (none of the ids in `not`) that
@@ -1159,13 +1568,16 @@ mod tests {
     /// entries, a and then b, b is a new entry and the one that plays, at 3 s ± 0.5 with the
     /// chosen `ytdl-format` for itself, and still paused. Shows that the old entry can go in the
     /// same request as the new one is added, without waiting for the new one's `file-loaded`.
+    /// The streams know the new entry by its id as one loaded with the quality (final review I-4).
+    /// Needs a real libmpv.
     #[test]
     fn changing_quality_keeps_the_playlist_and_the_position() {
         let tmp = tempfile::tempdir().unwrap();
         let (engine, clips, old) = b_at_three_seconds(temp_paths(tmp.path()), tmp.path());
+        let streams = quiet_streams();
 
         let format = STREAM_QUALITY_PRESETS[3];
-        engine.request(reload(&clips[1], format));
+        engine.request(reload(&clips[1], format, &streams));
 
         b_plays_anew_at_three_seconds(&engine, &clips, &[old]);
         assert_eq!(
@@ -1173,6 +1585,12 @@ mod tests {
             format
         );
         assert!(engine.call(|mpv| mpv.get_flag("pause").unwrap()));
+        let new = engine.call(|mpv| playlist(mpv)[1]["id"].as_i64().unwrap());
+        assert_eq!(
+            streams.shared.lock().made.get(&new).map(String::as_str),
+            Some(format)
+        );
+        assert!(!streams.shared.lock().made.contains_key(&old));
     }
 
     /// Holds the next load in its `on_load` hook for 1.5 s once it is told to (`hold-next-load`),
@@ -1198,13 +1616,14 @@ end)
         fs::create_dir_all(&paths.scripts_dir).unwrap();
         fs::write(paths.scripts_dir.join("hold.lua"), HOLD_SCRIPT).unwrap();
         let (engine, clips, old) = b_at_three_seconds(paths, tmp.path());
+        let streams = quiet_streams();
         eventually(&engine, "the hold script runs", |mpv| {
             mpv.command(&["script-message-to", "hold", "ping"]).is_ok()
         });
 
         // The script hears this before the hook of the entry the reload adds.
         engine.command(&["script-message-to", "hold", "hold-next-load"]);
-        engine.request(reload(&clips[1], STREAM_QUALITY_PRESETS[3]));
+        engine.request(reload(&clips[1], STREAM_QUALITY_PRESETS[3], &streams));
         let (b, before) = (clips[1].clone(), old);
         eventually(&engine, "the first new entry loads, held", move |mpv| {
             let entries = playlist(mpv);
@@ -1229,7 +1648,7 @@ end)
         );
 
         let second = STREAM_QUALITY_PRESETS[1];
-        engine.request(reload(&clips[1], second));
+        engine.request(reload(&clips[1], second, &streams));
 
         b_plays_anew_at_three_seconds(&engine, &clips, &[old, loading]);
         assert_eq!(

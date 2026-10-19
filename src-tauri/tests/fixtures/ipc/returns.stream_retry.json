@@ -1,0 +1,63 @@
+[
+  {
+    "ytDlp": {
+      "tool": "ytDlp",
+      "state": "ready",
+      "version": "2026.10.10",
+      "checkedAt": "2026-10-19T08:00:00Z",
+      "error": null
+    },
+    "deno": null,
+    "channel": "stable",
+    "updated": true
+  },
+  {
+    "ytDlp": {
+      "tool": "ytDlp",
+      "state": "ready",
+      "version": "2026.10.10",
+      "checkedAt": "2026-10-19T08:00:00Z",
+      "error": null
+    },
+    "deno": {
+      "tool": "deno",
+      "state": "ready",
+      "version": "2.9.7",
+      "checkedAt": "2026-10-12T08:00:00Z",
+      "error": null
+    },
+    "channel": "stable",
+    "updated": false
+  },
+  {
+    "ytDlp": {
+      "tool": "ytDlp",
+      "state": "ready",
+      "version": "2026.10.18.233141",
+      "checkedAt": "2026-10-19T08:00:00Z",
+      "error": null
+    },
+    "deno": {
+      "tool": "deno",
+      "state": "failed",
+      "version": null,
+      "checkedAt": null,
+      "error": "the server cannot be reached"
+    },
+    "channel": "nightly",
+    "updated": false
+  },
+  {
+    "ytDlp": {
+      "tool": "ytDlp",
+      "state": "failed",
+      "version": "2026.10.10",
+      "checkedAt": "2026-10-19T08:00:00Z",
+      "error": "the server cannot be reached"
+    },
+    "deno": null,
+    "channel": "stable",
+    "updated": false
+  },
+  null
+]

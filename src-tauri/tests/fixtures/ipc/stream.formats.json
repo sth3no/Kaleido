@@ -36,6 +36,20 @@
             "filesize": null,
             "filesizeApprox": 1903000123,
             "protocol": "http_dash_segments"
+          },
+          {
+            "formatId": "hls-2128",
+            "ext": "mp4",
+            "height": 720,
+            "width": 1280,
+            "fps": null,
+            "vcodec": "",
+            "acodec": "",
+            "dynamicRange": null,
+            "tbr": 2128.0,
+            "filesize": null,
+            "filesizeApprox": null,
+            "protocol": "m3u8_native"
           }
         ]
       }

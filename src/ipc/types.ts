@@ -453,6 +453,21 @@ export type ToolStatus = {
   error: string | null;
 };
 
+/**
+ * What "Update and try again" found for a link that failed (`stream_retry` with `update`). The link
+ * was opened again exactly when `updated`: otherwise it would fail as it did, and the card says why.
+ */
+export type LinkUpdate = {
+  /** yt-dlp after its check. */
+  ytDlp: ToolStatus;
+  /** Deno after its check, for a link that needs it (YouTube); `null` for any other link. */
+  deno: ToolStatus | null;
+  /** yt-dlp's channel the check was made in. */
+  channel: Channel;
+  /** yt-dlp, or the Deno the link needs, was put in place since the link failed. */
+  updated: boolean;
+};
+
 // ---------------------------------------------------------------------------------------------
 // The qualities of a link (src-tauri/src/streams.rs, tools/ytdlp.rs)
 
@@ -464,9 +479,12 @@ export type StreamFormat = {
   height: number | null;
   width: number | null;
   fps: number | null;
-  /** `null` also for an audio-only format. */
+  /**
+   * The video codec: `null` for none (an audio-only format, yt-dlp's `none`), `''` where yt-dlp
+   * does not know it (a plain HLS playlist without `CODECS`), else its name.
+   */
   vcodec: string | null;
-  /** `null` also for a video-only format. */
+  /** The audio codec, the same way: `null` for none (a video-only format). */
   acodec: string | null;
   /** `SDR`, `HDR10`, `HLG`, ... */
   dynamicRange: string | null;
@@ -743,12 +761,13 @@ export interface CommandTable {
   /** Checks a tool now, due or not; a failed check resolves with a `failed` state. */
   tools_check: { args: { tool: ToolId }; result: ToolStatus };
   /**
-   * Opens a link that failed again, as a pasted link opens. With `update` yt-dlp is checked first
-   * (due or not) and the promise resolves once the link is handed to the player, so after the
-   * download; an update that fails does not stop the retry. Rejects with a `LoadIssue` for text
-   * that is no http(s) link, before anything is updated.
+   * Opens a link that failed again, as a pasted link opens, and resolves with `null`. With
+   * `update` the tools are checked first (yt-dlp due or not, Deno for a YouTube link that lacks
+   * one) and the promise resolves after the download with what the check found; the link is
+   * opened only when something new was put in place since it failed (`updated`). Rejects with a
+   * `LoadIssue` for text that is no http(s) link, before anything is updated.
    */
-  stream_retry: { args: { url: string; update: boolean }; result: Nothing };
+  stream_retry: { args: { url: string; update: boolean }; result: LinkUpdate | null };
   /** What is known of the qualities of the link that plays; `null` when what plays is no link. */
   stream_formats: { args: undefined; result: StreamFormats | null };
   /**

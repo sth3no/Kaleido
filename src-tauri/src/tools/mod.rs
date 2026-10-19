@@ -216,6 +216,53 @@ pub struct ToolStatus {
     pub error: Option<String>,
 }
 
+/// How often each tool was put in place in this run of Kaleido ([`Tools::installs`]): a mark that
+/// a later one is compared with ([`Service::update_for_link`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Installs {
+    pub yt_dlp: u64,
+    pub deno: u64,
+}
+
+/// What "Update and try again" found for a link that failed (spec 10.3, `stream_retry`; final
+/// review I-1): yt-dlp after its check, Deno where the link needs it, and whether either was put
+/// in place since the link failed. The link is opened again exactly when something was
+/// (`updated`); otherwise it would fail as it did, and the card says why instead.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkUpdate {
+    /// yt-dlp after its check.
+    pub yt_dlp: ToolStatus,
+    /// Deno after its check, for a link that needs it ([`needs_deno`]); `None` for any other link.
+    pub deno: Option<ToolStatus>,
+    /// yt-dlp's channel the check was made in: the hint at the nightly builds is no help to one
+    /// that has them.
+    pub channel: Channel,
+    /// yt-dlp, or the Deno the link needs, was put in place since the link failed (by this check,
+    /// or by one that ran in the meantime, Ruling R11): the link may play now.
+    pub updated: bool,
+}
+
+/// Whether yt-dlp needs Deno for `link` (plan decision 20): YouTube's challenges are solved in
+/// JavaScript. A link of `youtube.com`, `youtu.be` or `youtube-nocookie.com`, or of a host under
+/// one of them (`www.`, `m.`, `music.`).
+pub fn needs_deno(link: &str) -> bool {
+    let Some(host) = url::Url::parse(link)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+    else {
+        return false;
+    };
+    ["youtube.com", "youtu.be", "youtube-nocookie.com"]
+        .iter()
+        .any(|domain| {
+            host == *domain
+                || host
+                    .strip_suffix(domain)
+                    .is_some_and(|rest| rest.ends_with('.'))
+        })
+}
+
 /// Why a check failed. In every case the tool on the disk is as it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolError {
@@ -1121,6 +1168,39 @@ impl Service {
     /// release over and over. Blocks for as long as the downloads take: not for the event thread.
     pub fn check_if_due(&self, tool: ToolId) -> ToolStatus {
         self.check_from_settings(tool, false)
+    }
+
+    /// How often each tool was put in place in this run so far.
+    pub fn installs(&self) -> Installs {
+        Installs {
+            yt_dlp: self.shared.tools.installs(ToolId::YtDlp),
+            deno: self.shared.tools.installs(ToolId::Deno),
+        }
+    }
+
+    /// "Update and try again" on the card of `link` (final review I-1), which failed when the
+    /// tools had been put in place as `since` says ([`Service::installs`]; `None` counts from
+    /// now): yt-dlp is checked now, due or not, and so is Deno for a link that needs it while it is
+    /// not one yt-dlp can use (missing, failed, too old: it would be due at once anyway, and the
+    /// user asks now). A Deno that is ready is left to its weekly check. Blocks for as long as the
+    /// downloads take: not for the main thread.
+    pub fn update_for_link(&self, link: &str, since: Option<Installs>) -> LinkUpdate {
+        let since = since.unwrap_or_else(|| self.installs());
+        let yt_dlp = self.check_now(ToolId::YtDlp);
+        let deno = needs_deno(link).then(|| {
+            if self.shared.tools.path(ToolId::Deno).is_some() {
+                self.shared.tools.status(ToolId::Deno)
+            } else {
+                self.check_now(ToolId::Deno)
+            }
+        });
+        let now = self.installs();
+        LinkUpdate {
+            updated: now.yt_dlp > since.yt_dlp || (deno.is_some() && now.deno > since.deno),
+            yt_dlp,
+            deno,
+            channel: self.shared.host.channel(),
+        }
     }
 
     /// [`Shared::check`] from the channel of the settings, then the scheduler looks again.
@@ -2623,6 +2703,120 @@ mod tests {
         assert_eq!(status.state, ToolState::Ready);
         assert_eq!(setup.web.calls().len(), 2);
         assert_eq!(host.sent().len(), 1);
+    }
+
+    /// Final review I-1: "Update and try again" says whether yt-dlp (or the Deno a YouTube link
+    /// needs) was put in place since the link failed, also by a check that ran in between (Ruling
+    /// R11's), and what it found otherwise. Needs a temp folder.
+    #[test]
+    fn a_link_update_says_what_was_put_in_place_since_the_link_failed() {
+        let setup = Setup::new();
+        let v1 = b"yt-dlp 2026.08.19";
+        let recent = stamp(now() - Duration::hours(1));
+        setup.installed(ToolId::YtDlp, v1, record(v1, "2026.08.19", &recent));
+        setup.release(Channel::Stable, &sha256_hex(v1), b"never fetched");
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host.clone());
+        let link = "https://example.com/video";
+
+        // The newest is in place already: nothing new, and Deno is not this link's business.
+        let failed = service.installs();
+        let found = service.update_for_link(link, Some(failed));
+        assert!(!found.updated);
+        assert_eq!(found.yt_dlp.state, ToolState::Ready);
+        assert_eq!(found.yt_dlp.version.as_deref(), Some("2026.08.19"));
+        assert_eq!((found.deno, found.channel), (None, Channel::Stable));
+        let stable = source(ToolId::YtDlp, Channel::Stable);
+        assert_eq!(setup.web.calls(), [stable.sums_url()], "a forced check");
+
+        // A new one comes with the press: updated.
+        let v2 = b"yt-dlp 2026.10.10";
+        setup.release(Channel::Stable, &sha256_hex(v2), v2);
+        setup.inspect.says(ToolId::YtDlp, "2026.10.10");
+        let found = service.update_for_link(link, Some(failed));
+        assert!(found.updated);
+        assert_eq!(found.yt_dlp.version.as_deref(), Some("2026.10.10"));
+
+        // One that the check after the failure put in place before the press (R11) counts too;
+        // counted from the press, it does not.
+        let failed = service.installs();
+        let v3 = b"yt-dlp 2026.11.11";
+        setup.release(Channel::Stable, &sha256_hex(v3), v3);
+        setup.inspect.says(ToolId::YtDlp, "2026.11.11");
+        service.check_now(ToolId::YtDlp);
+        assert!(service.update_for_link(link, Some(failed)).updated);
+        assert!(!service.update_for_link(link, None).updated);
+
+        // A YouTube link needs Deno: missing, it is checked too, and still missing it is said.
+        let youtube = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+        let deno_source = source(ToolId::Deno, Channel::Stable);
+        setup
+            .web
+            .answer(&deno_source.sums_url(), Err(FetchError::Offline));
+        let failed = service.installs();
+        let found = service.update_for_link(youtube, Some(failed));
+        assert!(!found.updated);
+        let deno = found.deno.expect("Deno for YouTube");
+        assert_eq!((deno.tool, deno.state), (ToolId::Deno, ToolState::Failed));
+        assert_eq!(deno.error.as_deref(), Some("the server cannot be reached"));
+        assert_eq!(setup.web.count(&deno_source.sums_url()), 1);
+        // Online: Deno comes, and that is new for the link.
+        let zip = zip_of(Some(b"deno 2.9.7"));
+        setup
+            .web
+            .answer(&deno_source.sums_url(), Ok(deno_sums(&zip)));
+        setup.web.answer(&deno_source.asset_url(), Ok(zip));
+        setup.inspect.says(ToolId::Deno, "2.9.7");
+        let found = service.update_for_link(youtube, Some(failed));
+        assert!(found.updated);
+        assert_eq!(found.deno.map(|deno| deno.state), Some(ToolState::Ready));
+        // Ready, it is left to its weekly check; a Deno put in place is nothing new for a link
+        // that does not need it.
+        let found = service.update_for_link(youtube, None);
+        assert_eq!(found.deno.map(|deno| deno.state), Some(ToolState::Ready));
+        assert_eq!(setup.web.count(&deno_source.sums_url()), 2);
+        assert!(!service.update_for_link(link, Some(failed)).updated);
+
+        // The channel the check was made in.
+        let nightly = b"yt-dlp 2026.11.12.010203";
+        setup.release(Channel::Nightly, &sha256_hex(nightly), nightly);
+        *host.channel.lock().unwrap() = Channel::Nightly;
+        let found = service.update_for_link(link, None);
+        assert_eq!(found.channel, Channel::Nightly);
+        assert!(found.updated, "the switch to nightly put one in place");
+
+        // What the UI gets: camelCase, Deno as null for a link without it.
+        let value = serde_json::to_value(&found).unwrap();
+        assert_eq!(value["ytDlp"]["tool"], "ytDlp");
+        assert_eq!(value["deno"], serde_json::Value::Null);
+        assert_eq!(value["channel"], "nightly");
+        assert_eq!(value["updated"], true);
+    }
+
+    #[test]
+    fn deno_is_needed_for_youtube_links() {
+        for link in [
+            "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+            "https://youtube.com/shorts/abc",
+            "https://m.youtube.com/watch?v=abc",
+            "https://music.youtube.com/watch?v=abc",
+            "https://youtu.be/aqz-KE-bpKQ",
+            "https://www.youtube-nocookie.com/embed/abc",
+            "http://WWW.YouTube.com/watch?v=abc",
+        ] {
+            assert!(needs_deno(link), "{link}");
+        }
+        for link in [
+            "https://vimeo.com/123",
+            "https://notyoutube.com/watch?v=abc",
+            "https://youtube.com.example.com/watch?v=abc",
+            "https://example.com/?u=https://www.youtube.com/watch?v=abc",
+            "not a link",
+            "",
+        ] {
+            assert!(!needs_deno(link), "{link}");
+        }
     }
 
     /// The browser for yt-dlp's cookies (plan decision 13) goes to the running core when the user

@@ -53,14 +53,26 @@ export function formatFilesize(filesize?: number | null, filesizeApprox?: number
   return `${(size / 1024 ** 3).toFixed(2)} GiB`;
 }
 
-/** A codec yt-dlp names; `none` is how it says there is no such stream (Rust passes it as `null`). */
-const hasCodec = (codec: string | null): boolean => Boolean(codec) && codec !== 'none';
+/**
+ * A codec as Rust passes it (`StreamFormat.vcodec`): `null` for no such stream (yt-dlp's `none`,
+ * which is also taken here should it ever come as it is), `''` for one yt-dlp does not know, else
+ * its name.
+ */
+const isNone = (codec: string | null): boolean => codec === null || codec === 'none';
 
-/** The format has a picture. */
-export const hasVideo = ({ vcodec }: StreamFormat): boolean => hasCodec(vcodec);
+/**
+ * The format has a picture: a video codec yt-dlp names, or one it does not know in a format with a
+ * height (a plain HLS playlist without `CODECS` lists its heights all the same).
+ */
+export const hasVideo = ({ vcodec, height }: StreamFormat): boolean =>
+  !isNone(vcodec) && (vcodec !== '' || height !== null);
 
-/** The format has a sound. */
-export const hasAudio = ({ acodec }: StreamFormat): boolean => hasCodec(acodec);
+/**
+ * The format has a sound: an audio codec yt-dlp names, or one it does not know in a format that has
+ * no picture.
+ */
+export const hasAudio = ({ acodec, vcodec }: StreamFormat): boolean =>
+  !isNone(acodec) && (acodec !== '' || isNone(vcodec));
 
 /**
  * The video formats from yt-dlp metadata, best-first (yt-dlp lists them

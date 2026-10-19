@@ -52,9 +52,10 @@ pub struct StreamFormat {
     pub height: Option<u32>,
     pub width: Option<u32>,
     pub fps: Option<f64>,
-    /// `None` also where yt-dlp says `none`: an audio-only format.
+    /// The video codec ([`codec`]'s contract: `None` for none, `Some("")` for one not known):
+    /// `None` is an audio-only format.
     pub vcodec: Option<String>,
-    /// `None` also where yt-dlp says `none`: a video-only format.
+    /// The audio codec, the same way: `None` is a video-only format.
     pub acodec: Option<String>,
     /// `SDR`, `HDR10`, `HLG`, ...
     pub dynamic_range: Option<String>,
@@ -236,9 +237,17 @@ fn text(object: &Map<String, Value>, key: &str) -> Option<String> {
     object.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-/// A codec, `None` for yt-dlp's `none` (the format has no such stream) and an empty one.
+/// A codec as the UI gets it (final review minor 2; `src/streams/formats.ts` reads it):
+/// - `None` where yt-dlp says `none`: the format has no such stream;
+/// - `Some("")` where yt-dlp does not know it (`null`, no key, an empty or a non-text value): a
+///   plain HLS format whose playlist has no `CODECS` attribute, which may well have the stream;
+/// - the codec where yt-dlp names one.
 fn codec(object: &Map<String, Value>, key: &str) -> Option<String> {
-    text(object, key).filter(|codec| !codec.is_empty() && codec != "none")
+    match object.get(key).and_then(Value::as_str) {
+        Some("none") => None,
+        Some(codec) => Some(codec.to_owned()),
+        None => Some(String::new()),
+    }
 }
 
 fn number(object: &Map<String, Value>, key: &str) -> Option<f64> {
@@ -522,8 +531,10 @@ mod tests {
         assert_eq!(hdr.fps, Some(59.94));
         assert_eq!(hdr.filesize_approx, Some(1_903_000_123));
         assert_eq!(hdr.protocol.as_deref(), Some("http_dash_segments"));
+        // Fields of the wrong type are as good as missing: a codec then is one that is not known.
         let odd = &info.formats[3];
-        assert_eq!((odd.height, odd.fps, &odd.vcodec), (None, None, &None));
+        assert_eq!((odd.height, odd.fps), (None, None));
+        assert_eq!(odd.vcodec.as_deref(), Some(""));
 
         // What the UI gets: camelCase.
         assert_eq!(
@@ -539,6 +550,54 @@ mod tests {
             serde_json::to_value(&info).unwrap()["formats"][0]["formatId"],
             "251"
         );
+    }
+
+    /// Final review minor 2: yt-dlp's `null` codec (it does not know it: a plain HLS playlist
+    /// without `CODECS`) is not its `none` (no such stream). The UI gets `""` for the first and
+    /// `null` for the second, and counts a format with a height and an unknown codec as video.
+    #[test]
+    fn an_unknown_codec_is_not_no_stream() {
+        let info = json!({
+            "title": "A plain HLS stream",
+            "formats": [
+                {
+                    "format_id": "hls-audio", "ext": "mp4", "protocol": "m3u8_native",
+                    "vcodec": "none", "acodec": "mp4a.40.2"
+                },
+                {
+                    "format_id": "hls-2128", "ext": "mp4", "protocol": "m3u8_native",
+                    "height": 720, "width": 1280, "tbr": 2128.0, "vcodec": null, "acodec": null
+                },
+                // No codec keys at all, and an empty one: not known either.
+                { "format_id": "hls-4400", "ext": "mp4", "height": 1080, "width": 1920 },
+                { "format_id": "hls-x", "ext": "mp4", "vcodec": "", "acodec": "none" }
+            ]
+        });
+
+        let info = parse_info(&info.to_string()).unwrap();
+
+        let codecs: Vec<(Option<&str>, Option<&str>)> = info
+            .formats
+            .iter()
+            .map(|format| (format.vcodec.as_deref(), format.acodec.as_deref()))
+            .collect();
+        assert_eq!(
+            codecs,
+            [
+                (None, Some("mp4a.40.2")),
+                (Some(""), Some("")),
+                (Some(""), Some("")),
+                (Some(""), None),
+            ]
+        );
+        assert_eq!(info.formats[1].height, Some(720));
+        let value = serde_json::to_value(&info.formats[1]).unwrap();
+        assert_eq!(
+            (&value["vcodec"], &value["acodec"]),
+            (&json!(""), &json!(""))
+        );
+        let value = serde_json::to_value(&info.formats[0]).unwrap();
+        assert_eq!(value["vcodec"], Value::Null);
     }
 
     #[test]

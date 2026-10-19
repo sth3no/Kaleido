@@ -53,6 +53,7 @@ import returnsPluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/retur
 import returnsSettingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_audio_devices.json';
 import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_bindings.json';
 import returnsStreamFormatsJson from '../../src-tauri/tests/fixtures/ipc/returns.stream_formats.json';
+import returnsStreamRetryJson from '../../src-tauri/tests/fixtures/ipc/returns.stream_retry.json';
 import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
 import returnsSystemBrowsersJson from '../../src-tauri/tests/fixtures/ipc/returns.system_browsers.json';
 import returnsSystemLicensesJson from '../../src-tauri/tests/fixtures/ipc/returns.system_licenses.json';
@@ -124,6 +125,7 @@ import type {
   Language,
   Layout,
   License,
+  LinkUpdate,
   LoadIssue,
   LoadMode,
   Localized,
@@ -272,6 +274,7 @@ const returnFixtures = {
   settings_audio_devices: returnsSettingsAudioDevicesJson,
   settings_bindings: returnsSettingsBindingsJson,
   stream_formats: returnsStreamFormatsJson,
+  stream_retry: returnsStreamRetryJson,
   system_appearance: returnsSystemAppearanceJson,
   system_browsers: returnsSystemBrowsersJson,
   system_licenses: returnsSystemLicensesJson,
@@ -286,6 +289,7 @@ const returnFixtures = {
     | 'settings_audio_devices'
     | 'settings_bindings'
     | 'stream_formats'
+    | 'stream_retry'
     | 'system_appearance'
     | 'system_browsers'
     | 'system_licenses'
@@ -499,6 +503,10 @@ const PLUGIN_SETTINGS: Shape<PluginSettings> = {
 const PLUGIN_ERROR_EVENT: Shape<PluginErrorEvent> = { fields: { name: 'required' } };
 const TOOL_STATUS: Shape<ToolStatus> = {
   fields: { tool: 'required', state: 'required', version: 'required', checkedAt: 'required', error: 'required' },
+};
+const LINK_UPDATE: Shape<LinkUpdate> = {
+  fields: { ytDlp: 'required', deno: 'required', channel: 'required', updated: 'required' },
+  inside: { ytDlp: TOOL_STATUS, deno: TOOL_STATUS },
 };
 const STREAM_FORMAT: Shape<StreamFormat> = {
   fields: {
@@ -858,6 +866,11 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(returnFixtures.tools_status.flat(), TOOL_STATUS, 'ToolStatus');
     expectShape(returnFixtures.tools_check, TOOL_STATUS, 'ToolStatus');
     expectShape(
+      returnFixtures.stream_retry.flatMap((found) => (found === null ? [] : [found])),
+      LINK_UPDATE,
+      'LinkUpdate',
+    );
+    expectShape(
       [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text, ...rejectFixtures.stream_retry],
       LOAD_ISSUE,
       'LoadIssue',
@@ -952,6 +965,24 @@ describe('stream_retry', () => {
     expectAll(commandFixtures.stream_retry.map(({ update }) => String(update)), ['true', 'false'], 'update');
     for (const { url } of commandFixtures.stream_retry) expect(url).toMatch(/^https?:\/\//);
   });
+
+  test('resolves with what the update found, or with nothing without the update', () => {
+    expect(returnFixtures.stream_retry).toContain(null);
+    const found = returnFixtures.stream_retry.flatMap((item) => (item === null ? [] : [item]));
+    // Something new and nothing new; Deno for a link that needs it, or none; both channels.
+    expectAll(found.map(({ updated }) => String(updated)), ['true', 'false'], 'updated');
+    expect(found.some(({ deno }) => deno === null)).toBe(true);
+    expect(found.some(({ deno }) => deno !== null)).toBe(true);
+    expectAll(found.map(({ channel }) => channel), CHANNELS, 'channel');
+    for (const { ytDlp, deno } of found) {
+      expect(ytDlp.tool).toBe('ytDlp');
+      expectKnown([ytDlp.state], TOOL_STATES, 'yt-dlp state');
+      if (deno !== null) {
+        expect(deno.tool).toBe('deno');
+        expectKnown([deno.state], TOOL_STATES, 'Deno state');
+      }
+    }
+  });
 });
 
 describe('the qualities of a link', () => {
@@ -978,6 +1009,15 @@ describe('the qualities of a link', () => {
     );
     // A live stream and a video.
     expect([...new Set(infos.map(({ live }) => live))].sort()).toEqual([false, true]);
+  });
+
+  test('a codec is named, not known (empty) or there is none (null); never yt-dlp\'s own "none"', () => {
+    const formats = states.flatMap((state) => ('info' in state && state.info !== undefined ? state.info.formats : []));
+    const codecs = formats.flatMap(({ vcodec, acodec }) => [vcodec, acodec]);
+    expect(codecs).toContain(null);
+    expect(codecs).toContain('');
+    expect(codecs.some((codec) => codec !== null && codec !== '')).toBe(true);
+    expect(codecs).not.toContain('none');
   });
 
   test('a failure has a class where Rust knows one, and a message in any case', () => {

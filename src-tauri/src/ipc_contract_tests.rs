@@ -62,7 +62,7 @@ use crate::system::{self, OpenRequestEvent, SourcePage};
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbReady};
 use crate::tools::ytdlp::{StreamFormat, StreamInfo};
-use crate::tools::{self, Channel, ToolId, ToolState, ToolStatus};
+use crate::tools::{self, Channel, LinkUpdate, ToolId, ToolState, ToolStatus};
 
 // ---------------------------------------------------------------------------------------------
 // Reading fixtures
@@ -1721,7 +1721,7 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     // The first start before anything is there, and later.
     for statuses in [
         vec![missing_yt_dlp, missing_deno],
-        vec![ready_yt_dlp.clone(), ready_deno],
+        vec![ready_yt_dlp.clone(), ready_deno.clone()],
     ] {
         assert_eq!(
             statuses
@@ -1732,9 +1732,61 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
         );
         serialized(out, "returns.tools_status", &statuses);
     }
-    for status in [ready_yt_dlp, old_deno] {
+    for status in [ready_yt_dlp.clone(), old_deno] {
         serialized(out, "returns.tools_check", &status);
     }
+    // What "Update and try again" found (final review I-1): a new yt-dlp (the link opens again);
+    // the newest already, for a YouTube link with a Deno that is ready; the newest nightly with a
+    // Deno that could not be downloaded; a check that failed. Nothing without the update.
+    let offline = "the server cannot be reached";
+    let link_updates = [
+        LinkUpdate {
+            yt_dlp: ready_yt_dlp.clone(),
+            deno: None,
+            channel: Channel::Stable,
+            updated: true,
+        },
+        LinkUpdate {
+            yt_dlp: ready_yt_dlp.clone(),
+            deno: Some(ready_deno.clone()),
+            channel: Channel::Stable,
+            updated: false,
+        },
+        LinkUpdate {
+            yt_dlp: tool(
+                ToolId::YtDlp,
+                ToolState::Ready,
+                Some("2026.10.18.233141"),
+                Some("2026-10-19T08:00:00Z"),
+                None,
+            ),
+            deno: Some(tool(
+                ToolId::Deno,
+                ToolState::Failed,
+                None,
+                None,
+                Some(offline),
+            )),
+            channel: Channel::Nightly,
+            updated: false,
+        },
+        LinkUpdate {
+            yt_dlp: tool(
+                ToolId::YtDlp,
+                ToolState::Failed,
+                Some("2026.10.10"),
+                Some("2026-10-19T08:00:00Z"),
+                Some(offline),
+            ),
+            deno: None,
+            channel: Channel::Stable,
+            updated: false,
+        },
+    ];
+    for found in &link_updates {
+        serialized(out, "returns.stream_retry", &Some(found));
+    }
+    serialized(out, "returns.stream_retry", &None::<LinkUpdate>);
 
     // The qualities of a link: every state of its probe (a failure with a class and one without),
     // what `stream_formats` returns (also nothing, for no link), and what a change of the quality
@@ -1771,6 +1823,22 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
                 filesize: None,
                 filesize_approx: Some(1_903_000_123),
                 protocol: Some("http_dash_segments".to_owned()),
+            },
+            // A plain HLS format: a height, and codecs yt-dlp does not know (`""`, not the
+            // `null` of no stream: final review minor 2).
+            StreamFormat {
+                format_id: "hls-2128".to_owned(),
+                ext: "mp4".to_owned(),
+                height: Some(720),
+                width: Some(1280),
+                fps: None,
+                vcodec: Some(String::new()),
+                acodec: Some(String::new()),
+                dynamic_range: None,
+                tbr: Some(2128.0),
+                filesize: None,
+                filesize_approx: None,
+                protocol: Some("m3u8_native".to_owned()),
             },
         ],
     };

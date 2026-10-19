@@ -251,9 +251,10 @@ export const toolsCheck = (tool: ToolId) => call('tools_check', { tool });
 
 /**
  * "Try again" and "Update and try again" on the card of a link that failed: opens `url` again as a
- * pasted link opens. With `update` yt-dlp is checked first, due or not, and the promise resolves
- * after the download, once the link is handed to the player; an update that fails does not stop
- * the retry. Rejects with a `LoadIssue` for text that is no http(s) link.
+ * pasted link opens, and resolves with `null`. With `update` the tools are checked first and the
+ * promise resolves after the download with what was found (`LinkUpdate`): the link is opened again
+ * only when something new was put in place since it failed. Rejects with a `LoadIssue` for text
+ * that is no http(s) link.
  */
 export const streamRetry = (url: string, update: boolean) => call('stream_retry', { url, update });
 

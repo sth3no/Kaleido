@@ -304,8 +304,10 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
 /// blocking task, never on the main thread (it is refused there), and never while holding the
 /// plugins' state (`plugins::Plugins::apply` lets it go). The essentials get Kaleido's options
 /// first (plan decision 2: the scripts read them when the new core loads them), the new core gets
-/// what every core gets ([`prepare_core`]), and the UI hears `player:engine-restarted` once it
-/// runs (also when the old core did not end in time: `RestartError::Quit`).
+/// what every core gets ([`prepare_core`]), the qualities chosen for links learn which of its
+/// entries were loaded with them ([`Streams::restored`]), and the UI hears
+/// `player:engine-restarted` once it runs (also when the old core did not end in time:
+/// `RestartError::Quit`).
 pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
     let (Some(engine), Some(paths)) = (app.try_state::<Engine>(), app.try_state::<AppPaths>())
     else {
@@ -313,6 +315,10 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
     };
     if let Some(plugins) = app.try_state::<plugins::Plugins>() {
         plugins.write_managed();
+    }
+    let streams = app.try_state::<Streams>();
+    if let Some(streams) = &streams {
+        streams.restarting();
     }
     let logs_dir = paths.logs_dir.clone();
     let restart = Restart {
@@ -339,6 +345,22 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
         }),
     };
     let result = engine.restart(restart);
+    if let Some(streams) = &streams {
+        // This is a thread of the caller's (never the main, request or event thread: the restart
+        // was refused there), and a core runs unless the restart says it does not.
+        let playlist = if matches!(result, Err(RestartError::Start(_))) {
+            None
+        } else {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                engine.call(|mpv| mpv.get_string(streams::PLAYLIST).ok())
+            }))
+            .ok()
+            .flatten()
+        };
+        streams.restored(playlist.as_deref());
+    }
+    // Reserved for the UI: nothing there listens yet (the new core reports every observed
+    // property itself); the contract carries it for M3.
     if !matches!(result, Err(RestartError::Start(_)))
         && let Err(error) = app.emit(player::ENGINE_RESTARTED_EVENT, serde_json::json!({}))
     {
@@ -471,14 +493,18 @@ impl EventSink for AppSink {
 fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
     match event {
         // The window follows mpv's fullscreen and ontop (spec 5.1); a link that starts to load is
-        // probed for its qualities (plan decision 11). The UI gets the batch too.
+        // probed for its qualities (plan decision 11), and an entry of a link that starts decides
+        // its chosen quality (final review I-4). The UI gets the batch too.
         PlayerEvent::State { changes } => {
             surface::follow_mpv(app, changes);
-            if let Some(path) = changes.get(streams::PATH)
-                && let Some(streams) = app.try_state::<Streams>()
-            {
-                // Looks at what is known and starts a thread: nothing here waits.
-                streams.on_path(path.as_str());
+            if let Some(streams) = app.try_state::<Streams>() {
+                if let Some(path) = changes.get(streams::PATH) {
+                    // Looks at what is known and starts a thread: nothing here waits.
+                    streams.on_path(path.as_str());
+                }
+                if let Some(playlist) = changes.get(streams::PLAYLIST) {
+                    streams.on_playlist(playlist);
+                }
             }
             if let Some(osd) = changes.get("osd-dimensions") {
                 // mpv says it once it has made its window: a new one gets the layout, hidden
@@ -507,12 +533,16 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
         }
         // A link that failed for want of a (newer) yt-dlp: yt-dlp is checked in the background
         // (spec 6.6; `check_yt_dlp` says how). The UI hears the end all the same, and its card
-        // offers the update.
+        // offers the update, which counts what is put in place from now on (final review I-1).
         PlayerEvent::EndFile {
             stream_error: Some(class),
+            file,
             ..
         } => {
             if class.wants_new_yt_dlp() {
+                if let (Some(file), Some(tools)) = (file, app.try_state::<tools::Service>()) {
+                    commands::note_failed_link(file, tools.installs());
+                }
                 check_yt_dlp(app, *class);
             }
             false

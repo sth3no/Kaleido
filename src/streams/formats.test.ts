@@ -132,6 +132,20 @@ describe('what a format has', () => {
     expect(hasAudio(fmt({ acodec: 'none' }))).toBe(false);
   });
 
+  it('a codec yt-dlp does not know (empty) is a picture with a height, and a sound without a picture', () => {
+    // A plain HLS playlist without CODECS: its heights are known, its codecs are not.
+    const hls = fmt({ formatId: 'hls-2128', height: 720, vcodec: '', acodec: '', protocol: 'm3u8_native' });
+    expect(hasVideo(hls)).toBe(true);
+    expect(hasAudio(hls)).toBe(false);
+    expect(hasVideo(fmt({ vcodec: '', height: null }))).toBe(false);
+    expect(hasAudio(fmt({ vcodec: null, acodec: '', height: null }))).toBe(true);
+    expect(hasAudio(fmt({ vcodec: 'none', acodec: '', height: null }))).toBe(true);
+    // The qualities of such a link are its heights, not "Automatic" alone.
+    const formats = info([hls, fmt({ formatId: 'hls-4400', height: 1080, vcodec: '', acodec: '' })]);
+    expect(getVideoFormats(formats).map((f) => f.formatId)).toEqual(['hls-4400', 'hls-2128']);
+    expect(hasAudioOnlyFormat(formats)).toBe(false);
+  });
+
   it('a link has an audio-only format when one has a sound and no picture', () => {
     const picture = fmt({ vcodec: 'vp09', acodec: null });
     const sound = fmt({ vcodec: null, acodec: 'opus', height: null });

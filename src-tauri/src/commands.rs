@@ -2,7 +2,8 @@
 //! queue it on the engine; none of them waits for mpv on the main thread, where Tauri runs a
 //! synchronous command (M0 review), because mpv may be busy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Mutex, PoisonError};
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -25,7 +26,7 @@ use crate::system::{
 };
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbStore};
-use crate::tools::{self, ToolId, ToolState, ToolStatus};
+use crate::tools::{self, Channel, Installs, LinkUpdate, ToolId, ToolState, ToolStatus};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
 /// A screenshot goes to the glass, which takes the glass out of the picture first (spec 8.2).
@@ -643,37 +644,100 @@ pub async fn plugins_apply(app: AppHandle) -> Result<PluginsState, PluginError> 
 // --- Links that failed (spec 10.3) -------------------------------------------------------------
 
 /// "Zkusit znovu" and "Aktualizovat a zkusit znovu" on the card of a link that failed: opens `url`
-/// again as a pasted link opens (the open queue, and the open-while-playing setting). With
-/// `update` yt-dlp is checked first, from the channel of the settings, due or not, and the link
-/// opens once that is over: a newer yt-dlp is what the card promises. An update that fails does
-/// not stop the retry (it is logged): the yt-dlp that is there, or the lack of one, makes the link
-/// fail as before, and the card says so. Rejects with a `LoadIssue`, before anything is updated,
-/// for text that is no http(s) link. Waits for the download, hence asynchronous.
+/// again as a pasted link opens (the open queue, and the open-while-playing setting), and resolves
+/// with `None`. With `update` the tools are checked first (`tools::Service::update_for_link`:
+/// yt-dlp from the channel of the settings, due or not, and Deno for a YouTube link that lacks a
+/// usable one), and the link opens once that is over, but only when something was put in place
+/// since the link failed (final review I-1): otherwise it would fail as it did, and the card,
+/// which gets what the check found, says why instead (yt-dlp is the newest already, its check
+/// failed, Deno is missing). Rejects with a `LoadIssue`, before anything is updated, for text that
+/// is no http(s) link. Waits for the download, hence asynchronous.
 #[tauri::command]
-pub async fn stream_retry(app: AppHandle, url: String, update: bool) -> Result<(), LoadIssue> {
+pub async fn stream_retry(
+    app: AppHandle,
+    url: String,
+    update: bool,
+) -> Result<Option<LinkUpdate>, LoadIssue> {
     let link = system::clipboard::checked_link(&url)?;
-    if update {
-        let tools_app = app.clone();
-        on_blocking_thread(move || update_yt_dlp(&tools_app)).await;
+    if !update {
+        system::clipboard::open_link(&app, link);
+        return Ok(None);
     }
-    system::clipboard::open_link(&app, link);
-    Ok(())
+    let tools_app = app.clone();
+    let found = on_blocking_thread(move || update_for_link(&tools_app, &url))
+        .await
+        .unwrap_or_else(|| not_updated("the check stopped unexpectedly"));
+    if found.updated {
+        system::clipboard::open_link(&app, link);
+    } else {
+        tracing::info!("nothing new for the link that failed; it is not opened again");
+    }
+    Ok(Some(found))
 }
 
-/// Checks yt-dlp now for a retry that asked for the newest. Blocks for as long as the download
-/// takes.
-fn update_yt_dlp(app: &AppHandle) {
+/// Checks the tools for a retry of `url` that asked for the newest. Blocks for as long as the
+/// download takes.
+fn update_for_link(app: &AppHandle, url: &str) -> LinkUpdate {
     let Some(tools) = app.try_state::<tools::Service>() else {
         tracing::warn!("yt-dlp is not updated for the retry: the tools are not running");
-        return;
+        return not_updated("the tools are not running");
     };
-    let status = tools.check_now(ToolId::YtDlp);
-    if status.state == ToolState::Failed {
+    let found = tools.update_for_link(url, failed_link(&FAILED_LINKS, url));
+    if found.yt_dlp.state == ToolState::Failed {
         tracing::warn!(
             "yt-dlp is not up to date for the retry: {}",
-            status.error.as_deref().unwrap_or("the check failed")
+            found.yt_dlp.error.as_deref().unwrap_or("the check failed")
         );
     }
+    found
+}
+
+/// What a retry with the update answers when the tools could not be checked at all.
+fn not_updated(reason: &str) -> LinkUpdate {
+    LinkUpdate {
+        yt_dlp: not_checked(ToolId::YtDlp, reason),
+        deno: None,
+        channel: Channel::default(),
+        updated: false,
+    }
+}
+
+/// How many links that failed are remembered with the tools' installs of the time.
+const FAILED_LINKS_KEPT: usize = 16;
+
+/// The links that failed for want of a (newer) yt-dlp in this run, the newest last, each with
+/// what the tools had been put in place as then (`tools::Service::installs`): "Update and try
+/// again" counts what came since, so that a yt-dlp the check after the failure put in place before
+/// the press (Ruling R11) is new for the link too.
+static FAILED_LINKS: Mutex<VecDeque<(String, Installs)>> = Mutex::new(VecDeque::new());
+
+/// A link failed for want of a (newer) yt-dlp (lib.rs, on the mpv event thread; before the check
+/// it starts): what the tools are now is kept for it.
+pub(crate) fn note_failed_link(url: &str, installs: Installs) {
+    note_link(&FAILED_LINKS, url, installs);
+}
+
+/// [`note_failed_link`] in `links`: the link's earlier failure goes, and beyond
+/// [`FAILED_LINKS_KEPT`] the oldest.
+fn note_link(links: &Mutex<VecDeque<(String, Installs)>>, url: &str, installs: Installs) {
+    // A list is changed in one step, so a panic elsewhere leaves it whole.
+    let mut links = links.lock().unwrap_or_else(PoisonError::into_inner);
+    links.retain(|(link, _)| link != url);
+    if links.len() == FAILED_LINKS_KEPT {
+        links.pop_front();
+    }
+    links.push_back((url.to_owned(), installs));
+}
+
+/// What the tools had been put in place as when `url` last failed, if it is remembered. It stays,
+/// so that a second press counts from the failure too.
+fn failed_link(links: &Mutex<VecDeque<(String, Installs)>>, url: &str) -> Option<Installs> {
+    links
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(link, _)| link == url)
+        .map(|(_, installs)| *installs)
 }
 
 // --- The qualities of a link (spec 8.5 points 2 and 3) ------------------------------------------
@@ -692,8 +756,9 @@ pub fn stream_formats(streams: State<'_, Streams>) -> Option<StreamFormats> {
 /// (`Invalid` otherwise) and is kept for the link before the reload is queued, so that a restart
 /// of the core loads the link with it too; the UI hears the choice as `stream:formats`. The
 /// reload is one request on the engine, which reads the path, the place in the playlist and the
-/// position when it runs, and does nothing when another entry plays by then. Waits for nothing
-/// but the streams' state; on a blocking thread all the same, off the main thread.
+/// position when it runs, and does nothing when another entry plays by then (the choice then goes
+/// back to what plays, and the UI hears that too: `streams::Reload::run`). Waits for nothing but
+/// the streams' state; on a blocking thread all the same, off the main thread.
 #[tauri::command]
 pub async fn player_set_quality(
     app: AppHandle,
@@ -705,7 +770,10 @@ pub async fn player_set_quality(
             return Err(QualityError::NotAStream);
         };
         let reload = streams.choose(format.as_deref())?;
-        engine.request(Request::Call(Box::new(move |mpv| reload.run(mpv))));
+        let streams = Streams::clone(&streams);
+        engine.request(Request::Call(Box::new(move |mpv| {
+            reload.run(mpv, &streams)
+        })));
         Ok(())
     })
     .await
@@ -781,6 +849,54 @@ mod tests {
             ui_error_line("Nelze přehrát: žluťoučký kůň"),
             "Nelze přehrát: žluťoučký kůň"
         );
+    }
+
+    /// Final review I-1: a link that failed is remembered with what the tools had been put in
+    /// place as then, its last failure wins, a press does not forget it, and only the newest few
+    /// are kept. Needs nothing.
+    #[test]
+    fn a_failed_link_keeps_the_installs_of_its_failure() {
+        let links = Mutex::new(VecDeque::new());
+        let at = |yt_dlp, deno| Installs { yt_dlp, deno };
+        let link = "https://www.youtube.com/watch?v=abc";
+        assert_eq!(failed_link(&links, link), None);
+
+        note_link(&links, link, at(1, 0));
+        note_link(&links, "https://example.com/v", at(1, 1));
+        assert_eq!(failed_link(&links, link), Some(at(1, 0)));
+        // Read again: still there.
+        assert_eq!(failed_link(&links, link), Some(at(1, 0)));
+        // It failed again later: that is what counts.
+        note_link(&links, link, at(2, 1));
+        assert_eq!(failed_link(&links, link), Some(at(2, 1)));
+        assert_eq!(links.lock().unwrap().len(), 2);
+
+        for n in 0..FAILED_LINKS_KEPT {
+            note_link(&links, &format!("https://example.com/{n}"), at(3, 1));
+        }
+        assert_eq!(links.lock().unwrap().len(), FAILED_LINKS_KEPT);
+        assert_eq!(failed_link(&links, link), None, "the oldest went");
+        assert_eq!(
+            failed_link(
+                &links,
+                &format!("https://example.com/{}", FAILED_LINKS_KEPT - 1)
+            ),
+            Some(at(3, 1))
+        );
+    }
+
+    /// What the card gets when the tools could not be checked at all: nothing new, and why.
+    #[test]
+    fn a_retry_without_the_tools_updates_nothing() {
+        let found = not_updated("the tools are not running");
+        assert!(!found.updated);
+        assert_eq!(found.yt_dlp.tool, ToolId::YtDlp);
+        assert_eq!(found.yt_dlp.state, ToolState::Failed);
+        assert_eq!(
+            found.yt_dlp.error.as_deref(),
+            Some("the tools are not running")
+        );
+        assert_eq!((found.deno, found.channel), (None, Channel::Stable));
     }
 
     /// At most 4 KB of it, cut between two characters.
