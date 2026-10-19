@@ -485,7 +485,12 @@ mod tests {
 
         struct Offline;
         impl Fetch for Offline {
-            fn get(&self, _: &str, _: u64) -> Result<Vec<u8>, FetchError> {
+            fn get_within(
+                &self,
+                _: &str,
+                _: u64,
+                _: std::time::Duration,
+            ) -> Result<Vec<u8>, FetchError> {
                 Err(FetchError::Offline)
             }
         }
@@ -507,6 +512,7 @@ mod tests {
             failures: 0,
             next_try: None,
             vanished: 0,
+            exe_sha256: None,
         };
         // As checks leave it: yt-dlp in place, Deno recorded but its file gone.
         let mut file = ToolsFile::default();

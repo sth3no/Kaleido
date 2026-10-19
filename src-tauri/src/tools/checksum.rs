@@ -1,16 +1,40 @@
-//! The checksums the tools are verified with (spec 6.6): the SHA-256 of what was downloaded, and
-//! the one the release publishes for it, read from yt-dlp's `SHA2-256SUMS` or Deno's
+//! The checksums the tools are verified with (spec 6.6): the SHA-256 of what was downloaded or is
+//! in place, and the one the release publishes for it, read from yt-dlp's `SHA2-256SUMS` or Deno's
 //! `<asset>.sha256sum`. Every checksum comes out as lowercase hex, so that two of them compare as
 //! strings.
+
+use std::fs::File;
+use std::io::{self, Read};
+use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
 /// The length of a SHA-256 in hex.
 const HEX_LEN: usize = 64;
 
+/// How much of a file is read at a time while it is hashed.
+const FILE_CHUNK: usize = 1024 * 1024;
+
 /// The SHA-256 of `bytes` as lowercase hex.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The SHA-256 of the file at `path` as lowercase hex, read a piece at a time (Deno is about
+/// 120 MB), or why it cannot be read.
+pub fn sha256_file(path: &Path) -> io::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0; FILE_CHUNK];
+    loop {
+        match file.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => hasher.update(&chunk[..read]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// The checksum of `asset` in a `sha256sum` list such as yt-dlp's `SHA2-256SUMS`: lines of
@@ -87,6 +111,21 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(sha256_hex(b"").len(), 64);
+    }
+
+    /// Needs a temp folder. A file is hashed as its bytes are, also one longer than a piece read
+    /// at a time; one that is not there is an error.
+    #[test]
+    fn a_file_is_hashed_as_its_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let small = tmp.path().join("small.exe");
+        std::fs::write(&small, b"abc").unwrap();
+        assert_eq!(sha256_file(&small).unwrap(), sha256_hex(b"abc"));
+        let bytes: Vec<u8> = (0..FILE_CHUNK * 2 + 7).map(|at| (at % 251) as u8).collect();
+        let large = tmp.path().join("large.exe");
+        std::fs::write(&large, &bytes).unwrap();
+        assert_eq!(sha256_file(&large).unwrap(), sha256_hex(&bytes));
+        assert!(sha256_file(&tmp.path().join("missing.exe")).is_err());
     }
 
     /// The forms of the checksum files of the releases, as they were on 2026-10-19 (yt-dlp

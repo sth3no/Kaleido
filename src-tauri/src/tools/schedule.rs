@@ -95,6 +95,7 @@ mod tests {
             failures: 0,
             next_try: None,
             vanished: 0,
+            exe_sha256: None,
         }
     }
 

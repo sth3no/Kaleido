@@ -91,6 +91,12 @@ pub struct ToolRecord {
     /// a check finds the file still in place at its start.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub vanished: u32,
+    /// The SHA-256 of the file put in place where that is not the release asset itself: Deno's
+    /// `deno.exe`, out of its zip (lowercase hex). `None` for yt-dlp, whose file is its asset
+    /// ([`sha256`](ToolRecord::sha256)), and in a Deno record from before Kaleido kept it: a check
+    /// then cannot verify the file and puts it in place again (final review I-2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exe_sha256: Option<String>,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -109,12 +115,28 @@ impl ToolRecord {
             failures: 0,
             next_try: None,
             vanished: 0,
+            exe_sha256: None,
         }
     }
 
     /// Whether the record describes an installed tool (its file may still be gone).
     pub fn is_installed(&self) -> bool {
         !self.sha256.is_empty()
+    }
+
+    /// The SHA-256 the file of `tool` had when a check put it in place: yt-dlp's is that of its
+    /// release asset, Deno's that of the `deno.exe` it unpacked ([`exe_sha256`]). `None` while
+    /// nothing is installed, and for a Deno record that does not know it.
+    ///
+    /// [`exe_sha256`]: ToolRecord::exe_sha256
+    pub fn file_sha256(&self, tool: ToolId) -> Option<&str> {
+        if !self.is_installed() {
+            return None;
+        }
+        match tool {
+            ToolId::YtDlp => Some(&self.sha256),
+            ToolId::Deno => self.exe_sha256.as_deref(),
+        }
     }
 }
 
@@ -272,7 +294,8 @@ mod tests {
                 "deno": {
                     "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
                     "installedAt": "2026-10-19T12:00:00Z",
-                    "failures": 0
+                    "failures": 0,
+                    "exeSha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a"
                 }
             },
             "futureKey": [1, 2]
@@ -288,11 +311,23 @@ mod tests {
         assert_eq!(yt.failures, 2);
         assert_eq!(yt.next_try.as_deref(), Some("2026-10-19T13:05:00Z"));
         assert_eq!(yt.vanished, 1);
+        // yt-dlp's file is its asset; it has no checksum of its own.
+        assert_eq!(
+            yt.exe_sha256, None,
+            "left out of the file while there is none"
+        );
+        assert_eq!(yt.file_sha256(ToolId::YtDlp), Some(&*yt.sha256));
         let deno = &file.tools[&ToolId::Deno];
         assert_eq!(deno.channel, None);
         assert_eq!(deno.checked_at, None);
         assert_eq!(deno.vanished, 0, "left out of the file while there is none");
         assert!(deno.is_installed());
+        // Deno's file is what came out of the zip.
+        assert_eq!(
+            deno.file_sha256(ToolId::Deno),
+            Some("66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a")
+        );
+        assert_eq!(ToolRecord::not_installed().file_sha256(ToolId::YtDlp), None);
         file.save(&path).unwrap();
         let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved, example);

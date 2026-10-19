@@ -6,13 +6,17 @@
 //! limits ([`source`]).
 //!
 //! [`Tools`] is the service. A check of a tool ([`Tools::check`]):
-//! 1. takes over the installation's bundled copy when the tool is missing and the copy is the one
+//! 1. reads the SHA-256 of the file in place: one that is not the file the record says was put
+//!    there (a scanner that "cleaned" it, a copy by hand, a write that broke off), or that cannot
+//!    be read, counts as not installed (final review I-2);
+//! 2. takes over the installation's bundled copy when the tool is missing and the copy is the one
 //!    its `tools.json` names (plan decision 7);
-//! 2. reads the release's checksum of the asset from its checksum list ([`checksum`]);
-//! 3. if that is the checksum of the installed tool, notes the time of the check and is done;
-//! 4. otherwise downloads the asset, verifies it against that checksum, puts the tool in place
+//! 3. reads the release's checksum of the asset from its checksum list ([`checksum`]);
+//! 4. if that is the checksum of the installed tool, notes the time of the check and is done (a
+//!    forced check asks the tool its version again);
+//! 5. otherwise downloads the asset, verifies it against that checksum, puts the tool in place
 //!    beside the one that may run ([`replace`]), reads its version ([`Inspect`]) and records it;
-//! 5. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
+//! 6. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
 //!    A tool whose file is gone, or whose version cannot be read, is such an error too
 //!    ([`ToolError::Gone`], [`ToolError::Silent`]; controller Ruling R10): a virus scanner that
 //!    takes `yt-dlp.exe` away is not answered with a download at every round. A check that is not
@@ -22,7 +26,8 @@
 //!
 //! Nothing is ever put in place unverified: a download must have the checksum the release lists
 //! for it, and a bundled copy the one the installer's `tools.json` beside it names (the installer
-//! takes it from the release). One check of a tool runs at a time: another one that comes
+//! takes it from the release); and what is in place is verified again at every check (step 1).
+//! One check of a tool runs at a time: another one that comes
 //! meanwhile waits for it and gets its result; the two tools are checked independently.
 //!
 //! [`Tools`] starts no process and knows nothing of Tauri: the version of a tool comes through
@@ -533,7 +538,7 @@ impl Tools {
         result
     }
 
-    /// Steps 1 to 5 of a check: the record the tool has after it, and how it went.
+    /// Steps 1 to 6 of a check: the record the tool has after it, and how it went.
     fn run(
         &self,
         tool: ToolId,
@@ -559,6 +564,23 @@ impl Tools {
                 Err(ToolError::Gone(tool)),
             );
         }
+        // Step 1: the file in place is the one that was put there, or the record is no longer
+        // true. One that is another file, or that cannot be read, counts as not installed, so
+        // that this check puts the release's in place again; what the earlier attempts left (the
+        // failures and the vanishings, the basis of the backoff, and the last check that went
+        // through) stays.
+        let record = record.map(|found| {
+            if !self.installed(tool, Some(&found)) || self.intact(tool, &found) {
+                return found;
+            }
+            ToolRecord {
+                failures: found.failures,
+                next_try: found.next_try,
+                vanished: found.vanished,
+                checked_at: found.checked_at,
+                ..ToolRecord::not_installed()
+            }
+        });
         // Found in place at the start: a streak of vanishings is over.
         let in_place = self.installed(tool, record.as_ref());
         let source = source(tool, channel);
@@ -575,7 +597,7 @@ impl Tools {
             }
             record = Some(taken);
         }
-        match self.update(tool, channel, &source, record.as_ref()) {
+        match self.update(tool, channel, &source, record.as_ref(), force) {
             Ok(mut updated) => {
                 updated.vanished = if in_place {
                     0
@@ -619,13 +641,20 @@ impl Tools {
         }
     }
 
-    /// Steps 2 to 4: the release's checksum, and the download when it is a new one.
+    /// Steps 3 to 5: the release's checksum, and the download when it is a new one. `record` is
+    /// one whose file step 1 has found to be the one put in place (or one of a tool that is not
+    /// installed), so the release's checksum is compared with what is on the disk. A forced check
+    /// (`force`: the user asked, or a link needs a newer yt-dlp) asks a tool that is current its
+    /// version again, so that one that no longer runs says so ([`ToolError::Silent`]). The
+    /// download of the tool has more time the more checks of it failed before
+    /// ([`http::large_timeout`]).
     fn update(
         &self,
         tool: ToolId,
         channel: Channel,
         source: &Source,
         record: Option<&ToolRecord>,
+        force: bool,
     ) -> Result<ToolRecord, ToolError> {
         let sums = self.fetch.get(&source.sums_url(), SUMS_LIMIT)?;
         let sums = String::from_utf8_lossy(&sums);
@@ -646,19 +675,24 @@ impl Tools {
             checked.failures = 0;
             checked.next_try = None;
             checked.channel = channel;
-            if checked.version.is_none() {
+            if force || checked.version.is_none() {
                 checked.version = self.inspect.version(tool, &exe);
             }
             return Ok(checked);
         }
 
         self.set_phase(tool, ToolState::Downloading);
-        let bytes = self.fetch.get(&source.asset_url(), tool.limit())?;
+        let failures = record.map_or(0, |record| record.failures);
+        let bytes = self.fetch.get_within(
+            &source.asset_url(),
+            tool.limit(),
+            http::large_timeout(failures),
+        )?;
         let actual = checksum::sha256_hex(&bytes);
         if actual != expected {
             return Err(ToolError::Checksum { expected, actual });
         }
-        self.install(tool, &bytes)?;
+        let in_place = self.install(tool, &bytes)?;
         let now = stamp(OffsetDateTime::now_utc());
         Ok(ToolRecord {
             version: self.inspect.version(tool, &exe),
@@ -670,10 +704,43 @@ impl Tools {
             next_try: None,
             // `run` carries the vanishings over.
             vanished: 0,
+            exe_sha256: exe_sha256_of(tool, in_place),
         })
     }
 
-    /// Step 1: the installation's copy of a missing tool (plan decision 7), the release asset under
+    /// Whether the file of `tool` in place is the one `record` (of an installed tool) says was
+    /// put there: its SHA-256 is the one it had then ([`ToolRecord::file_sha256`]). Not when it
+    /// cannot be read, nor for a record that does not know the SHA-256 (a Deno recorded before
+    /// Kaleido kept it). Reads the whole file: for a check only, never for the main thread.
+    fn intact(&self, tool: ToolId, record: &ToolRecord) -> bool {
+        let Some(wanted) = record.file_sha256(tool) else {
+            tracing::warn!(
+                "{} cannot be verified (its record is older than that); it is put in place again",
+                tool.exe_name()
+            );
+            return false;
+        };
+        match checksum::sha256_file(&self.exe(tool)) {
+            Ok(actual) if actual.eq_ignore_ascii_case(wanted) => true,
+            Ok(_) => {
+                tracing::warn!(
+                    "{} is not the file that was put in place (replaced or damaged since); it is \
+                     put in place again",
+                    tool.exe_name()
+                );
+                false
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "{} cannot be read to verify it ({error}); it is put in place again",
+                    tool.exe_name()
+                );
+                false
+            }
+        }
+    }
+
+    /// Step 2: the installation's copy of a missing tool (plan decision 7), the release asset under
     /// its own name in `resource_dir\tools\`, with its record in the `tools.json` there. Taken only
     /// when its SHA-256 is the one that record names; the record it gets is that one's, installed
     /// now and not yet checked. `None` when there is no such copy or it cannot be put in place,
@@ -697,10 +764,13 @@ impl Tools {
             );
             return None;
         }
-        if let Err(error) = self.install(tool, &bytes) {
-            tracing::warn!("cannot put the bundled {tool} in place: {error}");
-            return None;
-        }
+        let in_place = match self.install(tool, &bytes) {
+            Ok(in_place) => in_place,
+            Err(error) => {
+                tracing::warn!("cannot put the bundled {tool} in place: {error}");
+                return None;
+            }
+        };
         Some(ToolRecord {
             version: self
                 .inspect
@@ -716,12 +786,14 @@ impl Tools {
             failures: 0,
             next_try: None,
             vanished: 0,
+            exe_sha256: exe_sha256_of(tool, in_place),
         })
     }
 
     /// Puts the verified release asset of `tool` in place: `yt-dlp.exe` as it is, `deno.exe` out
-    /// of its zip.
-    fn install(&self, tool: ToolId, asset: &[u8]) -> Result<(), ToolError> {
+    /// of its zip. Returns the SHA-256 of the file now in place, which the next checks verify it
+    /// with (step 1).
+    fn install(&self, tool: ToolId, asset: &[u8]) -> Result<String, ToolError> {
         let unpacked;
         let exe = match tool {
             ToolId::YtDlp => asset,
@@ -739,7 +811,7 @@ impl Tools {
                 ToolError::Io(format!("cannot put {} in place: {error}", tool.exe_name()))
             })?;
         *self.lock().installs.entry(tool).or_default() += 1;
-        Ok(())
+        Ok(checksum::sha256_hex(exe))
     }
 
     fn set_phase(&self, tool: ToolId, phase: ToolState) {
@@ -883,6 +955,12 @@ fn unusable(tool: ToolId, record: Option<&ToolRecord>) -> Option<String> {
 /// The channel a tool's record keeps: yt-dlp's, and none for Deno.
 fn channel_of(tool: ToolId, channel: Channel) -> Option<Channel> {
     (tool == ToolId::YtDlp).then_some(channel)
+}
+
+/// What a tool's record keeps of the SHA-256 of the file put in place (`in_place`): Deno's, whose
+/// file is not its release asset; nothing for yt-dlp, whose file is ([`ToolRecord::exe_sha256`]).
+fn exe_sha256_of(tool: ToolId, in_place: String) -> Option<String> {
+    (tool == ToolId::Deno).then_some(in_place)
 }
 
 /// `record` once its file was found gone at `now` (Ruling R10), `previous` the record before the
@@ -1237,11 +1315,12 @@ mod tests {
     use crate::tools::store::parse_time;
 
     /// Answers by address: bytes or an error, 404 for what it does not know. A GET of the
-    /// address it holds waits until it is released.
+    /// address it holds waits until it is released. It remembers the time each GET was given.
     #[derive(Default)]
     struct FakeWeb {
         answers: Mutex<HashMap<String, Result<Vec<u8>, FetchError>>>,
         calls: Mutex<Vec<String>>,
+        timeouts: Mutex<Vec<(String, std::time::Duration)>>,
         held: Mutex<Option<String>>,
         released: Condvar,
     }
@@ -1253,6 +1332,10 @@ mod tests {
 
         fn calls(&self) -> Vec<String> {
             self.calls.lock().unwrap().clone()
+        }
+
+        fn timeouts(&self) -> Vec<(String, std::time::Duration)> {
+            self.timeouts.lock().unwrap().clone()
         }
 
         fn count(&self, url: &str) -> usize {
@@ -1270,8 +1353,17 @@ mod tests {
     }
 
     impl Fetch for FakeWeb {
-        fn get(&self, url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
+        fn get_within(
+            &self,
+            url: &str,
+            limit: u64,
+            timeout: std::time::Duration,
+        ) -> Result<Vec<u8>, FetchError> {
             self.calls.lock().unwrap().push(url.to_owned());
+            self.timeouts
+                .lock()
+                .unwrap()
+                .push((url.to_owned(), timeout));
             let mut held = self.held.lock().unwrap();
             while held.as_deref() == Some(url) {
                 held = self.released.wait(held).unwrap();
@@ -1415,6 +1507,17 @@ mod tests {
             failures: 0,
             next_try: None,
             vanished: 0,
+            exe_sha256: None,
+        }
+    }
+
+    /// A record of a Deno that came from the zip `zip` as `exe`, installed (and last checked) at
+    /// `at`.
+    fn deno_record(zip: &[u8], exe: &[u8], version: &str, at: &str) -> ToolRecord {
+        ToolRecord {
+            channel: None,
+            exe_sha256: Some(sha256_hex(exe)),
+            ..record(zip, version, at)
         }
     }
 
@@ -1505,6 +1608,9 @@ mod tests {
         // Deno is a tool of its own: still missing.
         assert_eq!(tools.status(ToolId::Deno).state, ToolState::Missing);
 
+        // yt-dlp's file is its asset: no checksum of its own.
+        assert_eq!(recorded.exe_sha256, None);
+
         // The next start knows it.
         let again = setup.tools();
         assert_eq!(again.status(ToolId::YtDlp), status);
@@ -1541,7 +1647,7 @@ mod tests {
             recorded,
             ToolRecord {
                 checked_at: recorded.checked_at.clone(),
-                ..old
+                ..old.clone()
             }
         );
         assert!(setup.inspect.asked().is_empty());
@@ -1553,9 +1659,27 @@ mod tests {
             Ok(status.clone())
         );
         assert_eq!(setup.web.calls().len(), 1);
-        // A forced one reads the checksums again, and still downloads nothing.
-        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        // A forced one reads the checksums again, and still downloads nothing; it asks the tool
+        // in place its version again (final review I-2).
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let forced = tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
         assert_eq!(setup.web.calls(), [source.sums_url(), source.sums_url()]);
+        assert_eq!(
+            setup.inspect.asked(),
+            [(ToolId::YtDlp, setup.exe(ToolId::YtDlp), exe.to_vec())]
+        );
+        assert_eq!(forced.version.as_deref(), Some("2026.08.19"));
+        // One that no longer answers is no longer ready: it does not run as it should.
+        let silent = Setup::new();
+        silent.installed(ToolId::YtDlp, exe, old);
+        silent.release(Channel::Stable, &sha256_hex(exe), b"never fetched");
+        let tools = silent.tools();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, true),
+            Err(ToolError::Silent(ToolId::YtDlp))
+        );
+        assert_eq!(fs::read(silent.exe(ToolId::YtDlp)).unwrap(), exe);
+        assert_eq!(tools.status(ToolId::YtDlp).state, ToolState::Failed);
     }
 
     #[test]
@@ -1645,6 +1769,143 @@ mod tests {
         assert_eq!(setup.record(ToolId::YtDlp).unwrap().failures, 2);
     }
 
+    /// Final review I-2: a tool whose file in place is not the one its record says was put there
+    /// (replaced by hand, "cleaned" by an antivirus, a write that broke off) is not current,
+    /// whatever the release says: the next check downloads it and puts it in place, also when the
+    /// release is still the one recorded and the check is not forced. Needs a temp folder.
+    #[test]
+    fn a_file_that_is_not_the_one_put_in_place_is_downloaded_again() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        // The record names this one, checked weeks ago; the file in place is another one.
+        setup.installed(
+            ToolId::YtDlp,
+            b"MZ replaced by hand",
+            record(exe, "2026.08.19", "2026-10-01T00:00:00Z"),
+        );
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let tools = setup.tools();
+        // Nothing reads the file before a check: until then it looks ready.
+        assert_eq!(tools.status(ToolId::YtDlp).state, ToolState::Ready);
+
+        let status = tools.check(ToolId::YtDlp, Channel::Stable, false).unwrap();
+
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(status.version.as_deref(), Some("2026.08.19"));
+        let source = source(ToolId::YtDlp, Channel::Stable);
+        assert_eq!(setup.web.calls(), [source.sums_url(), source.asset_url()]);
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+        assert_eq!(tools.installs(ToolId::YtDlp), 1);
+        assert_eq!(setup.record(ToolId::YtDlp).unwrap().sha256, sha256_hex(exe));
+        assert_eq!(setup.names(), ["tools.json", "yt-dlp.exe"]);
+        // Verified now: the next check downloads nothing.
+        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        assert_eq!(setup.web.count(&source.asset_url()), 1);
+
+        // Cut short while offline: not installed (nothing hands it on as verified), and the check
+        // backs off as any failed one; the last check that went through stays.
+        fs::write(setup.exe(ToolId::YtDlp), &exe[..4]).unwrap();
+        setup
+            .web
+            .answer(&source.sums_url(), Err(FetchError::Offline));
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, true),
+            Err(ToolError::Fetch(FetchError::Offline))
+        );
+        assert_eq!(tools.path(ToolId::YtDlp), None);
+        let status = tools.status(ToolId::YtDlp);
+        assert_eq!((status.state, status.version), (ToolState::Failed, None));
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert!(!recorded.is_installed());
+        assert_eq!(recorded.failures, 1);
+        assert!(recorded.checked_at.is_some());
+        // Online again: put in place, its failures over.
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.next_try), (0, None));
+        assert_eq!(tools.installs(ToolId::YtDlp), 2);
+
+        // Deno: its file is deno.exe out of the zip, verified by the checksum kept for it.
+        let deno = b"deno 2.9.7";
+        let zip = zip_of(Some(deno));
+        let deno_source = super::source(ToolId::Deno, Channel::Stable);
+        setup
+            .web
+            .answer(&deno_source.sums_url(), Ok(deno_sums(&zip)));
+        setup.web.answer(&deno_source.asset_url(), Ok(zip.clone()));
+        setup.inspect.says(ToolId::Deno, "2.9.7");
+        setup.installed(
+            ToolId::Deno,
+            deno,
+            deno_record(&zip, deno, "2.9.7", "2026-10-01T00:00:00Z"),
+        );
+        let tools = setup.tools();
+        tools.check(ToolId::Deno, Channel::Stable, true).unwrap();
+        assert_eq!(setup.web.count(&deno_source.asset_url()), 0, "intact");
+        fs::write(setup.exe(ToolId::Deno), b"deno, damaged").unwrap();
+        let status = tools.check(ToolId::Deno, Channel::Stable, true).unwrap();
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(setup.web.count(&deno_source.asset_url()), 1);
+        assert_eq!(fs::read(setup.exe(ToolId::Deno)).unwrap(), deno);
+        // A Deno recorded before Kaleido kept deno.exe's checksum cannot be verified: it is put in
+        // place once more, and verified from then on.
+        let path = setup.paths.tools_dir.join(store::FILE);
+        let mut file = ToolsFile::load(&path);
+        file.tools.get_mut(&ToolId::Deno).unwrap().exe_sha256 = None;
+        file.save(&path).unwrap();
+        let tools = setup.tools();
+        tools.check(ToolId::Deno, Channel::Stable, true).unwrap();
+        assert_eq!(setup.web.count(&deno_source.asset_url()), 2);
+        assert_eq!(
+            setup.record(ToolId::Deno).unwrap().exe_sha256,
+            Some(sha256_hex(deno))
+        );
+        tools.check(ToolId::Deno, Channel::Stable, true).unwrap();
+        assert_eq!(setup.web.count(&deno_source.asset_url()), 2);
+    }
+
+    /// Final review minor 5: the download of a tool has more time the more checks of it failed in
+    /// a row (`http::large_timeout`); its checksum list keeps the small time. Needs a temp folder.
+    #[test]
+    fn a_download_after_failed_checks_has_more_time() {
+        let setup = Setup::new();
+        let v1 = b"yt-dlp 2026.08.19";
+        let v2 = b"yt-dlp 2026.10.10";
+        setup.installed(
+            ToolId::YtDlp,
+            v1,
+            ToolRecord {
+                failures: 2,
+                ..record(v1, "2026.08.19", "2026-10-01T00:00:00Z")
+            },
+        );
+        setup.release(Channel::Stable, &sha256_hex(v2), v2);
+        setup.inspect.says(ToolId::YtDlp, "2026.10.10");
+        let tools = setup.tools();
+
+        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+
+        let source = source(ToolId::YtDlp, Channel::Stable);
+        assert_eq!(
+            setup.web.timeouts(),
+            [
+                (source.sums_url(), http::SMALL_TIMEOUT),
+                (source.asset_url(), std::time::Duration::from_secs(40 * 60)),
+            ]
+        );
+        // That check went through: the next download has the first time again.
+        let v3 = b"yt-dlp 2026.11.11";
+        setup.release(Channel::Stable, &sha256_hex(v3), v3);
+        tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        assert_eq!(
+            setup.web.timeouts()[3],
+            (source.asset_url(), http::LARGE_TIMEOUT)
+        );
+    }
+
     /// Review focus 3 and spec 10.7: offline, the tool stays as it is, and the next tries wait 60 s,
     /// then 300 s.
     #[test]
@@ -1707,8 +1968,9 @@ mod tests {
         );
         assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), v1);
 
-        // Back online: the failures are over.
+        // Back online: the failures are over. (A forced check asks the tool its version.)
         setup.release(Channel::Stable, &sha256_hex(v1), b"never fetched");
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
         let status = tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
         assert_eq!((status.state, status.error), (ToolState::Ready, None));
         let recorded = setup.record(ToolId::YtDlp).unwrap();
@@ -1900,10 +2162,12 @@ mod tests {
         assert_eq!(status.version.as_deref(), Some("2.9.7"));
         assert_eq!(fs::read(setup.exe(ToolId::Deno)).unwrap(), deno);
         assert_eq!(tools.path(ToolId::Deno), Some(setup.exe(ToolId::Deno)));
-        // The record keeps the zip's checksum, as the release lists it, and no channel.
+        // The record keeps the zip's checksum, as the release lists it, and no channel; and that
+        // of deno.exe, which the next checks verify the file with.
         let recorded = setup.record(ToolId::Deno).unwrap();
         assert_eq!(recorded.sha256, sha256_hex(&zip));
         assert_eq!(recorded.channel, None);
+        assert_eq!(recorded.exe_sha256, Some(sha256_hex(deno)));
         assert_eq!(
             setup.inspect.asked(),
             [(ToolId::Deno, setup.exe(ToolId::Deno), deno.to_vec())]

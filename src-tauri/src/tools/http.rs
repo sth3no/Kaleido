@@ -31,8 +31,11 @@ pub const ALLOWED_HOSTS: [&str; 3] = [
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a small download (a checksum list) may take, redirects included.
 pub const SMALL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a large download (a tool) may take, redirects included.
+/// How long a large download (a tool) may take, redirects included, while the tool's checks have
+/// not failed ([`large_timeout`]).
 pub const LARGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// The most a large download may take, however often the tool's checks failed before.
+pub const LARGE_TIMEOUT_MAX: Duration = Duration::from_secs(80 * 60);
 /// A download whose limit is at most this is a small one.
 const SMALL_LIMIT: u64 = 1024 * 1024;
 /// The redirects one download may follow; GitHub's take two.
@@ -43,8 +46,36 @@ const USER_AGENT: &str = concat!("Kaleido/", env!("CARGO_PKG_VERSION"));
 /// Gets files from the network.
 pub trait Fetch: Send + Sync {
     /// The body of a GET of `url`, of at most `limit` bytes: a longer one is
-    /// [`FetchError::TooLarge`], however much of it came.
-    fn get(&self, url: &str, limit: u64) -> Result<Vec<u8>, FetchError>;
+    /// [`FetchError::TooLarge`], however much of it came. The whole download, redirects included,
+    /// may take [`SMALL_TIMEOUT`] for a small `limit` (a checksum list) and [`LARGE_TIMEOUT`]
+    /// otherwise.
+    fn get(&self, url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
+        self.get_within(url, limit, default_timeout(limit))
+    }
+
+    /// [`get`](Fetch::get), the whole download taking at most `timeout`, redirects included.
+    fn get_within(&self, url: &str, limit: u64, timeout: Duration) -> Result<Vec<u8>, FetchError>;
+}
+
+/// How long a download of at most `limit` bytes may take unless it is given a time of its own.
+fn default_timeout(limit: u64) -> Duration {
+    if limit <= SMALL_LIMIT {
+        SMALL_TIMEOUT
+    } else {
+        LARGE_TIMEOUT
+    }
+}
+
+/// How long the large download of a tool may take after `failures` checks of it failed in a row
+/// (final review minor 5): [`LARGE_TIMEOUT`], doubled for each failure, at most
+/// [`LARGE_TIMEOUT_MAX`]: 10, 20, 40, then 80 minutes. A line too slow for a tool in 10 minutes
+/// (below about 70 KB/s for Deno's zip) gets more time at the next try, instead of being cut off
+/// at the same point again after every backoff. Checksum lists keep their small time.
+pub fn large_timeout(failures: u32) -> Duration {
+    // Three doublings reach the most; more change nothing (and cannot overflow the shift).
+    LARGE_TIMEOUT
+        .saturating_mul(1 << failures.min(3))
+        .min(LARGE_TIMEOUT_MAX)
 }
 
 /// Why a download did not happen.
@@ -141,12 +172,7 @@ impl Web {
 }
 
 impl Fetch for Web {
-    fn get(&self, url: &str, limit: u64) -> Result<Vec<u8>, FetchError> {
-        let timeout = if limit <= SMALL_LIMIT {
-            SMALL_TIMEOUT
-        } else {
-            LARGE_TIMEOUT
-        };
+    fn get_within(&self, url: &str, limit: u64, timeout: Duration) -> Result<Vec<u8>, FetchError> {
         let deadline = Instant::now() + timeout;
         let mut url = Url::parse(url)
             .map_err(|error| FetchError::Other(format!("not an address: {error}")))?;
@@ -324,6 +350,26 @@ mod tests {
             }
         });
         port
+    }
+
+    /// Final review minor 5: a tool's download gets twice the time after each failed check, up
+    /// to 80 minutes; a checksum list keeps its 30 seconds. Needs nothing.
+    #[test]
+    fn the_large_timeout_grows_with_the_failures() {
+        let minutes = |count: u64| Duration::from_secs(count * 60);
+        assert_eq!(large_timeout(0), minutes(10));
+        assert_eq!(large_timeout(1), minutes(20));
+        assert_eq!(large_timeout(2), minutes(40));
+        assert_eq!(large_timeout(3), minutes(80));
+        for failures in [4, 5, 31, 32, u32::MAX] {
+            assert_eq!(large_timeout(failures), LARGE_TIMEOUT_MAX, "{failures}");
+        }
+        assert_eq!(LARGE_TIMEOUT_MAX, minutes(80));
+        // What a download is given when nobody says: by its limit, as before.
+        assert_eq!(default_timeout(SMALL_LIMIT), SMALL_TIMEOUT);
+        assert_eq!(default_timeout(64 * 1024), SMALL_TIMEOUT);
+        assert_eq!(default_timeout(SMALL_LIMIT + 1), LARGE_TIMEOUT);
+        assert_eq!(large_timeout(0), LARGE_TIMEOUT);
     }
 
     /// Review focus 3. Needs only the loopback interface: the server is in the test.
