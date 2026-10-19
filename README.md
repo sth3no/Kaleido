@@ -59,11 +59,9 @@ and `-Unregister` removes the registration. Details:
 `install-local-prototype.ps1`, which this script replaces). The M4 installer replaces both.
 
 Run it yourself, in your own PowerShell window, with Kaleido closed (it refuses to replace a
-running player). It writes to your user's registry and to `%LOCALAPPDATA%\Programs\`, and only a
-script that runs in your own Windows session reaches the registration Explorer reads. A shell that
-runs in a sandbox, as some automation and coding-assistant tools do, writes into a copy of the
-registry, `%APPDATA%` and `%LOCALAPPDATA%` that your session never sees: the script reports
-success there and Explorer, Open with and Default apps find nothing. The same goes for
+running installed player). It writes to your user's registry and to `%LOCALAPPDATA%\Programs\`, and only a
+script that runs in your own Windows session reaches the registration Explorer reads; a sandboxed
+shell's registry and `%APPDATA%` writes do not reach it. The same goes for
 `scripts/diagnose-associations.ps1`, which reads the registration back.
 
 ## Plugins and essentials
@@ -151,8 +149,8 @@ starts files paused or loops them (`pause`, `loop-file`, `loop-playlist`) can ma
 fail; what mpv saved for the clip (`watch_later`) is removed before each run. tauri-driver is
 looked for in `$KALEIDO_TAURI_DRIVER`, then `$CARGO_HOME\bin`, then `PATH`, then `~\.cargo\bin`.
 
-The last step opens My plugins and expects Kaleido's own thumbfast there, as an essential and
-turned on. A first start of the app installs it from the essentials the build bundles
+A step near the end opens My plugins and expects Kaleido's own thumbfast there, as an essential
+and turned on. A first start of the app installs it from the essentials the build bundles
 (`scripts/fetch-essentials.ps1` comes before `npm run e2e:build`); a thumbfast you uninstalled or
 turned off in My plugins, or replaced with a `thumbfast.lua` of your own, makes that step fail.
 
