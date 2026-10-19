@@ -127,7 +127,9 @@
       "stopsOnApply": "Vypnuto. Běží, dokud změny nepoužiješ.",
       "errors": "Hlásí chyby: {{errors}}",
       "uninstall": "Odinstalovat",
-      "uninstallLabel": "Odinstalovat {{name}}"
+      "uninstallLabel": "Odinstalovat {{name}}",
+      "settings": "Nastavení",
+      "settingsLabel": "Nastavení pluginu {{name}}"
     },
     "confirm": {
       "question": "Odinstalovat {{name}}? Soubory půjdou do Koše a tvoje nastavení pluginu zůstane.",
@@ -162,6 +164,41 @@
       "gone": "Plugin {{name}} už neexistuje. Seznam byl načten znovu.",
       "unavailable": "Přehrávač neběží nebo se ho nepodařilo restartovat. Změny čekají na další Použít.",
       "generic": "Změnu se nepodařilo provést."
+    },
+    "settings": {
+      "label": "Nastavení pluginu {{name}}",
+      "loading": "Načítání…",
+      "loadFailed": "Nastavení se nepodařilo načíst.",
+      "applyHint": "Běžící plugin čte své nastavení při spuštění, takže se změna projeví až po Použít.",
+      "default": "Výchozí",
+      "defaultLabel": "Vrátit {{label}} na výchozí",
+      "refused": "Plugin tuto hodnotu nepřijme.",
+      "reason": "Důvod:",
+      "noOptions": "Soubor s nastavením pluginu zatím žádné volby nenastavuje.",
+      "optionsLabel": "Volby v souboru s nastavením",
+      "remove": "Odebrat",
+      "removeLabel": "Odebrat {{key}}",
+      "foreignKey": "Tuto volbu Kaleido změnit neumí. Uprav soubor s nastavením ručně.",
+      "addLabel": "Nová volba",
+      "newKey": "Název volby",
+      "newValue": "Hodnota",
+      "add": "Přidat volbu",
+      "managedKey": "Tuto volbu si nastavuje Kaleido sám.",
+      "keyExists": "Tato volba už v souboru je. Změň její hodnotu výše.",
+      "wants": {
+        "bool": "Zadej yes nebo no.",
+        "whole": "Zadej celé číslo.",
+        "wholeBetween": "Zadej celé číslo od {{min}} do {{max}}.",
+        "wholeMin": "Zadej celé číslo, nejméně {{min}}.",
+        "wholeMax": "Zadej celé číslo, nejvýše {{max}}.",
+        "number": "Zadej číslo.",
+        "numberBetween": "Zadej číslo od {{min}} do {{max}}.",
+        "numberMin": "Zadej číslo, nejméně {{min}}.",
+        "numberMax": "Zadej číslo, nejvýše {{max}}.",
+        "enum": "Vyber jednu z hodnot: {{values}}.",
+        "line": "Zadej hodnotu na jednom řádku, bez zalomení.",
+        "key": "Název volby tvoří písmena, číslice, _ a -."
+      }
     }
   },
   "settings": {

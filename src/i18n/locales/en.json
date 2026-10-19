@@ -127,7 +127,9 @@
       "stopsOnApply": "Turned off. It keeps running until you apply the changes.",
       "errors": "Reports errors: {{errors}}",
       "uninstall": "Uninstall",
-      "uninstallLabel": "Uninstall {{name}}"
+      "uninstallLabel": "Uninstall {{name}}",
+      "settings": "Settings",
+      "settingsLabel": "Settings of {{name}}"
     },
     "confirm": {
       "question": "Uninstall {{name}}? Its files go to the Recycle Bin, and your settings for it stay.",
@@ -162,6 +164,41 @@
       "gone": "The plugin {{name}} is gone. The list was read again.",
       "unavailable": "The player is not running or could not be restarted. The changes wait for the next Apply.",
       "generic": "The change could not be made."
+    },
+    "settings": {
+      "label": "Settings of {{name}}",
+      "loading": "Loading…",
+      "loadFailed": "The settings could not be read.",
+      "applyHint": "A running plugin reads its settings when it starts, so a change takes effect after Apply.",
+      "default": "Default",
+      "defaultLabel": "Reset {{label}} to default",
+      "refused": "The plugin cannot take this value.",
+      "reason": "Reason:",
+      "noOptions": "The plugin’s settings file does not set any options yet.",
+      "optionsLabel": "Options in the settings file",
+      "remove": "Remove",
+      "removeLabel": "Remove {{key}}",
+      "foreignKey": "Kaleido cannot change this option. Edit the settings file by hand.",
+      "addLabel": "New option",
+      "newKey": "Option name",
+      "newValue": "Value",
+      "add": "Add option",
+      "managedKey": "Kaleido sets this option itself.",
+      "keyExists": "This option is already in the file. Change its value above.",
+      "wants": {
+        "bool": "Use yes or no.",
+        "whole": "Use a whole number.",
+        "wholeBetween": "Use a whole number from {{min}} to {{max}}.",
+        "wholeMin": "Use a whole number, {{min}} or more.",
+        "wholeMax": "Use a whole number, {{max}} or less.",
+        "number": "Use a number.",
+        "numberBetween": "Use a number from {{min}} to {{max}}.",
+        "numberMin": "Use a number, {{min}} or more.",
+        "numberMax": "Use a number, {{max}} or less.",
+        "enum": "Choose one of: {{values}}.",
+        "line": "Use one line, with no line break.",
+        "key": "Use letters, digits, _ and - for the name of an option."
+      }
     }
   },
   "settings": {

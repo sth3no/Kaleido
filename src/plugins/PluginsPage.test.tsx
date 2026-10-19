@@ -3,7 +3,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../i18n';
-import type { LogLine, PluginInfo, PluginsState } from '../ipc/types';
+import type {
+  LogLine,
+  PluginInfo,
+  PluginSettings as PluginSettingsData,
+  PluginsState,
+  SettingSpec,
+} from '../ipc/types';
 import AppShell from '../shell/AppShell';
 import { usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
@@ -75,6 +81,26 @@ const SUB_SELECT = plugin('sub-select', { enabled: false, running: true });
 
 const LIST = [THUMBFAST, UOSC, COPY, RELOAD, SUB_SELECT];
 
+/** The form of an essential's schema: a slider, a list and a text field. */
+const FORM: SettingSpec[] = [
+  {
+    key: 'max_height',
+    type: 'int',
+    default: 200,
+    min: 50,
+    max: 600,
+    label: { en: 'Maximum height', cs: 'Nejvyšší výška' },
+  },
+  { key: 'mode', type: 'enum', default: 'fast', values: ['fast', 'slow'], label: { en: 'Mode' } },
+  { key: 'prefix', type: 'string', default: 'thumb', label: { en: 'Prefix' } },
+];
+
+/** What a plugin's settings are: the essentials have a schema, the others keys and values. */
+const settingsFor = (name: string): PluginSettingsData =>
+  name === 'thumbfast' || name === 'sub-select'
+    ? { name, schema: FORM, entries: [], managed: [] }
+    : { name, schema: null, entries: [{ key: 'fps', value: '30' }], managed: [] };
+
 type Answers = Record<string, (args: unknown) => unknown>;
 
 /** The state `plugins_list` answers with. */
@@ -85,6 +111,7 @@ function rust(answers: Answers = {}) {
   const all: Answers = {
     plugins_list: () => current,
     plugins_log: () => [],
+    plugins_settings: (args) => settingsFor((args as { name: string }).name),
     // The shell asks for the player and the glass; the answers never come.
     system_ui_ready: () => new Promise(() => undefined),
     glass_state: () => new Promise(() => undefined),
@@ -130,6 +157,8 @@ const names = () =>
 const switchOf = (name: string) => within(row(name)).getByRole('switch') as HTMLButtonElement;
 const uninstallOf = (name: string) =>
   within(row(name)).getByRole('button', { name: `Uninstall ${name}` }) as HTMLButtonElement;
+const settingsOf = (name: string) =>
+  within(row(name)).getByRole('button', { name: `Settings of ${name}` }) as HTMLButtonElement;
 const applyRegion = () => screen.getByRole('status', { name: 'Changes waiting' });
 const restoreRegion = () => screen.getByRole('status', { name: 'Result of restoring' });
 const heading = () => screen.getByRole('heading', { level: 1 });
@@ -199,7 +228,7 @@ describe('the list', () => {
     expect(within(row('thumbfast')).queryByText(/keeps running until you apply/)).toBeNull();
   });
 
-  test('a switch is named by its plugin and a row has no Settings button yet', async () => {
+  test('a switch is named by its plugin, and every row has a Settings button', async () => {
     await open();
 
     expect(screen.getAllByRole('switch').map((item) => item.getAttribute('aria-checked'))).toEqual([
@@ -210,8 +239,14 @@ describe('the list', () => {
       'false',
     ]);
     expect(screen.getByRole('switch', { name: 'thumbfast' })).toBe(switchOf('thumbfast'));
-    // Task 14 adds it; until then no button that does nothing.
-    expect(screen.queryByRole('button', { name: /Settings/ })).toBeNull();
+    // Both forms of settings have it, and each is named by its plugin.
+    expect(screen.getAllByRole('button', { name: /^Settings of / })).toHaveLength(5);
+    for (const { name } of LIST) {
+      expect(settingsOf(name).getAttribute('aria-expanded')).toBe('false');
+      expect(settingsOf(name).textContent).toBe('Settings');
+    }
+    // Nothing is read until the settings are opened.
+    expect(sent('plugins_settings')).toHaveLength(0);
   });
 
   test('the texts follow the language of the app', async () => {
@@ -227,6 +262,9 @@ describe('the list', () => {
     expect(within(row('uosc')).getByText('Nekompatibilní')).toBeTruthy();
     expect(within(row('reload')).getByRole('button', { name: 'Hlásí chyby: 3' })).toBeTruthy();
     expect(within(row('thumbfast')).getByRole('button', { name: 'Odinstalovat thumbfast' })).toBeTruthy();
+    expect(
+      within(row('thumbfast')).getByRole('button', { name: 'Nastavení pluginu thumbfast' }),
+    ).toBeTruthy();
   });
 
   test('says that it is reading, and that there are no plugins', async () => {
@@ -647,6 +685,167 @@ describe('the log of a plugin that reports errors', () => {
   });
 });
 
+describe('the settings of a plugin', () => {
+  test('the Settings button opens the settings of the plugin in its row, and closes them again', async () => {
+    await open();
+    const button = settingsOf('thumbfast');
+
+    fireEvent.click(button, { detail: 1 });
+    await settle();
+
+    expect(sent('plugins_settings')).toHaveLength(1);
+    expect(sent('plugins_settings')[0]?.[1]).toEqual({ name: 'thumbfast' });
+    // In the row, in the flow of the page, named by the plugin.
+    const panel = within(row('thumbfast')).getByRole('group', { name: 'Settings of thumbfast' });
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(button.getAttribute('aria-controls') ?? '')).toBe(panel);
+    expect(within(panel).getByRole('slider', { name: 'Maximum height' })).toBeTruthy();
+    // Only this row.
+    expect(within(row('uosc')).queryByRole('group')).toBeNull();
+    expect(settingsOf('uosc').getAttribute('aria-expanded')).toBe('false');
+
+    // The button closes it again.
+    fireEvent.click(button, { detail: 1 });
+    expect(within(row('thumbfast')).queryByRole('group')).toBeNull();
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.getAttribute('aria-controls')).toBeNull();
+  });
+
+  test('a plugin without a schema is edited as keys and values', async () => {
+    await open();
+
+    fireEvent.click(settingsOf('uosc'));
+    await settle();
+
+    const panel = within(row('uosc')).getByRole('group', { name: 'Settings of uosc' });
+    expect(within(panel).getByRole('textbox', { name: 'fps' })).toBeTruthy();
+    expect(within(panel).getByRole('group', { name: 'New option' })).toBeTruthy();
+    expect(sent('plugins_settings')[0]?.[1]).toEqual({ name: 'uosc' });
+  });
+
+  test('opened with the keyboard the focus goes into the panel; the pointer leaves it where it is', async () => {
+    await open();
+
+    fireEvent.click(settingsOf('thumbfast'), { detail: 0 });
+    await settle();
+    const panel = within(row('thumbfast')).getByRole('group', { name: 'Settings of thumbfast' });
+    expect(document.activeElement).toBe(panel);
+
+    fireEvent.click(settingsOf('reload'), { detail: 1 });
+    await settle();
+    expect(within(row('reload')).getByRole('group', { name: 'Settings of reload' })).toBeTruthy();
+    expect(row('reload').contains(document.activeElement)).toBe(false);
+  });
+
+  test('Esc closes the settings and the focus goes back to the button', async () => {
+    await open();
+    const button = settingsOf('thumbfast');
+    fireEvent.click(button, { detail: 0 });
+    await settle();
+    const prefix = within(row('thumbfast')).getByRole('textbox', { name: 'Prefix' });
+    prefix.focus();
+
+    // Handled, so that mpv does not get the Esc (it would leave the fullscreen).
+    expect(fireEvent.keyDown(prefix, { key: 'Escape' })).toBe(false);
+
+    expect(within(row('thumbfast')).queryByRole('group')).toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  test('an Esc that a field used first leaves the settings open: the list closes, typing is dropped', async () => {
+    await open();
+    fireEvent.click(settingsOf('thumbfast'), { detail: 0 });
+    await settle();
+    const inRow = within(row('thumbfast'));
+    const panel = () => inRow.queryByRole('group', { name: 'Settings of thumbfast' });
+
+    // An open list: the first Esc closes the list, with the focus back on its button.
+    const mode = inRow.getByRole('button', { name: /^Mode/ });
+    fireEvent.click(mode);
+    expect(inRow.getByRole('listbox')).toBeTruthy();
+    expect(fireEvent.keyDown(inRow.getByRole('option', { name: 'fast' }), { key: 'Escape' })).toBe(false);
+    expect(inRow.queryByRole('listbox')).toBeNull();
+    expect(panel()).not.toBeNull();
+    expect(document.activeElement).toBe(mode);
+
+    // Typing that is dropped: the same.
+    const prefix = inRow.getByRole('textbox', { name: 'Prefix' }) as HTMLInputElement;
+    fireEvent.change(prefix, { target: { value: 'typed' } });
+    expect(fireEvent.keyDown(prefix, { key: 'Escape' })).toBe(false);
+    expect(prefix.value).toBe('thumb');
+    expect(panel()).not.toBeNull();
+
+    // The next Esc is the panel's.
+    expect(fireEvent.keyDown(prefix, { key: 'Escape' })).toBe(false);
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(settingsOf('thumbfast'));
+  });
+
+  test('the arrows belong to the fields of the settings, and still move between rows from the row’s buttons', async () => {
+    await open();
+    fireEvent.click(settingsOf('thumbfast'), { detail: 0 });
+    await settle();
+    const prefix = within(row('thumbfast')).getByRole('textbox', { name: 'Prefix' });
+    prefix.focus();
+
+    // Not the row's: the focus stays and the key is left to the field.
+    expect(fireEvent.keyDown(prefix, { key: 'ArrowDown' })).toBe(true);
+    expect(document.activeElement).toBe(prefix);
+
+    const button = settingsOf('thumbfast');
+    button.focus();
+    expect(fireEvent.keyDown(button, { key: 'ArrowDown' })).toBe(false);
+    expect(document.activeElement).toBe(switchOf('uosc'));
+  });
+
+  test('a change reaches Rust, and the apply bar is what Rust says', async () => {
+    rust({
+      plugins_set_setting: () => ({
+        ...settingsFor('thumbfast'),
+        entries: [{ key: 'prefix', value: 'x' }],
+      }),
+    });
+    await open();
+    fireEvent.click(settingsOf('thumbfast'));
+    await settle();
+    expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+    const panel = within(row('thumbfast')).getByRole('group', { name: 'Settings of thumbfast' });
+    expect(within(panel).getByText(/takes effect after Apply/)).toBeTruthy();
+
+    const prefix = within(panel).getByRole('textbox', { name: 'Prefix' }) as HTMLInputElement;
+    fireEvent.change(prefix, { target: { value: 'x' } });
+    fireEvent.keyDown(prefix, { key: 'Enter' });
+    await settle();
+
+    expect(sent('plugins_set_setting')).toHaveLength(1);
+    expect(sent('plugins_set_setting')[0]?.[1]).toEqual({
+      name: 'thumbfast',
+      key: 'prefix',
+      value: 'x',
+    });
+    expect(prefix.value).toBe('x');
+    // Rust marks the running plugin pending and sends the state: the bar is the page's own.
+    emit('plugins:changed', state(LIST, { restartNeeded: true }));
+    expect(within(applyRegion()).getByRole('button', { name: 'Apply' })).toBeTruthy();
+    // The settings stay open.
+    expect(within(row('thumbfast')).getByRole('group', { name: 'Settings of thumbfast' })).toBeTruthy();
+  });
+
+  test('while Apply runs the settings can be read and the fields are off', async () => {
+    current = state(LIST, { applying: true });
+    await open();
+
+    fireEvent.click(settingsOf('thumbfast'));
+    await settle();
+
+    const panel = within(row('thumbfast')).getByRole('group', { name: 'Settings of thumbfast' });
+    const slider = within(panel).getByRole('slider', { name: 'Maximum height' }) as HTMLInputElement;
+    const prefix = within(panel).getByRole('textbox', { name: 'Prefix' }) as HTMLInputElement;
+    expect(slider.disabled).toBe(true);
+    expect(prefix.disabled).toBe(true);
+  });
+});
+
 describe('restore essentials', () => {
   test('restore essentials shows only when one was removed', async () => {
     await open();
@@ -898,14 +1097,14 @@ describe('the keyboard', () => {
     expect(document.activeElement).toBe(uninstallOf('uosc'));
   });
 
-  test('Tab reaches the switch, the badge and the buttons of a row in the order they are drawn', async () => {
+  test('Tab reaches the badge, the switch and the buttons of a row in the order they are drawn', async () => {
     await open();
     const controls = Array.from(row('reload').querySelectorAll('button')).map(
       (button) => button.getAttribute('aria-label') ?? button.textContent,
     );
 
-    // The badge (it sits with the name, above the switch), then the switch, then Uninstall.
-    expect(controls).toEqual(['Reports errors: 3', '', 'Uninstall reload']);
+    // The badge (it sits with the name, above the switch), then the switch, Settings and Uninstall.
+    expect(controls).toEqual(['Reports errors: 3', '', 'Settings of reload', 'Uninstall reload']);
     expect(row('reload').querySelectorAll('[tabindex]')).toHaveLength(0);
   });
 
@@ -947,15 +1146,20 @@ describe('the page has no layer of its own', () => {
     );
     await settle();
 
-    // Everything the page can open: the question, the log, the apply bar, the restore button.
+    // Everything the page can open: the question, the log, the settings, the apply bar, the restore button.
     fireEvent.click(uninstallOf('thumbfast'));
     fireEvent.click(within(row('reload')).getByRole('button', { name: 'Reports errors: 3' }));
+    fireEvent.click(settingsOf('sub-select'));
     await settle();
+    // The list of a setting opens in the page too.
+    fireEvent.click(within(row('sub-select')).getByRole('button', { name: /^Mode/ }));
 
     const main = screen.getByRole('main');
     const opened = [
       within(row('thumbfast')).getByRole('group'),
       within(row('reload')).getByRole('region', { name: 'Errors of reload' }),
+      within(row('sub-select')).getByRole('group', { name: 'Settings of sub-select' }),
+      within(row('sub-select')).getByRole('listbox'),
       screen.getByRole('button', { name: 'Apply' }),
       screen.getByRole('button', { name: 'Restore essentials' }),
       ...Array.from(document.querySelectorAll('[data-plugin]')),

@@ -1,0 +1,216 @@
+/*
+ * The settings of a plugin (PluginSettings.tsx), in its row on My plugins: a bordered panel in the
+ * flow of the page (Ruling R46: nothing here opens in a layer of its own), holding either the
+ * schema's form or the key = value editor, and a line about Apply. The fields are the settings
+ * page's (settings/fields/Fields.module.css); the buttons are the page's (PluginsPage.module.css).
+ * The text keeps the glass' colour; the quieter tones are that colour at a lower strength.
+ */
+
+/* Spans the row (a grid of the name and the controls); the row's confirmation and log do the same. */
+.panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+}
+
+/* The row focuses the panel when it was opened with the keyboard; the ring is the global :focus-visible. */
+.panel:focus {
+  outline: none;
+}
+
+.panel:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+}
+
+.status,
+.applyHint,
+.empty,
+.hint,
+.foreign {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+}
+
+.failure .status {
+  color: inherit;
+}
+
+/* --- A schema's form ------------------------------------------------------------------------ */
+
+.fields {
+  display: flex;
+  flex-direction: column;
+}
+
+.field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  align-items: center;
+  gap: var(--k-space-xs) var(--k-space-l);
+  padding: var(--k-space-s) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.field:first-child {
+  border-top: 0;
+}
+
+@media (max-width: 720px) {
+  .field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--k-font-size-m);
+  overflow-wrap: anywhere;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--k-space-xs);
+  min-width: 0;
+}
+
+.controlLine {
+  display: flex;
+  align-items: center;
+  gap: var(--k-space-s);
+  min-width: 0;
+}
+
+/* "Default": small and quiet beside the field, there only while the file sets the key. */
+.reset {
+  flex: none;
+  padding: 2px var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-s);
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.reset:hover:not(:disabled) {
+  background: var(--k-color-hover);
+}
+
+.reset:disabled {
+  opacity: 0.5;
+}
+
+/* What is wrong with a value: the text keeps the glass' colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+  overflow-wrap: anywhere;
+}
+
+.detail {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* --- The key = value editor ------------------------------------------------------------------ */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+}
+
+.options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.option,
+.add {
+  display: grid;
+  grid-template-columns: minmax(6rem, 14rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--k-space-xs) var(--k-space-s);
+}
+
+.option {
+  padding: var(--k-space-xs) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.option:first-child {
+  border-top: 0;
+}
+
+.add {
+  padding-top: var(--k-space-s);
+  border-top: 1px solid var(--k-color-divider);
+}
+
+@media (max-width: 720px) {
+  .option,
+  .add {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.optionKey {
+  min-width: 0;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--k-font-size-s);
+  overflow-wrap: anywhere;
+}
+
+.optionValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.foreign {
+  grid-column: 1 / -1;
+}
+
+/* High contrast: system colours. */
+@media (forced-colors: active) {
+  .panel,
+  .reset {
+    border-color: ButtonText;
+  }
+
+  .reset {
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .error,
+  .failure {
+    border-inline-start-color: CanvasText;
+  }
+}

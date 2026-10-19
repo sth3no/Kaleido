@@ -18,13 +18,18 @@
  * - While an action on the row runs, or Apply does, the controls are `aria-disabled` and do
  *   nothing; they are not `disabled`, which would take the focus from the keyboard user who just
  *   pressed one. What Rust refused is said in the row, as an alert.
- * - The arrow keys of the row's own controls (the switch, the errors badge, "Uninstall") move
- *   between the rows (to the next row's switch; they wrap). The log and the open question have the
- *   arrows for themselves: the log scrolls (`PluginLog`), the question's two buttons trade the
- *   focus. Esc closes an open confirmation or log. All of them say so with `preventDefault`, so
- *   that mpv does not get the key (a seek, leaving the fullscreen).
- *
- * The "Settings" button is Task 14's: there is none until it exists.
+ * - "Settings" is on every row. It opens the plugin's settings (`PluginSettings`: a form from its
+ *   schema, or its keys and values) under the row, in the flow of the page, and closes them again;
+ *   it is `aria-expanded` like the errors badge. Opened with the keyboard, the focus goes to the
+ *   panel (Tab then reaches its fields; without that, "Uninstall" would be in the way). Esc closes
+ *   the panel and the focus goes back to "Settings".
+ * - The arrow keys of the row's own controls (the switch, the errors badge, "Settings",
+ *   "Uninstall") move between the rows (to the next row's switch; they wrap). The log, the open
+ *   question and the settings panel have the arrows for themselves: the log scrolls (`PluginLog`),
+ *   the question's two buttons trade the focus, the settings' fields are theirs. Esc closes an open
+ *   confirmation, log or settings panel (one that the Esc came from, else the confirmation first),
+ *   unless a field in them used it already (a list that closes, typing that is dropped). All of them
+ *   say so with `preventDefault`, so that mpv does not get the key (a seek, leaving the fullscreen).
  */
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type Ref } from 'react';
@@ -36,10 +41,11 @@ import fields from '../settings/fields/Fields.module.css';
 import Icon, { CHEVRON_DOWN } from '../shell/Icon';
 import { localized } from './localized';
 import PluginLog from './PluginLog';
+import PluginSettings from './PluginSettings';
 import styles from './PluginsPage.module.css';
 import { problemText, type PluginProblem } from './problem';
 
-/** The log and the open question: what in a row has keys of its own. */
+/** The log, the open question and the settings: what in a row has keys of its own. */
 const EXTRA = '[role="region"], [role="group"]';
 
 /** The arrows that trade the focus between the question's two buttons. */
@@ -85,11 +91,17 @@ export default function PluginRow({
   const confirmId = `${ids}-confirm`;
   const questionId = `${ids}-question`;
   const logId = `${ids}-log`;
+  const settingsId = `${ids}-settings`;
   const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const uninstallButton = useRef<HTMLButtonElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const logToggle = useRef<HTMLButtonElement>(null);
+  const settingsToggle = useRef<HTMLButtonElement>(null);
+  const settingsPanel = useRef<HTMLDivElement>(null);
+  /** "Settings" was pressed with the keyboard: the focus goes into the panel once it is there. */
+  const settingsByKeyboard = useRef(false);
   const idle = !busy && !locked;
 
   const reportsErrors = plugin.errors > 0;
@@ -100,6 +112,13 @@ export default function PluginRow({
     if (confirming) cancelButton.current?.focus();
   }, [confirming]);
 
+  // The settings were opened with the keyboard: the focus goes into them.
+  useEffect(() => {
+    if (!settingsOpen || !settingsByKeyboard.current) return;
+    settingsByKeyboard.current = false;
+    settingsPanel.current?.focus();
+  }, [settingsOpen]);
+
   const notes: string[] = [];
   if (plugin.summary !== null) notes.push(localized(plugin.summary, i18n.language));
   if (plugin.copyOf !== null) notes.push(t('plugins.row.copyOf', { essential: plugin.copyOf }));
@@ -107,7 +126,7 @@ export default function PluginRow({
   if (plugin.duplicate) notes.push(t('plugins.row.duplicateText'));
   if (!plugin.enabled && plugin.running) notes.push(t('plugins.row.stopsOnApply'));
 
-  // From the log or the question: those have the arrows for themselves.
+  // From the log, the question or the settings: those have the arrows for themselves.
   const fromExtra = (e: KeyboardEvent<HTMLLIElement>): boolean =>
     e.target instanceof Element && e.currentTarget.contains(e.target.closest(EXTRA));
 
@@ -119,6 +138,20 @@ export default function PluginRow({
     other.current?.focus();
   };
 
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    settingsToggle.current?.focus();
+  };
+
+  /** What the Esc closes: the settings if it came from them, else the question, the log, the settings. */
+  const escapeTarget = (e: KeyboardEvent<HTMLLIElement>): 'confirm' | 'log' | 'settings' | null => {
+    const inSettings = e.target instanceof Node && settingsPanel.current?.contains(e.target);
+    if (settingsOpen && inSettings === true) return 'settings';
+    if (confirming) return 'confirm';
+    if (showLog) return 'log';
+    return settingsOpen ? 'settings' : null;
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>) => {
     if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -126,15 +159,20 @@ export default function PluginRow({
       // Handled here: mpv does not get the arrow too.
       e.preventDefault();
       onMove(e.key === 'ArrowDown' ? 1 : -1);
-    } else if (e.key === 'Escape' && (confirming || showLog)) {
+    } else if (e.key === 'Escape' && !e.defaultPrevented) {
+      // A field of the settings that used the Esc (an open list, typing to drop) has handled it.
+      const target = escapeTarget(e);
+      if (target === null) return;
       // Handled here: the key does not go on to mpv, where it would leave the fullscreen.
       e.preventDefault();
-      if (confirming) {
+      if (target === 'confirm') {
         onCancelUninstall();
         uninstallButton.current?.focus();
-      } else {
+      } else if (target === 'log') {
         setLogOpen(false);
         logToggle.current?.focus();
+      } else {
+        closeSettings();
       }
     }
   };
@@ -216,6 +254,22 @@ export default function PluginRow({
           {plugin.enabled ? t('plugins.row.on') : t('plugins.row.off')}
         </span>
         <button
+          ref={settingsToggle}
+          type="button"
+          className={styles.quiet}
+          aria-label={t('plugins.row.settingsLabel', { name: plugin.name })}
+          aria-expanded={settingsOpen}
+          aria-controls={settingsOpen ? settingsId : undefined}
+          onClick={(e) => {
+            // Enter or Space: no pointer behind the click.
+            settingsByKeyboard.current = !settingsOpen && e.detail === 0;
+            setSettingsOpen((open) => !open);
+          }}
+          {...blurAfterPointer}
+        >
+          {t('plugins.row.settings')}
+        </button>
+        <button
           ref={uninstallButton}
           type="button"
           className={styles.quiet}
@@ -276,6 +330,10 @@ export default function PluginRow({
             </button>
           </div>
         </div>
+      )}
+
+      {settingsOpen && (
+        <PluginSettings ref={settingsPanel} id={settingsId} name={plugin.name} locked={locked} />
       )}
 
       {showLog && <PluginLog id={logId} name={plugin.name} errors={plugin.errors} />}

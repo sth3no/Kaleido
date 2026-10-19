@@ -10,9 +10,12 @@
  *   it is the page's business.
  * - The apply bar (`ApplyBar`) shows while a change waits for Apply. While Apply runs (`applying`
  *   stays true until the new core plays on) the switches, "Uninstall" and Apply are off.
- * - The confirmation of "Uninstall" and the plugin's log open in the row, in the flow of the page,
- *   never in a popover or any layer of their own: the page layer is clipped around the mini player
- *   (Ruling R46). Only one row asks at a time; the page holds which.
+ * - The confirmation of "Uninstall", the plugin's log and its settings (`PluginSettings`: a form from
+ *   its schema, or its keys and values) open in the row, in the flow of the page, never in a popover
+ *   or any layer of their own: the page layer is clipped around the mini player (Ruling R46). Only
+ *   one row asks at a time; the page holds which. A change of a plugin's settings is Rust's to
+ *   report: a running plugin is pending, `plugins:changed` says `restartNeeded`, and the apply bar
+ *   shows; the settings panel has no state of the page's.
  * - Uninstall takes a row away, and the focus with it; it goes to the row next to it, or to the
  *   heading when there is none. A focus that is somewhere else by then stays there.
  * - "Restore essentials" brings back the essentials the user removed. An essential that does not
