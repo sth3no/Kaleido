@@ -62,9 +62,9 @@ export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved' | 'unchanged
  * What "Update and try again" found when nothing new was put in place (final review I-1), in the
  * order the card looks for it:
  *
+ * - `failed`: yt-dlp's check failed (`status`, with Rust's reason). The update is offered again.
  * - `deno`: the link needs Deno (YouTube) and Deno is not ready (`status`, with Rust's reason).
  *   The update, which checks Deno too, is offered again.
- * - `failed`: yt-dlp's check failed (`status`, with Rust's reason). The update is offered again.
  * - `blocked`: yt-dlp is there and current, yet the link said it is missing: mpv could not start it.
  * - `newest`: yt-dlp `version` is the newest of its channel already; `nightly`: the channel is the
  *   nightly one. The site may have changed after it.

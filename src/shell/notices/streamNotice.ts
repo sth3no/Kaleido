@@ -57,13 +57,14 @@ function refusalKind(error: unknown): SourceError | null {
 
 /**
  * What the update for the link of a card whose class is `stream` found, when it put nothing new in
- * place (`found.updated` is false), in the order that explains the failure best: a Deno the link
- * needs and does not have, then a check of yt-dlp that failed, then a yt-dlp that is there but
- * could not be started (the link said it is missing), and otherwise a yt-dlp that is the newest.
+ * place (`found.updated` is false), in the order that explains the failure best: a check of yt-dlp
+ * that failed (offline, Deno could not come either), then a Deno the link needs and does not have,
+ * then a yt-dlp that is there but could not be started (the link said it is missing), and
+ * otherwise a yt-dlp that is the newest.
  */
 export function findingOf(found: LinkUpdate, stream: StreamError | null): UpdateFinding {
-  if (found.deno !== null && found.deno.state !== 'ready') return { kind: 'deno', status: found.deno };
   if (found.ytDlp.state !== 'ready') return { kind: 'failed', status: found.ytDlp };
+  if (found.deno !== null && found.deno.state !== 'ready') return { kind: 'deno', status: found.deno };
   if (stream === 'missing') return { kind: 'blocked' };
   return { kind: 'newest', version: found.ytDlp.version, nightly: found.channel === 'nightly' };
 }

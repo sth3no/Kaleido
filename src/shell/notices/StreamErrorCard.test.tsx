@@ -485,7 +485,15 @@ describe('an update that finds nothing new (final review I-1)', () => {
   });
 
   test('a check of yt-dlp that failed says so with Rust’s reason, and the update is offered again', async () => {
-    rust({ stream_retry: () => found({ ytDlp: status({ state: 'failed', error: 'the server cannot be reached' }) }) });
+    // Offline, Deno could not come either: yt-dlp is what the card is about.
+    const offline = 'the server cannot be reached';
+    rust({
+      stream_retry: () =>
+        found({
+          ytDlp: status({ state: 'failed', error: offline }),
+          deno: status({ tool: 'deno', state: 'failed', version: null, checkedAt: null, error: offline }),
+        }),
+    });
     const card = await updated();
 
     const said = within(card).getByText(/could not be updated/);
