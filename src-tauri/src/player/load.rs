@@ -49,13 +49,32 @@ pub enum LoadMode {
     Append,
 }
 
-/// Per-file options for the first source.
+/// Per-file options for the first source. They reach mpv only as [`ValidatedOptions`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LoadOptions {
     /// Where to start, in seconds.
     pub start: Option<f64>,
     /// yt-dlp's format selection for links (`ytdl-format`).
     pub format: Option<String>,
+}
+
+/// [`LoadOptions`] that passed [`LoadOptions::validate`]: the only options [`load_commands`] and
+/// [`open_checked`] take, so that options nobody checked can never reach mpv's `loadfile`. Made
+/// only by [`LoadOptions::validated`]; the default (no options) is valid as it is.
+///
+/// ```compile_fail,E0308
+/// use kaleido::player::load::{LoadMode, LoadOptions, load_commands};
+/// let unchecked = LoadOptions { start: None, format: Some("best,vo=gpu".to_owned()) };
+/// load_commands(&[], LoadMode::Append, &unchecked);
+/// ```
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ValidatedOptions(LoadOptions);
+
+impl ValidatedOptions {
+    /// The options, read only.
+    pub fn options(&self) -> &LoadOptions {
+        &self.0
+    }
 }
 
 /// What a `ytdl-format` may be made of besides ASCII letters and digits: no comma, space or
@@ -94,6 +113,12 @@ impl LoadOptions {
         } else {
             Err(SourceError::Invalid)
         }
+    }
+
+    /// The options as [`ValidatedOptions`], if they [`validate`](LoadOptions::validate).
+    pub fn validated(self) -> Result<ValidatedOptions, SourceError> {
+        self.validate()?;
+        Ok(ValidatedOptions(self))
     }
 
     /// The value of `loadfile`'s options argument, if there is any option. Each value is
@@ -233,8 +258,12 @@ pub fn parse_source(raw: &str, cwd: &Path) -> Result<Source, SourceError> {
 /// The `loadfile` commands for `sources`: the first starts (or, for `Append`, joins the
 /// playlist and starts if nothing plays), the rest are appended. A replace is followed by
 /// `set pause no`, since opening something means to play it (spec 9.3). `opts` go with the
-/// first source only and must have been validated.
-pub fn load_commands(sources: &[Source], mode: LoadMode, opts: &LoadOptions) -> Vec<Vec<String>> {
+/// first source only; they are validated by their type.
+pub fn load_commands(
+    sources: &[Source],
+    mode: LoadMode,
+    opts: &ValidatedOptions,
+) -> Vec<Vec<String>> {
     let mut commands: Vec<Vec<String>> = sources
         .iter()
         .enumerate()
@@ -246,7 +275,7 @@ pub fn load_commands(sources: &[Source], mode: LoadMode, opts: &LoadOptions) -> 
                 _ => args.push("append".to_owned()),
             }
             if index == 0
-                && let Some(options) = opts.to_mpv()
+                && let Some(options) = opts.options().to_mpv()
             {
                 // -1 is the index placeholder in front of the options.
                 args.extend(["-1".to_owned(), options]);
@@ -291,7 +320,7 @@ pub fn open_sources(
             }),
         }
     }
-    open_checked(engine, &sources, mode, &LoadOptions::default());
+    open_checked(engine, &sources, mode, &ValidatedOptions::default());
     if issues.is_empty() {
         Ok(())
     } else {
@@ -301,15 +330,9 @@ pub fn open_sources(
 
 /// Queues `sources`, which [`parse_source`] has accepted, on the engine, as [`open_sources`]
 /// does; `opts` go with the first one. For the open requests that check their sources
-/// themselves (`system`: command line, dialog, paste, drop). Options that do not
-/// [`validate`](LoadOptions::validate) are left out.
-pub fn open_checked(engine: &Engine, sources: &[Source], mode: LoadMode, opts: &LoadOptions) {
-    let opts = if opts.validate().is_ok() {
-        opts
-    } else {
-        tracing::warn!("invalid load options left out: {opts:?}");
-        &LoadOptions::default()
-    };
+/// themselves (`system`: command line, dialog, paste, drop); the command line checked its
+/// options when it read them (`system::cli`).
+pub fn open_checked(engine: &Engine, sources: &[Source], mode: LoadMode, opts: &ValidatedOptions) {
     let commands = load_commands(sources, mode, opts);
     match mode {
         LoadMode::Replace => {
@@ -564,7 +587,7 @@ mod tests {
         let commands = load_commands(
             &[Source::Url(url("https://youtu.be/x"))],
             LoadMode::Append,
-            &opts,
+            &opts.validated().unwrap(),
         );
         // %N% is the length in bytes of the value that follows: 23 for the format.
         assert_eq!(
@@ -629,15 +652,63 @@ mod tests {
     }
 
     /// The value of an option is read for as many bytes as `%N%` says, so even a value that
-    /// holds `,` or `=` could not start another option.
+    /// holds `,` or `=` could not start another option. (A format with `ž` never validates, so the
+    /// quoting is checked on its own.)
     #[test]
     fn quoting_counts_bytes_not_characters() {
-        let opts = LoadOptions {
-            start: None,
-            format: Some("ž".into()),
+        assert_eq!(per_file_option("ytdl-format", "ž"), "ytdl-format=%2%ž");
+        assert_eq!(
+            per_file_option("sub-files", r"C:\a,b=c.srt"),
+            r"sub-files=%12%C:\a,b=c.srt"
+        );
+    }
+
+    /// The M1 Task 4 minor: options reach `load_commands` only once they are checked. That
+    /// unchecked ones cannot is the type's (`ValidatedOptions`, and its `compile_fail` example);
+    /// here, that what fails the check never becomes one, that what passes comes through as it
+    /// was, and that a bad `--format` of the command line is refused before anything opens.
+    #[test]
+    fn loading_options_are_validated_before_they_reach_mpv() {
+        for bad in ["best,vo=gpu", "a b", "%5%x", "bestč", ""] {
+            let opts = LoadOptions {
+                start: None,
+                format: Some(bad.to_owned()),
+            };
+            assert_eq!(opts.validated(), Err(SourceError::Invalid), "{bad:?}");
+        }
+        let late = LoadOptions {
+            start: Some(-1.0),
+            format: None,
         };
-        let commands = load_commands(&[Source::File("a.mkv".into())], LoadMode::Append, &opts);
-        assert_eq!(commands[0][4], "ytdl-format=%2%ž,autocreate-playlist=no");
+        assert_eq!(late.validated(), Err(SourceError::Invalid));
+
+        let good = LoadOptions {
+            start: Some(4.5),
+            format: Some("bv*[height<=?1080]+ba/b[height<=?1080]".to_owned()),
+        };
+        assert_eq!(good.clone().validated().unwrap().options(), &good);
+        assert_eq!(
+            ValidatedOptions::default().options(),
+            &LoadOptions::default()
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.mkv"), b"x").unwrap();
+        let request = crate::system::cli::parse(
+            ["--format=best,vo=gpu", "--start=3", "a.mkv"].map(std::ffi::OsString::from),
+            tmp.path(),
+        );
+        // The bad format is dropped, the good start stays, and the file still opens.
+        assert_eq!(
+            request.options.options(),
+            &LoadOptions {
+                start: Some(3.0),
+                format: None,
+            }
+        );
+        assert_eq!(request.sources.len(), 1);
+        let commands = load_commands(&request.sources, LoadMode::Append, &request.options);
+        assert_eq!(commands[0][4], "start=%1%3,autocreate-playlist=no");
     }
 
     /// mpv cannot open a path of 260 characters or more as it is (R5): it gets the `\\?\` form.
@@ -677,7 +748,7 @@ mod tests {
             Source::File(PathBuf::from(r"C:\Videa\c.mkv")),
         ];
         assert_eq!(
-            load_commands(&sources, LoadMode::Replace, &LoadOptions::default()),
+            load_commands(&sources, LoadMode::Replace, &ValidatedOptions::default()),
             [
                 text(&["loadfile", r"C:\Videa\a.mkv", "replace"]),
                 text(&["loadfile", "https://example.com/b.mp4", "append"]),
@@ -699,7 +770,7 @@ mod tests {
         };
         // The options belong to the first source only.
         assert_eq!(
-            load_commands(&sources, LoadMode::Append, &opts),
+            load_commands(&sources, LoadMode::Append, &opts.validated().unwrap()),
             [
                 text(&[
                     "loadfile",
@@ -716,7 +787,7 @@ mod tests {
     #[test]
     fn nothing_to_open_sends_nothing() {
         for mode in [LoadMode::Replace, LoadMode::Append] {
-            assert!(load_commands(&[], mode, &LoadOptions::default()).is_empty());
+            assert!(load_commands(&[], mode, &ValidatedOptions::default()).is_empty());
         }
     }
 
@@ -779,6 +850,7 @@ mod tests {
             start: Some(4.0),
             format: Some("bv*[height<=?1080]+ba/b".into()),
         };
+        let opts = opts.validated().unwrap();
         for args in load_commands(&[Source::File(clip)], LoadMode::Replace, &opts) {
             engine.request(Request::Command(args));
         }
@@ -837,7 +909,7 @@ mod tests {
             &engine,
             &source(),
             LoadMode::Replace,
-            &LoadOptions::default(),
+            &ValidatedOptions::default(),
         );
         events.wait_until("the file loaded", LOAD_TIMEOUT, is_file_loaded);
         assert_eq!(
@@ -856,7 +928,9 @@ mod tests {
         let start = LoadOptions {
             start: Some(3.0),
             format: None,
-        };
+        }
+        .validated()
+        .unwrap();
         open_checked(&engine, &source(), LoadMode::Replace, &start);
         events.wait_until("the file loaded again", LOAD_TIMEOUT, |events| {
             events

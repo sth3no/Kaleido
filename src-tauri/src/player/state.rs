@@ -11,7 +11,8 @@ use serde_json::Value;
 use super::stream_error::{HookLog, StreamError, is_link};
 use super::{ENGINE_OBSERVE_BASE, EventLoop};
 
-/// The properties the UI renders, observed under their index as reply id.
+/// The properties the UI renders, observed under their index as reply id. `path` is also Rust's:
+/// a link that starts to load is probed for its qualities (`streams`, plan decision 11).
 pub const OBSERVED: &[(&str, PropertyKind)] = &[
     ("pause", PropertyKind::Flag),
     ("time-pos", PropertyKind::Double),
@@ -21,6 +22,7 @@ pub const OBSERVED: &[(&str, PropertyKind)] = &[
     ("mute", PropertyKind::Flag),
     ("speed", PropertyKind::Double),
     ("media-title", PropertyKind::String),
+    ("path", PropertyKind::String),
     ("playlist", PropertyKind::String),
     ("playlist-pos", PropertyKind::Int64),
     ("track-list", PropertyKind::String),
@@ -1493,6 +1495,8 @@ mod tests {
             ("track-list", json!([])),
             ("chapter-list", json!([])),
             ("time-pos", Value::Null),
+            // No file: no path.
+            ("path", Value::Null),
         ] {
             assert_eq!(all[name], expected, "{name}");
         }
@@ -1529,6 +1533,8 @@ mod tests {
             _ => None,
         });
         assert_eq!(playlist[0]["filename"], clip.to_string_lossy().as_ref());
+        // The path of what plays, as it was loaded (what `streams` probes when it is a link).
+        recorder.wait_for_change("path", &json!(clip.to_string_lossy()));
 
         // The other kinds too: a track id is a number (null when no track is selected).
         recorder.wait_for_change("vid", &json!(1));

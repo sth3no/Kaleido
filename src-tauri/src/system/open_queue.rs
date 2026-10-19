@@ -6,7 +6,7 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::player::LoadMode;
-use crate::player::load::{LoadOptions, Source};
+use crate::player::load::{Source, ValidatedOptions};
 
 /// Something to open, as it comes in.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -14,7 +14,7 @@ pub struct OpenRequest {
     pub sources: Vec<Source>,
     /// `None` follows the open-while-playing setting.
     pub mode: Option<LoadMode>,
-    pub options: LoadOptions,
+    pub options: ValidatedOptions,
 }
 
 /// What the player is given: a request with its mode decided.
@@ -22,7 +22,7 @@ pub struct OpenRequest {
 pub struct Batch {
     pub sources: Vec<Source>,
     pub mode: LoadMode,
-    pub options: LoadOptions,
+    pub options: ValidatedOptions,
 }
 
 pub struct OpenQueue {
@@ -126,7 +126,7 @@ mod tests {
         Batch {
             sources: vec![Source::File(PathBuf::from(name))],
             mode,
-            options: LoadOptions::default(),
+            options: ValidatedOptions::default(),
         }
     }
 

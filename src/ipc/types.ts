@@ -454,6 +454,74 @@ export type ToolStatus = {
 };
 
 // ---------------------------------------------------------------------------------------------
+// The qualities of a link (src-tauri/src/streams.rs, tools/ytdlp.rs)
+
+/** One format of a link as yt-dlp lists it, with what the list of qualities needs. */
+export type StreamFormat = {
+  /** What `ytdl-format` names it by. */
+  formatId: string;
+  ext: string;
+  height: number | null;
+  width: number | null;
+  fps: number | null;
+  /** `null` also for an audio-only format. */
+  vcodec: string | null;
+  /** `null` also for a video-only format. */
+  acodec: string | null;
+  /** `SDR`, `HDR10`, `HLG`, ... */
+  dynamicRange: string | null;
+  /** Kbit/s. */
+  tbr: number | null;
+  /** Bytes. */
+  filesize: number | null;
+  /** Bytes, yt-dlp's estimate where it does not know the size. */
+  filesizeApprox: number | null;
+  /** `https`, `m3u8_native`, `http_dash_segments`, ... */
+  protocol: string | null;
+};
+
+/** A link as yt-dlp sees it (`yt-dlp -J`). */
+export type StreamInfo = {
+  title: string | null;
+  /** Seconds; `null` for a live stream and where the site does not say. */
+  duration: number | null;
+  /**
+   * A live stream, one to come, or one that has ended and has no recording yet: it plays from the
+   * live edge. A recording of a past stream is not live.
+   */
+  live: boolean;
+  /** In yt-dlp's order, the worst first; empty where yt-dlp lists none. */
+  formats: StreamFormat[];
+};
+
+/** Where the probe of a link is. */
+export type FormatsState =
+  /** yt-dlp is asked. */
+  | { type: 'loading' }
+  | { type: 'ready'; info: StreamInfo }
+  /**
+   * yt-dlp could not say: `error` is the class of the failure where Rust knows one (`missing`
+   * without a yt-dlp), `message` the last line yt-dlp wrote, without paths and links (in English).
+   */
+  | { type: 'failed'; error: StreamError | null; message: string };
+
+/** What is known of the qualities of a link: the payload of `stream:formats`, and what `stream_formats` returns. */
+export type StreamFormats = {
+  /** The link as mpv's `path` has it: compare it with `path`, the event comes for any link. */
+  url: string;
+  state: FormatsState;
+  /** The `ytdl-format` chosen for the link in this run; `null` for the default (Settings → Playback). */
+  chosen: string | null;
+};
+
+/** Why `player_set_quality` changed nothing. */
+export type QualityError =
+  /** What plays is no http(s) link, or nothing plays. */
+  | 'notAStream'
+  /** The format is not one Rust passes on (the check of the command line's `--format`). */
+  | 'invalid';
+
+// ---------------------------------------------------------------------------------------------
 // The player's state (src-tauri/src/player/state.rs)
 
 /** The properties that changed, or all of them (`system_ui_ready`): mpv's property name → value. */
@@ -520,7 +588,7 @@ export type VideoParams = {
 export type OsdDimensions = { w: number; h: number; ml: number; mr: number; mt: number; mb: number };
 
 // ---------------------------------------------------------------------------------------------
-// Events (Rust emits them; src-tauri/src/lib.rs, player/state.rs, glass.rs, thumbs.rs, themes.rs, system, commands.rs)
+// Events (Rust emits them; src-tauri/src/lib.rs, player/state.rs, glass.rs, thumbs.rs, themes.rs, system, commands.rs, streams.rs)
 
 /** Why a file stopped. */
 export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
@@ -604,6 +672,7 @@ export interface EventTable {
   'plugins:changed': PluginsState;
   'plugins:error': PluginErrorEvent;
   'tools:status': ToolStatus;
+  'stream:formats': StreamFormats;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -680,6 +749,14 @@ export interface CommandTable {
    * that is no http(s) link, before anything is updated.
    */
   stream_retry: { args: { url: string; update: boolean }; result: Nothing };
+  /** What is known of the qualities of the link that plays; `null` when what plays is no link. */
+  stream_formats: { args: undefined; result: StreamFormats | null };
+  /**
+   * Plays the link that plays with the quality `format` (a `ytdl-format`; `null` for the default)
+   * from where it is, in place in the playlist. Resolves once the reload is queued; the choice comes
+   * as `stream:formats` too. Rejects with a `QualityError`.
+   */
+  player_set_quality: { args: { format: string | null }; result: Nothing };
 }
 
 /**
@@ -702,4 +779,5 @@ export interface CommandErrors {
   plugins_settings: PluginError;
   plugins_set_setting: PluginError;
   plugins_apply: PluginError;
+  player_set_quality: QualityError;
 }

@@ -139,8 +139,10 @@ describe('the descriptors', () => {
  * that Rust would refuse, or miss an option it allows.
  *
  * The parse leans on the shape of that block (`live("key", ValueKind::Kind(...))` and `at_start(...)`,
- * one entry after the other, `&["word", ...]` for the words, `min: 0.0, max: 100.0` for the bounds). If
- * the block changes shape, the first test below fails on the parse, before anything else does.
+ * one entry after the other, `&["word", ...]` for the words or the name of a list of the file
+ * (`ValueKind::ChoiceOrNone(STREAM_QUALITY_PRESETS)`, read from its `pub const NAME: &[&str] = &[...];`),
+ * `min: 0.0, max: 100.0` for the bounds). If the block changes shape, the first test below fails on
+ * the parse, before anything else does.
  */
 interface RustSetting {
   key: string;
@@ -153,6 +155,16 @@ interface RustSetting {
   max?: number;
 }
 
+/**
+ * The words of `pub const NAME: &[&str] = &[...];` in the source, as the text between the brackets. A
+ * word may hold `]` (`bv*[height<=?1080]+ba/b[height<=?1080]`), so the list ends at `];`.
+ */
+function namedList(source: string, name: string): string {
+  const found = new RegExp(`pub const ${name}: &\\[&str\\] = &\\[([\\s\\S]*?)\\];`).exec(source)?.[1];
+  if (found === undefined) throw new Error(`mpv_keys.rs has no list ${name} where this test looks for it`);
+  return found.replace(/\/\/.*$/gm, '');
+}
+
 function parseAllowList(source: string): RustSetting[] {
   const start = source.indexOf('pub const MPV_SETTINGS');
   const end = source.indexOf('\n];', start);
@@ -162,7 +174,9 @@ function parseAllowList(source: string): RustSetting[] {
   const heads = [...block.matchAll(/\b(live|at_start)\(\s*"([^"]+)"\s*,\s*ValueKind::(\w+)/g)];
   return heads.map((head, index) => {
     const body = block.slice(head.index + head[0].length, heads[index + 1]?.index ?? block.length);
-    const list = /&\[([^\]]*)\]/.exec(body)?.[1] ?? '';
+    // The words in place, or a list of the file by its name.
+    const named = /^\(\s*([A-Z][A-Z0-9_]*)\s*\)/.exec(body)?.[1];
+    const list = named === undefined ? (/&\[([^\]]*)\]/.exec(body)?.[1] ?? '') : namedList(source, named);
     const min = /min:\s*(-?[\d.]+)/.exec(body)?.[1];
     const max = /max:\s*(-?[\d.]+)/.exec(body)?.[1];
     return {
@@ -176,8 +190,17 @@ function parseAllowList(source: string): RustSetting[] {
   });
 }
 
+/**
+ * Allowed in Rust, with no row on the settings page yet: the default quality of links
+ * (`ytdl-format`, its words are `STREAM_QUALITY_PRESETS`) gets its field with the Playback settings
+ * of Task 17, which adds its descriptor (`''` for yt-dlp's default and the presets, see the parse
+ * test) and takes it out of this list.
+ */
+const WITHOUT_A_ROW_YET = ['ytdl-format'];
+
 describe('the descriptors against the allow-list of mpv_keys.rs', () => {
-  const rust = parseAllowList(mpvKeysSource);
+  const allowed = parseAllowList(mpvKeysSource);
+  const rust = allowed.filter((setting) => !WITHOUT_A_ROW_YET.includes(setting.key));
   const byKey = (key: string): SettingDescriptor => {
     const found = DESCRIPTORS.find((descriptor) => mpvTarget(descriptor) === key);
     if (!found) throw new Error(`no descriptor for ${key}`);
@@ -186,7 +209,8 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
 
   test('the allow-list is read from the Rust source', () => {
     // Not vacuous: the parse found the entries, with their kinds, words and bounds.
-    expect(rust.length).toBeGreaterThanOrEqual(19);
+    expect(allowed.length).toBeGreaterThanOrEqual(20);
+    expect(rust.length).toBe(allowed.length - WITHOUT_A_ROW_YET.length);
     const hwdec = rust.find((setting) => setting.key === 'hwdec');
     expect(hwdec).toEqual({
       key: 'hwdec',
@@ -199,7 +223,23 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
     const volume = rust.find((setting) => setting.key === 'volume');
     expect(volume).toMatchObject({ kind: 'Number', live: false, min: 0, max: 100 });
     expect(rust.find((setting) => setting.key === 'glsl-shaders')?.kind).toBe('Shaders');
-    for (const setting of rust) {
+    // A list of its own in the file, whose words hold brackets.
+    expect(allowed.find((setting) => setting.key === 'ytdl-format')).toEqual({
+      key: 'ytdl-format',
+      kind: 'ChoiceOrNone',
+      live: true,
+      words: [
+        'bv*[height<=?2160]+ba/b[height<=?2160]',
+        'bv*[height<=?1440]+ba/b[height<=?1440]',
+        'bv*[height<=?1080]+ba/b[height<=?1080]',
+        'bv*[height<=?720]+ba/b[height<=?720]',
+        'bv*[height<=?480]+ba/b[height<=?480]',
+        'ba/b',
+      ],
+      min: undefined,
+      max: undefined,
+    });
+    for (const setting of allowed) {
       expect(setting.key, 'an entry without a key').not.toBe('');
       if (setting.kind === 'Choice' || setting.kind === 'ChoiceOrNone') {
         expect(setting.words.length, setting.key).toBeGreaterThan(0);

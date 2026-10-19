@@ -8,6 +8,7 @@ pub mod paths;
 pub mod player;
 pub mod plugins;
 pub mod settings;
+pub mod streams;
 pub mod surface;
 pub mod system;
 pub mod themes;
@@ -31,13 +32,14 @@ use player::{
     Engine, EngineConfig, EventSink, PlayerEvent, QUIT_TIMEOUT, Request, Restart, RestartError,
     StateLoop, StreamError,
 };
+use streams::{StreamFormats, Streams};
 use surface::{Surface, WindowSync};
 use system::OpenThread;
 use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
 use system::logs::LogGuard;
 use system::open_queue::OpenQueue;
-use tools::{Channel, ToolStatus};
+use tools::{Channel, ToolId, ToolStatus};
 
 pub fn run() {
     // First: every panic goes to the log once there is one, and one that ends the start is told
@@ -115,6 +117,8 @@ pub fn run() {
             commands::tools_status,
             commands::tools_check,
             commands::stream_retry,
+            commands::stream_formats,
+            commands::player_set_quality,
         ])
         // A failed start is logged with its whole chain of causes and shown in a message box
         // before Tauri turns it into a panic, whose message has nowhere to go (Ruling R53).
@@ -235,6 +239,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             app: app.handle().clone(),
         }),
     );
+    // Before the engine: its first state batch may name a link to probe already.
+    app.manage(new_streams(app.handle()));
     let engine = Engine::start(
         EngineConfig {
             paths: paths.clone(),
@@ -315,8 +321,11 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
             let app = app.clone();
             move |mpv| prepare_core(&app, mpv)
         }),
-        // Task 12: the quality chosen for a stream.
-        entry_options: Box::new(|_| Vec::new()),
+        // The quality chosen for a link (plan decision 10): it loads with it again.
+        entry_options: match app.try_state::<Streams>() {
+            Some(streams) => streams.entry_options(),
+            None => Box::new(|_| Vec::new()),
+        },
         before_start: Box::new({
             let app = app.clone();
             move || {
@@ -369,6 +378,31 @@ fn prepare_core(app: &AppHandle, mpv: &Mpv) {
             tracing::warn!("the restarted player refuses {args:?}: {error}");
         }
     }
+}
+
+/// The qualities of links (plan decisions 10 and 11, Ruling R4): the probe is the managed yt-dlp's
+/// `-J` with Deno and the cookies' browser as they are when it runs (a yt-dlp that is not there yet
+/// is `Missing`), and what is known of a link reaches the UI as `stream:formats`.
+fn new_streams(app: &AppHandle) -> Streams {
+    let probe_app = app.clone();
+    let probe: streams::Probe = Arc::new(move |url: &str| {
+        let (yt_dlp, deno) = match probe_app.try_state::<tools::Service>() {
+            Some(tools) => (
+                tools.tools().path(ToolId::YtDlp),
+                tools.tools().path(ToolId::Deno),
+            ),
+            None => (None, None),
+        };
+        let cookies = settings::cookies_from_browser(&probe_app);
+        tools::ytdlp::probe(yt_dlp.as_deref(), deno.as_deref(), cookies.as_deref(), url)
+    });
+    let emit_app = app.clone();
+    let emit: streams::Emit = Arc::new(move |formats: &StreamFormats| {
+        if let Err(error) = emit_app.emit(streams::FORMATS_EVENT, formats) {
+            tracing::warn!("cannot send {} to the UI: {error}", streams::FORMATS_EVENT);
+        }
+    });
+    Streams::new(probe, emit)
 }
 
 /// What the tools' service asks of the app: the channel and the cookies' browser of the settings,
@@ -436,9 +470,16 @@ impl EventSink for AppSink {
 /// event. Messages from mpv that Rust acts on are added here.
 fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
     match event {
-        // The window follows mpv's fullscreen and ontop (spec 5.1); the UI gets the batch too.
+        // The window follows mpv's fullscreen and ontop (spec 5.1); a link that starts to load is
+        // probed for its qualities (plan decision 11). The UI gets the batch too.
         PlayerEvent::State { changes } => {
             surface::follow_mpv(app, changes);
+            if let Some(path) = changes.get(streams::PATH)
+                && let Some(streams) = app.try_state::<Streams>()
+            {
+                // Looks at what is known and starts a thread: nothing here waits.
+                streams.on_path(path.as_str());
+            }
             if let Some(osd) = changes.get("osd-dimensions") {
                 // mpv says it once it has made its window: a new one gets the layout, hidden
                 // while no file is open (Ruling R52).

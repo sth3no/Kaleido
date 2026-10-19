@@ -26,6 +26,7 @@ import playerEngineRestartedEventJson from '../../src-tauri/tests/fixtures/ipc/p
 import playerFileLoadedEventJson from '../../src-tauri/tests/fixtures/ipc/player.file-loaded.json';
 import playerInputJson from '../../src-tauri/tests/fixtures/ipc/player_input.json';
 import playerLoadJson from '../../src-tauri/tests/fixtures/ipc/player_load.json';
+import playerSetQualityJson from '../../src-tauri/tests/fixtures/ipc/player_set_quality.json';
 import playerLogEventJson from '../../src-tauri/tests/fixtures/ipc/player.log.json';
 import playerMessageEventJson from '../../src-tauri/tests/fixtures/ipc/player.message.json';
 import playerStateEventJson from '../../src-tauri/tests/fixtures/ipc/player.state.json';
@@ -41,6 +42,7 @@ import pluginsSetSettingJson from '../../src-tauri/tests/fixtures/ipc/plugins_se
 import pluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/plugins_settings.json';
 import pluginsUninstallJson from '../../src-tauri/tests/fixtures/ipc/plugins_uninstall.json';
 import rejectsPlayerLoadJson from '../../src-tauri/tests/fixtures/ipc/rejects.player_load.json';
+import rejectsPlayerSetQualityJson from '../../src-tauri/tests/fixtures/ipc/rejects.player_set_quality.json';
 import rejectsPluginsSetSettingJson from '../../src-tauri/tests/fixtures/ipc/rejects.plugins_set_setting.json';
 import rejectsSettingsSetJson from '../../src-tauri/tests/fixtures/ipc/rejects.settings_set.json';
 import rejectsStreamRetryJson from '../../src-tauri/tests/fixtures/ipc/rejects.stream_retry.json';
@@ -50,6 +52,7 @@ import returnsPluginsLogJson from '../../src-tauri/tests/fixtures/ipc/returns.pl
 import returnsPluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_settings.json';
 import returnsSettingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_audio_devices.json';
 import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_bindings.json';
+import returnsStreamFormatsJson from '../../src-tauri/tests/fixtures/ipc/returns.stream_formats.json';
 import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
 import returnsSystemBrowsersJson from '../../src-tauri/tests/fixtures/ipc/returns.system_browsers.json';
 import returnsSystemLicensesJson from '../../src-tauri/tests/fixtures/ipc/returns.system_licenses.json';
@@ -66,6 +69,8 @@ import settingsRebindJson from '../../src-tauri/tests/fixtures/ipc/settings_rebi
 import settingsResetBindingJson from '../../src-tauri/tests/fixtures/ipc/settings_reset_binding.json';
 import settingsSetJson from '../../src-tauri/tests/fixtures/ipc/settings_set.json';
 import settingsSetMpvJson from '../../src-tauri/tests/fixtures/ipc/settings_set_mpv.json';
+import streamFormatsEventJson from '../../src-tauri/tests/fixtures/ipc/stream.formats.json';
+import streamFormatsJson from '../../src-tauri/tests/fixtures/ipc/stream_formats.json';
 import streamRetryJson from '../../src-tauri/tests/fixtures/ipc/stream_retry.json';
 import surfaceSetCaptionButtonsJson from '../../src-tauri/tests/fixtures/ipc/surface_set_caption_buttons.json';
 import surfaceSetLayoutJson from '../../src-tauri/tests/fixtures/ipc/surface_set_layout.json';
@@ -111,6 +116,7 @@ import type {
   EndFile,
   EndReason,
   EventTable,
+  FormatsState,
   GlassRect,
   GlassReason,
   GlassState,
@@ -135,6 +141,7 @@ import type {
   PluginSettings,
   PluginSource,
   PluginsState,
+  QualityError,
   ReduceTransparency,
   ScreenshotMode,
   SeekMode,
@@ -146,6 +153,9 @@ import type {
   SourceError,
   SourcePage,
   StreamError,
+  StreamFormat,
+  StreamFormats,
+  StreamInfo,
   SystemAppearance,
   ThemeMode,
   ThumbReady,
@@ -189,6 +199,7 @@ const commandFixtures = {
   player_command: playerCommandJson,
   player_input: playerInputJson,
   player_load: playerLoadJson,
+  player_set_quality: playerSetQualityJson,
   plugins_apply: pluginsApplyJson,
   plugins_list: pluginsListJson,
   plugins_log: pluginsLogJson,
@@ -206,6 +217,7 @@ const commandFixtures = {
   settings_reset_binding: settingsResetBindingJson,
   settings_set: settingsSetJson,
   settings_set_mpv: settingsSetMpvJson,
+  stream_formats: streamFormatsJson,
   stream_retry: streamRetryJson,
   surface_set_caption_buttons: surfaceSetCaptionButtonsJson,
   surface_set_layout: surfaceSetLayoutJson,
@@ -244,6 +256,7 @@ const eventFixtures = {
   'plugins:changed': pluginsChangedEventJson,
   'plugins:error': pluginsErrorEventJson,
   'settings:changed': settingsChangedEventJson,
+  'stream:formats': streamFormatsEventJson,
   'system:appearance-changed': systemAppearanceEventJson,
   'system:error': systemErrorEventJson,
   'system:open-request': systemOpenRequestEventJson,
@@ -258,6 +271,7 @@ const returnFixtures = {
   plugins_settings: returnsPluginsSettingsJson,
   settings_audio_devices: returnsSettingsAudioDevicesJson,
   settings_bindings: returnsSettingsBindingsJson,
+  stream_formats: returnsStreamFormatsJson,
   system_appearance: returnsSystemAppearanceJson,
   system_browsers: returnsSystemBrowsersJson,
   system_licenses: returnsSystemLicensesJson,
@@ -271,6 +285,7 @@ const returnFixtures = {
     | 'plugins_settings'
     | 'settings_audio_devices'
     | 'settings_bindings'
+    | 'stream_formats'
     | 'system_appearance'
     | 'system_browsers'
     | 'system_licenses'
@@ -282,6 +297,7 @@ const returnFixtures = {
 /** What a command rejects with (the `Err` of its `Result`). */
 const rejectFixtures = {
   player_load: rejectsPlayerLoadJson,
+  player_set_quality: rejectsPlayerSetQualityJson,
   plugins_set_setting: rejectsPluginsSetSettingJson,
   settings_set: rejectsSettingsSetJson,
   stream_retry: rejectsStreamRetryJson,
@@ -289,6 +305,7 @@ const rejectFixtures = {
 } satisfies {
   [K in
     | 'player_load'
+    | 'player_set_quality'
     | 'plugins_set_setting'
     | 'settings_set'
     | 'stream_retry'
@@ -363,6 +380,11 @@ const PLUGIN_ERROR_SHAPES: Shapes<PluginError, 'type'> = {
   busy: { type: true },
   io: { type: true, message: true },
   unavailable: { type: true },
+};
+const FORMATS_STATE_SHAPES: Shapes<FormatsState, 'type'> = {
+  loading: { type: true },
+  ready: { type: true, info: true },
+  failed: { type: true, error: true, message: true },
 };
 
 /**
@@ -477,6 +499,30 @@ const PLUGIN_SETTINGS: Shape<PluginSettings> = {
 const PLUGIN_ERROR_EVENT: Shape<PluginErrorEvent> = { fields: { name: 'required' } };
 const TOOL_STATUS: Shape<ToolStatus> = {
   fields: { tool: 'required', state: 'required', version: 'required', checkedAt: 'required', error: 'required' },
+};
+const STREAM_FORMAT: Shape<StreamFormat> = {
+  fields: {
+    formatId: 'required',
+    ext: 'required',
+    height: 'required',
+    width: 'required',
+    fps: 'required',
+    vcodec: 'required',
+    acodec: 'required',
+    dynamicRange: 'required',
+    tbr: 'required',
+    filesize: 'required',
+    filesizeApprox: 'required',
+    protocol: 'required',
+  },
+};
+// The `formats` of a link are a list: see `STREAM_FORMAT`.
+const STREAM_INFO: Shape<StreamInfo> = {
+  fields: { title: 'required', duration: 'required', live: 'required', formats: 'required' },
+};
+// The `state` is a tagged union: see `FORMATS_STATE_SHAPES`.
+const STREAM_FORMATS: Shape<StreamFormats> = {
+  fields: { url: 'required', state: 'required', chosen: 'required' },
 };
 
 /** The setting of one kind. */
@@ -618,6 +664,7 @@ const BROWSER_WARNINGS = names<BrowserWarning>({ chromiumCookies: true, noProfil
 const COOKIES_SPEC = /^(brave|chrome|chromium|edge|firefox|opera|safari|vivaldi|whale)(:.+)?$/;
 const TOOL_IDS = names<ToolId>({ ytDlp: true, deno: true });
 const TOOL_STATES = names<ToolState>({ missing: true, checking: true, downloading: true, ready: true, failed: true });
+const QUALITY_ERRORS = names<QualityError>({ notAStream: true, invalid: true });
 const SETTING_KINDS = names<SettingKind>({
   bool: true,
   int: true,
@@ -907,6 +954,69 @@ describe('stream_retry', () => {
   });
 });
 
+describe('the qualities of a link', () => {
+  const returned = returnFixtures.stream_formats.flatMap((found) => (found === null ? [] : [found]));
+  const sent = [...eventFixtures['stream:formats'], ...returned];
+  const states = sent.map(({ state }) => state);
+
+  test('every state of a probe, with exactly its keys', () => {
+    expectShape(sent, STREAM_FORMATS, 'StreamFormats');
+    for (const samples of [eventFixtures['stream:formats'], returned]) {
+      expectVariants(
+        samples.map(({ state }) => state),
+        'type',
+        FORMATS_STATE_SHAPES,
+        'formats state',
+      );
+    }
+    const infos = states.flatMap((state) => ('info' in state && state.info !== undefined ? [state.info] : []));
+    expectShape(infos, STREAM_INFO, 'StreamInfo');
+    expectShape(
+      infos.flatMap(({ formats }) => formats),
+      STREAM_FORMAT,
+      'StreamFormat',
+    );
+    // A live stream and a video.
+    expect([...new Set(infos.map(({ live }) => live))].sort()).toEqual([false, true]);
+  });
+
+  test('a failure has a class where Rust knows one, and a message in any case', () => {
+    const failures = states.flatMap((state) =>
+      'message' in state && typeof state.message === 'string'
+        ? [{ error: state.error ?? null, message: state.message }]
+        : [],
+    );
+    expect(failures.some(({ error }) => error === null)).toBe(true);
+    expect(failures.some(({ error }) => error !== null)).toBe(true);
+    expectKnown(
+      failures.flatMap(({ error }) => (error === null ? [] : [error])),
+      STREAM_ERRORS,
+      'stream error',
+    );
+    // No paths and no links in what yt-dlp said (spec 10.8).
+    for (const { message } of failures) {
+      expect(message).not.toBe('');
+      expect(message).not.toMatch(/[a-z]+:\/\/|[A-Za-z]:\\/);
+    }
+  });
+
+  test('every sample is of a link; nothing for no link; a chosen quality or the default', () => {
+    for (const { url } of sent) expect(url).toMatch(/^https?:\/\//);
+    expect(returnFixtures.stream_formats).toContain(null);
+    expect(sent.some(({ chosen }) => chosen === null)).toBe(true);
+    expect(sent.some(({ chosen }) => chosen !== null)).toBe(true);
+    expect(commandFixtures.stream_formats).toEqual([{}]);
+  });
+
+  test('player_set_quality takes a format or the default, and rejects with a QualityError', () => {
+    expect(commandFixtures.player_set_quality.map(({ format }) => format)).toEqual([
+      'bv*[height<=?1080]+ba/b[height<=?1080]',
+      null,
+    ]);
+    expectAll(rejectFixtures.player_set_quality, QUALITY_ERRORS, 'quality error');
+  });
+});
+
 describe('the tools', () => {
   test('every tool and every state', () => {
     expectAll(commandFixtures.tools_check.map(({ tool }) => tool), TOOL_IDS, 'tool');
@@ -941,6 +1051,7 @@ const wrappers = {
   player_command: ({ cmd }) => commands.playerCommand(cmd),
   player_input: ({ event }) => commands.playerInput(event),
   player_load: ({ sources, mode }) => commands.playerLoad(sources, mode),
+  player_set_quality: ({ format }) => commands.playerSetQuality(format),
   plugins_apply: () => commands.pluginsApply(),
   plugins_list: () => commands.pluginsList(),
   plugins_log: ({ name }) => commands.pluginsLog(name),
@@ -958,6 +1069,7 @@ const wrappers = {
   settings_reset_binding: ({ key }) => commands.settingsResetBinding(key),
   settings_set: ({ patch }) => commands.settingsSet(patch),
   settings_set_mpv: ({ key, value }) => commands.settingsSetMpv(key, value),
+  stream_formats: () => commands.streamFormats(),
   stream_retry: ({ url, update }) => commands.streamRetry(url, update),
   surface_set_caption_buttons: ({ rects }) => commands.surfaceSetCaptionButtons(rects),
   surface_set_layout: ({ layout }) => commands.surfaceSetLayout(layout),
@@ -996,6 +1108,7 @@ const subscribers = {
   'plugins:changed': events.onPluginsChanged,
   'plugins:error': events.onPluginsError,
   'settings:changed': events.onSettingsChanged,
+  'stream:formats': events.onStreamFormats,
   'system:appearance-changed': events.onSystemAppearanceChanged,
   'system:error': events.onSystemError,
   'system:open-request': events.onOpenRequest,

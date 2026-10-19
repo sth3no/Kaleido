@@ -58,6 +58,21 @@ const fn at_start(key: &'static str, kind: ValueKind) -> MpvSetting {
     }
 }
 
+/// The default qualities of links a user can choose (Settings → Playback, "Výchozí kvalita
+/// streamů", plan decision 10): yt-dlp's selections for at most 2160, 1440, 1080, 720 and 480 lines
+/// (the best video of that height or lower with the best audio, or the best single file of it),
+/// and audio alone. `ytdl-format` takes only these, or nothing for yt-dlp's own default. Each one
+/// passes the check of a format to load (`player::load::LoadOptions::validate`), so the quality
+/// chosen for a link can be one of them too.
+pub const STREAM_QUALITY_PRESETS: &[&str] = &[
+    "bv*[height<=?2160]+ba/b[height<=?2160]",
+    "bv*[height<=?1440]+ba/b[height<=?1440]",
+    "bv*[height<=?1080]+ba/b[height<=?1080]",
+    "bv*[height<=?720]+ba/b[height<=?720]",
+    "bv*[height<=?480]+ba/b[height<=?480]",
+    "ba/b",
+];
+
 /// Every mpv option Kaleido's settings manage, by section of the settings page (spec 8.10).
 pub const MPV_SETTINGS: &[MpvSetting] = &[
     // Playback
@@ -70,6 +85,13 @@ pub const MPV_SETTINGS: &[MpvSetting] = &[
         ValueKind::Choice(&["no", "filter", "same"]),
     ),
     live("save-position-on-quit", ValueKind::Flag),
+    // The default quality of links (plan decision 10): mpv's `ytdl_hook` reads it for every link
+    // it opens, so it is live for the next one; the quality of the link that plays is changed
+    // with `player_set_quality` (streams.rs).
+    live(
+        "ytdl-format",
+        ValueKind::ChoiceOrNone(STREAM_QUALITY_PRESETS),
+    ),
     // Subtitles
     live("sub-font", ValueKind::Font),
     live(
@@ -323,6 +345,7 @@ mod tests {
                 "hwdec",
                 "autocreate-playlist",
                 "save-position-on-quit",
+                "ytdl-format",
                 "sub-font",
                 "sub-font-size",
                 "sub-color",
@@ -473,6 +496,75 @@ mod tests {
         // Removing a managed key is always allowed.
         for setting in MPV_SETTINGS {
             assert_eq!(check(setting.key, None), None, "{}", setting.key);
+        }
+    }
+
+    /// Plan decision 10: a preset is what a link loads with (mpv.conf's `ytdl-format`, or the
+    /// quality chosen for one link), so each one passes the check `--format` and the chosen
+    /// quality go through. The table is the plan's, word for word.
+    #[test]
+    fn presets_pass_the_format_check() {
+        assert_eq!(
+            STREAM_QUALITY_PRESETS,
+            [
+                "bv*[height<=?2160]+ba/b[height<=?2160]",
+                "bv*[height<=?1440]+ba/b[height<=?1440]",
+                "bv*[height<=?1080]+ba/b[height<=?1080]",
+                "bv*[height<=?720]+ba/b[height<=?720]",
+                "bv*[height<=?480]+ba/b[height<=?480]",
+                "ba/b",
+            ]
+        );
+        for preset in STREAM_QUALITY_PRESETS {
+            let options = crate::player::load::LoadOptions {
+                start: None,
+                format: Some((*preset).to_owned()),
+            };
+            assert_eq!(options.validate(), Ok(()), "{preset}");
+        }
+        let unique: std::collections::BTreeSet<&str> =
+            STREAM_QUALITY_PRESETS.iter().copied().collect();
+        assert_eq!(unique.len(), STREAM_QUALITY_PRESETS.len());
+    }
+
+    /// The default quality is one of the presets or nothing (yt-dlp's own default); anything else,
+    /// a format that would set another option among it too, is refused before mpv.conf is touched.
+    #[test]
+    fn ytdl_format_accepts_only_presets_or_nothing() {
+        let ctx = ctx();
+        let setting = setting("ytdl-format").expect("ytdl-format is managed");
+        assert!(setting.live, "the next link takes it");
+        assert_eq!(
+            setting.kind,
+            ValueKind::ChoiceOrNone(STREAM_QUALITY_PRESETS)
+        );
+        for preset in STREAM_QUALITY_PRESETS {
+            assert_eq!(
+                validate_mpv("ytdl-format", Some(preset), &ctx)
+                    .unwrap()
+                    .as_deref(),
+                Some(*preset)
+            );
+        }
+        assert_eq!(validate_mpv("ytdl-format", Some(""), &ctx), Ok(None));
+        assert_eq!(validate_mpv("ytdl-format", None, &ctx), Ok(None));
+        for bad in [
+            "best,vo=gpu",
+            "bestvideo+bestaudio",
+            "bv*[height<=?1080]+ba/b",
+            "BA/B",
+            " ba/b",
+            "ba/b\n",
+            "ba/b\nvo=gpu",
+        ] {
+            assert!(
+                matches!(
+                    validate_mpv("ytdl-format", Some(bad), &ctx),
+                    Err(SettingsError::Invalid { ref key, .. }) if key == "ytdl-format"
+                ),
+                "{bad:?} got {:?}",
+                validate_mpv("ytdl-format", Some(bad), &ctx)
+            );
         }
     }
 

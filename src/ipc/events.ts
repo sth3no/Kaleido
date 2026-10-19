@@ -18,6 +18,7 @@ import type {
   PluginErrorEvent,
   PluginsState,
   Settings,
+  StreamFormats,
   SystemAppearance,
   ThumbReady,
   ToolStatus,
@@ -96,3 +97,11 @@ export const onPluginsError = (callback: (payload: PluginErrorEvent) => void) =>
 
 /** A tool's state changed: a check started, a download began, or how the check ended. Ask with `toolsStatus` at start. */
 export const onToolsStatus = (callback: (payload: ToolStatus) => void) => on('tools:status', callback);
+
+/**
+ * What is known of a link's qualities changed: its probe started, ended or failed, a quality was
+ * chosen, or a known link plays again. Comes for any link: compare `url` with `path`. Ask with
+ * `streamFormats` when `path` changes.
+ */
+export const onStreamFormats = (callback: (payload: StreamFormats) => void) =>
+  on('stream:formats', callback);

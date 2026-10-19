@@ -256,3 +256,21 @@ export const toolsCheck = (tool: ToolId) => call('tools_check', { tool });
  * the retry. Rejects with a `LoadIssue` for text that is no http(s) link.
  */
 export const streamRetry = (url: string, update: boolean) => call('stream_retry', { url, update });
+
+// --- The qualities of a link -----------------------------------------------------------------
+// What is known of a link comes as `stream:formats` too (`onStreamFormats`), for any link: compare
+// its `url` with `path`.
+
+/**
+ * What is known of the qualities of the link that plays (yt-dlp is asked as soon as it starts to
+ * load); `null` when what plays is no http(s) link. Ask when `path` changes; the event says what
+ * changes after.
+ */
+export const streamFormats = () => call('stream_formats');
+
+/**
+ * Plays the link that plays with another quality from where it is, in place in the playlist:
+ * `format` is a `ytdl-format` (`bv*[height<=?1080]+ba/b[height<=?1080]`), `null` for the default
+ * of the settings. Kept for the link for the run, also across Apply. Rejects with a `QualityError`.
+ */
+export const playerSetQuality = (format: string | null) => call('player_set_quality', { format });

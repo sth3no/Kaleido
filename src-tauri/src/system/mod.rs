@@ -224,7 +224,7 @@ fn play(app: &AppHandle, batch: Batch) {
 mod tests {
     use super::*;
     use crate::player::LoadMode;
-    use crate::player::load::{LoadOptions, Source};
+    use crate::player::load::{Source, ValidatedOptions};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -263,7 +263,7 @@ mod tests {
         Batch {
             sources: vec![Source::File(PathBuf::from(name))],
             mode,
-            options: LoadOptions::default(),
+            options: ValidatedOptions::default(),
         }
     }
 

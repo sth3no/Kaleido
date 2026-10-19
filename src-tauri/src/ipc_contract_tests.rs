@@ -36,7 +36,7 @@ use serde_json::{Map, Number, Value, json};
 use crate::glass::{self, GlassReason, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::player::command::{ScreenshotMode, SeekMode, TrackKind};
-use crate::player::load::SourceError;
+use crate::player::load::{LoadOptions, SourceError};
 use crate::player::{
     self, CommandError, EndReason, LoadIssue, LoadMode, LogLine, PlayerCommand, PlayerEvent,
     StreamError,
@@ -47,10 +47,12 @@ use crate::plugins::{
     self, OptEntry, PluginError, PluginErrorEvent, PluginInfo, PluginSettings, PluginsState,
     SettingsForm,
 };
+use crate::settings::mpv_keys::STREAM_QUALITY_PRESETS;
 use crate::settings::{
     self, Appearance, AudioDevice, Binding, BindingSource, Language, Playback, ReduceTransparency,
     Settings, SettingsError, SettingsStore, ThemeMode, Updates,
 };
+use crate::streams::{self, FormatsState, QualityError, StreamFormats};
 use crate::surface::{CaptionButton, Layout};
 use crate::system::browsers::{Browser, BrowserWarning};
 use crate::system::clipboard::PasteOutcome;
@@ -59,6 +61,7 @@ use crate::system::dialog::DialogPurpose;
 use crate::system::{self, OpenRequestEvent, SourcePage};
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbReady};
+use crate::tools::ytdlp::{StreamFormat, StreamInfo};
 use crate::tools::{self, Channel, ToolId, ToolState, ToolStatus};
 
 // ---------------------------------------------------------------------------------------------
@@ -259,7 +262,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 23] = [
+const WITHOUT_ARGUMENTS: [&str; 24] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -283,6 +286,7 @@ const WITHOUT_ARGUMENTS: [&str; 23] = [
     "plugins_restore_essentials",
     "plugins_apply",
     "tools_status",
+    "stream_formats",
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -465,6 +469,15 @@ variants!(tool_state_name, TOOL_STATE_NAMES: ToolState {
 variants!(channel_name, CHANNEL_NAMES: Channel {
     Channel::Stable => "stable",
     Channel::Nightly => "nightly",
+});
+variants!(formats_state_name, FORMATS_STATE_NAMES: FormatsState {
+    FormatsState::Loading => "loading",
+    FormatsState::Ready { .. } => "ready",
+    FormatsState::Failed { .. } => "failed",
+});
+variants!(quality_error_name, QUALITY_ERROR_NAMES: QualityError {
+    QualityError::NotAStream => "notAStream",
+    QualityError::Invalid => "invalid",
 });
 variants!(browser_warning_name, BROWSER_WARNING_NAMES: BrowserWarning {
     BrowserWarning::ChromiumCookies => "chromiumCookies",
@@ -878,6 +891,18 @@ fn check_command(command: &str, calls: &[Value]) {
             );
             for (url, _) in &retries {
                 assert!(system::clipboard::checked_link(url).is_ok(), "{url}");
+            }
+        }
+        // A preset of the settings, and the default; each one is a format a link may load with.
+        "player_set_quality" => {
+            let formats = column::<Option<String>>(command, calls, "format");
+            assert_eq!(formats, [Some(STREAM_QUALITY_PRESETS[2].to_owned()), None]);
+            for format in formats.into_iter().flatten() {
+                let options = LoadOptions {
+                    start: None,
+                    format: Some(format.clone()),
+                };
+                assert_eq!(options.validate(), Ok(()), "{format}");
             }
         }
         other => panic!("{other} is registered, but has no check here: add its fixture"),
@@ -1709,6 +1734,115 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     }
     for status in [ready_yt_dlp, old_deno] {
         serialized(out, "returns.tools_check", &status);
+    }
+
+    // The qualities of a link: every state of its probe (a failure with a class and one without),
+    // what `stream_formats` returns (also nothing, for no link), and what a change of the quality
+    // rejects with. A small video and a live stream.
+    let video = StreamInfo {
+        title: Some("Big Buck Bunny".to_owned()),
+        duration: Some(634.5),
+        live: false,
+        formats: vec![
+            StreamFormat {
+                format_id: "251".to_owned(),
+                ext: "webm".to_owned(),
+                height: None,
+                width: None,
+                fps: None,
+                vcodec: None,
+                acodec: Some("opus".to_owned()),
+                dynamic_range: None,
+                tbr: Some(129.483),
+                filesize: Some(10_283_475),
+                filesize_approx: None,
+                protocol: Some("https".to_owned()),
+            },
+            StreamFormat {
+                format_id: "337".to_owned(),
+                ext: "webm".to_owned(),
+                height: Some(2160),
+                width: Some(3840),
+                fps: Some(59.94),
+                vcodec: Some("vp09.02.51.10.01.09.16.09.00".to_owned()),
+                acodec: None,
+                dynamic_range: Some("HDR10".to_owned()),
+                tbr: None,
+                filesize: None,
+                filesize_approx: Some(1_903_000_123),
+                protocol: Some("http_dash_segments".to_owned()),
+            },
+        ],
+    };
+    let live = StreamInfo {
+        title: Some("Živé vysílání".to_owned()),
+        duration: None,
+        live: true,
+        formats: Vec::new(),
+    };
+    let link = "https://www.youtube.com/watch?v=aqz-KE-bpKQ";
+    let stream = |url: &str, state: FormatsState, chosen: Option<&str>| StreamFormats {
+        url: url.to_owned(),
+        state,
+        chosen: chosen.map(str::to_owned),
+    };
+    let stream_samples = [
+        stream(link, FormatsState::Loading, None),
+        stream(
+            link,
+            FormatsState::Ready { info: video },
+            Some(STREAM_QUALITY_PRESETS[2]),
+        ),
+        stream(
+            "https://www.twitch.tv/kaleido",
+            FormatsState::Ready { info: live },
+            None,
+        ),
+        stream(
+            link,
+            FormatsState::Failed {
+                error: Some(StreamError::AgeRestricted),
+                message: "ERROR: [youtube] aqz-KE-bpKQ: Sign in to confirm your age. This video \
+                          may be inappropriate for some users."
+                    .to_owned(),
+            },
+            None,
+        ),
+        stream(
+            "https://example.com/video.mp4",
+            FormatsState::Failed {
+                error: None,
+                message: "yt-dlp took too long".to_owned(),
+            },
+            None,
+        ),
+    ];
+    let states: Vec<FormatsState> = stream_samples
+        .iter()
+        .map(|sample| sample.state.clone())
+        .collect();
+    covers(
+        "FormatsState",
+        &states,
+        formats_state_name,
+        FORMATS_STATE_NAMES,
+        Some("type"),
+    );
+    for sample in &stream_samples {
+        serialized(out, &fixture_name(streams::FORMATS_EVENT), sample);
+        serialized(out, "returns.stream_formats", &Some(sample));
+    }
+    serialized(out, "returns.stream_formats", &None::<StreamFormats>);
+    let quality_errors = [QualityError::NotAStream, QualityError::Invalid];
+    covers(
+        "QualityError",
+        &quality_errors,
+        quality_error_name,
+        QUALITY_ERROR_NAMES,
+        None,
+    );
+    for error in &quality_errors {
+        serialized(out, "rejects.player_set_quality", error);
     }
     sent
 }

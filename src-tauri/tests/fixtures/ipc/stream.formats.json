@@ -1,0 +1,67 @@
+[
+  { "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "state": { "type": "loading" }, "chosen": null },
+  {
+    "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "state": {
+      "type": "ready",
+      "info": {
+        "title": "Big Buck Bunny",
+        "duration": 634.5,
+        "live": false,
+        "formats": [
+          {
+            "formatId": "251",
+            "ext": "webm",
+            "height": null,
+            "width": null,
+            "fps": null,
+            "vcodec": null,
+            "acodec": "opus",
+            "dynamicRange": null,
+            "tbr": 129.483,
+            "filesize": 10283475,
+            "filesizeApprox": null,
+            "protocol": "https"
+          },
+          {
+            "formatId": "337",
+            "ext": "webm",
+            "height": 2160,
+            "width": 3840,
+            "fps": 59.94,
+            "vcodec": "vp09.02.51.10.01.09.16.09.00",
+            "acodec": null,
+            "dynamicRange": "HDR10",
+            "tbr": null,
+            "filesize": null,
+            "filesizeApprox": 1903000123,
+            "protocol": "http_dash_segments"
+          }
+        ]
+      }
+    },
+    "chosen": "bv*[height<=?1080]+ba/b[height<=?1080]"
+  },
+  {
+    "url": "https://www.twitch.tv/kaleido",
+    "state": {
+      "type": "ready",
+      "info": { "title": "Živé vysílání", "duration": null, "live": true, "formats": [] }
+    },
+    "chosen": null
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+    "state": {
+      "type": "failed",
+      "error": "ageRestricted",
+      "message": "ERROR: [youtube] aqz-KE-bpKQ: Sign in to confirm your age. This video may be inappropriate for some users."
+    },
+    "chosen": null
+  },
+  {
+    "url": "https://example.com/video.mp4",
+    "state": { "type": "failed", "error": null, "message": "yt-dlp took too long" },
+    "chosen": null
+  }
+]

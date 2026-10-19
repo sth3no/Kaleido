@@ -1,20 +1,21 @@
 //! Kaleido's command line (spec 9.2): `Kaleido.exe [--append] [--start=<s>] [--format=<f>]
 //! <file|folder|url>…`, checked like everything else that is opened. A `--start` or `--format`
 //! goes with the first source, which then opens on its own, without the playlist of its folder
-//! (Ruling R55, `LoadOptions::to_mpv`).
+//! (Ruling R55, `LoadOptions::to_mpv`). The options are checked as they are read, so the request
+//! carries them as [`ValidatedOptions`].
 
 use std::ffi::OsString;
 use std::path::Path;
 
 use crate::player::LoadMode;
-use crate::player::load::{LoadOptions, Source, SourceError, parse_source};
+use crate::player::load::{Source, SourceError, ValidatedOptions, parse_source};
 
 /// What a command line asks for.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CliRequest {
     /// `Some(Append)` with `--append`; `None` leaves it to the open-while-playing setting.
     pub mode: Option<LoadMode>,
-    pub options: LoadOptions,
+    pub options: ValidatedOptions,
     pub sources: Vec<Source>,
     /// Arguments that are no source to open, as given, and why.
     pub rejected: Vec<(String, SourceError)>,
@@ -51,9 +52,10 @@ pub fn parse(args: impl IntoIterator<Item = OsString>, cwd: &Path) -> CliRequest
 }
 
 /// `--append`, `--start=<s>` and `--format=<f>`. A value Kaleido would not pass on to mpv
-/// (see [`LoadOptions::validate`]) is dropped like an unknown option: the files still open.
+/// (see [`LoadOptions::validate`](crate::player::load::LoadOptions::validate)) is dropped like an
+/// unknown option: the files still open.
 fn read_option(arg: &str, request: &mut CliRequest) {
-    let mut options = request.options.clone();
+    let mut options = request.options.options().clone();
     match arg.split_once('=') {
         None if arg == "--append" => {
             request.mode = Some(LoadMode::Append);
@@ -67,10 +69,9 @@ fn read_option(arg: &str, request: &mut CliRequest) {
             return;
         }
     }
-    if options.validate().is_ok() {
-        request.options = options;
-    } else {
-        tracing::warn!("command line option with an invalid value ignored: {arg}");
+    match options.validated() {
+        Ok(options) => request.options = options,
+        Err(_) => tracing::warn!("command line option with an invalid value ignored: {arg}"),
     }
 }
 
@@ -81,6 +82,7 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::player::load::LoadOptions;
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -105,8 +107,8 @@ mod tests {
 
         assert_eq!(request.mode, Some(LoadMode::Append));
         assert_eq!(
-            request.options,
-            LoadOptions {
+            request.options.options(),
+            &LoadOptions {
                 start: Some(12.5),
                 format: Some("bv*+ba/b".into()),
             }
@@ -127,7 +129,7 @@ mod tests {
         fs::write(tmp.path().join("a.mkv"), b"x").unwrap();
         let request = parse(args(&["a.mkv"]), tmp.path());
         assert_eq!(request.mode, None);
-        assert_eq!(request.options, LoadOptions::default());
+        assert_eq!(request.options.options(), &LoadOptions::default());
         assert_eq!(request.sources.len(), 1);
     }
 
@@ -205,7 +207,11 @@ mod tests {
             &["--start", "a.mkv"],
         ] {
             let request = parse(args(bad), tmp.path());
-            assert_eq!(request.options, LoadOptions::default(), "{bad:?}");
+            assert_eq!(
+                request.options.options(),
+                &LoadOptions::default(),
+                "{bad:?}"
+            );
             assert_eq!(request.mode, None, "{bad:?}");
             assert_eq!(request.sources.len(), 1, "{bad:?}");
         }

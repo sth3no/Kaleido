@@ -3,8 +3,15 @@
 //!
 //! The rules of reading the answer are the downloader's (`src/lib/ytdlp.ts` of The Downloader, MIT,
 //! Copyright (c) 2021 Raycast, Copyright (c) 2026 Vojtěch Stehlík; plan decision 9): noise before
-//! the JSON is skipped (`extractDumpJson`), and a link is live when `live_status` says anything but
-//! `null` or `not_live` (`isLiveStream`).
+//! the JSON is skipped (`extractDumpJson`). What is live is narrower than its `isLiveStream`
+//! (anything but `null` or `not_live`), because here it is about playing: a link is live while
+//! there is no recording to play from its start, that is while `live_status` is `is_live`,
+//! `is_upcoming` or `post_live`. `post_live` (the stream has ended and its recording is not
+//! processed yet) counts as live: yt-dlp still takes its formats from the live stream's manifests,
+//! which hold a window of the last hours and no final duration, and it becomes `was_live` once the
+//! recording is there. `was_live` is that recording, a video like any other with a duration and a
+//! position to come back to, so it is not live. A link that yt-dlp answers with a playlist (or a
+//! `multi_video`, several videos under one link) is not one video.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -28,7 +35,8 @@ pub struct StreamInfo {
     pub title: Option<String>,
     /// Seconds; `None` for a live stream and where the site does not say.
     pub duration: Option<f64>,
-    /// A live stream, one to come, or one that has just ended (see the module).
+    /// A live stream, one to come, or one that has ended and has no recording yet (see the
+    /// module); a recording of a past stream is not live.
     pub live: bool,
     /// In yt-dlp's order, the worst first. Empty where yt-dlp lists none.
     pub formats: Vec<StreamFormat>,
@@ -69,7 +77,7 @@ pub enum ProbeError {
     Failed { stderr: String },
     /// yt-dlp took longer than [`PROBE_TIMEOUT`].
     Timeout,
-    /// The link is a playlist, not a video.
+    /// The link is a playlist (or several videos, `multi_video`), not a video.
     Playlist,
     /// yt-dlp's answer is not the JSON of a video.
     BadJson(String),
@@ -144,9 +152,9 @@ pub fn probe(
 }
 
 /// Reads what `yt-dlp -J` wrote (see the module): the JSON starts at the first line that starts
-/// with `{` (after spaces); a `_type` of `playlist` is [`ProbeError::Playlist`]; no `formats` is
-/// an empty list. A field of an unexpected type is as good as missing, and a format without a
-/// `format_id` (which nothing could select) is left out.
+/// with `{` (after spaces); a `_type` of `playlist` or `multi_video` is [`ProbeError::Playlist`];
+/// no `formats` is an empty list. A field of an unexpected type is as good as missing, and a format
+/// without a `format_id` (which nothing could select) is left out.
 pub fn parse_info(stdout: &str) -> Result<StreamInfo, ProbeError> {
     let start = json_start(stdout)
         .ok_or_else(|| ProbeError::BadJson("there is no JSON in it".to_owned()))?;
@@ -159,7 +167,10 @@ pub fn parse_info(stdout: &str) -> Result<StreamInfo, ProbeError> {
     let Value::Object(info) = value else {
         return Err(ProbeError::BadJson("it is not a JSON object".to_owned()));
     };
-    if info.get("_type").and_then(Value::as_str) == Some("playlist") {
+    if matches!(
+        info.get("_type").and_then(Value::as_str),
+        Some("playlist" | "multi_video")
+    ) {
         return Err(ProbeError::Playlist);
     }
     let formats = info
@@ -194,14 +205,14 @@ fn json_start(stdout: &str) -> Option<usize> {
     None
 }
 
-/// `isLiveStream`: `live_status` is there, not `null` and not `not_live` (`is_live`,
-/// `is_upcoming`, `post_live`, `was_live`).
+/// Whether the link plays as a live one (see the module): `live_status` is `is_live`,
+/// `is_upcoming` or `post_live`. `not_live`, `was_live`, `null`, no `live_status` at all and one
+/// this Kaleido does not know are a video to play from its start.
 fn is_live(info: &Map<String, Value>) -> bool {
-    match info.get("live_status") {
-        None | Some(Value::Null) => false,
-        Some(Value::String(status)) => status != "not_live",
-        Some(_) => true,
-    }
+    matches!(
+        info.get("live_status").and_then(Value::as_str),
+        Some("is_live" | "is_upcoming" | "post_live")
+    )
 }
 
 fn format_of(format: &Map<String, Value>) -> Option<StreamFormat> {
@@ -393,7 +404,9 @@ mod tests {
         ));
     }
 
-    /// The cases of the downloader's `isLiveStream` tests, and the other states yt-dlp knows.
+    /// The cases of the downloader's `isLiveStream` tests, and the other states yt-dlp knows:
+    /// live is a stream with no recording to play from its start (see the module), so a recording
+    /// of a past stream (`was_live`) is a video, unlike in the downloader.
     #[test]
     fn live_status_decides_live() {
         let live = |status: Value| {
@@ -401,10 +414,17 @@ mod tests {
             info["live_status"] = status;
             parse_info(&info.to_string()).unwrap().live
         };
-        assert!(!live(json!("not_live")));
-        assert!(!live(json!(null)));
-        for status in ["is_live", "is_upcoming", "post_live", "was_live"] {
+        for status in ["is_live", "is_upcoming", "post_live"] {
             assert!(live(json!(status)), "{status}");
+        }
+        for status in [
+            json!("not_live"),
+            json!("was_live"),
+            json!(null),
+            json!("some_future_state"),
+            json!(true),
+        ] {
+            assert!(!live(status.clone()), "{status}");
         }
         // No `live_status` at all.
         let info = parse_info(&json!({ "title": "t", "formats": [] }).to_string()).unwrap();
@@ -420,6 +440,13 @@ mod tests {
             "entries": [{ "_type": "url", "url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ" }]
         });
         assert_eq!(parse_info(&playlist.to_string()), Err(ProbeError::Playlist));
+        // Several videos under one link (a post with two clips) are no one video either.
+        let several = json!({
+            "_type": "multi_video",
+            "title": "Two clips",
+            "entries": [{ "title": "One" }, { "title": "Two" }]
+        });
+        assert_eq!(parse_info(&several.to_string()), Err(ProbeError::Playlist));
         // One video is `_type: video`, or has no `_type`.
         let video = json!({ "_type": "video", "title": "One" });
         assert_eq!(

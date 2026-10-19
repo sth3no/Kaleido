@@ -11,9 +11,10 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use crate::glass::{GlassController, GlassRect, GlassState};
 use crate::input::{self, InputEvent};
 use crate::paths::AppPaths;
-use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand};
+use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand, Request};
 use crate::plugins::{self, PluginError, PluginSettings, Plugins, PluginsState};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
+use crate::streams::{QualityError, StreamFormats, Streams};
 use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
 use crate::system::browsers::{self, Browser, Roots};
 use crate::system::diagnostics::{self, License, ToolVersions};
@@ -664,6 +665,42 @@ fn update_yt_dlp(app: &AppHandle) {
             status.error.as_deref().unwrap_or("the check failed")
         );
     }
+}
+
+// --- The qualities of a link (spec 8.5 points 2 and 3) ------------------------------------------
+
+/// What is known of the qualities of the link that plays: `yt-dlp -J` runs as soon as a link starts
+/// to load, and `stream:formats` tells every change. `None` when what plays is no http(s) link, or
+/// nothing plays. Reads what is kept only.
+#[tauri::command]
+pub fn stream_formats(streams: State<'_, Streams>) -> Option<StreamFormats> {
+    streams.current()
+}
+
+/// Plays the link that plays with the quality `format` (a `ytdl-format`; `None` for the default
+/// of the settings) from where it is: it is loaded again in place, and the playlist stays as it is
+/// (`streams::quality_commands`). `format` passes the check of the command line's `--format`
+/// (`Invalid` otherwise) and is kept for the link before the reload is queued, so that a restart
+/// of the core loads the link with it too; the UI hears the choice as `stream:formats`. The
+/// reload is one request on the engine, which reads the path, the place in the playlist and the
+/// position when it runs, and does nothing when another entry plays by then. Waits for nothing
+/// but the streams' state; on a blocking thread all the same, off the main thread.
+#[tauri::command]
+pub async fn player_set_quality(
+    app: AppHandle,
+    format: Option<String>,
+) -> Result<(), QualityError> {
+    on_blocking_thread(move || {
+        let (Some(streams), Some(engine)) = (app.try_state::<Streams>(), app.try_state::<Engine>())
+        else {
+            return Err(QualityError::NotAStream);
+        };
+        let reload = streams.choose(format.as_deref())?;
+        engine.request(Request::Call(Box::new(move |mpv| reload.run(mpv))));
+        Ok(())
+    })
+    .await
+    .unwrap_or(Err(QualityError::NotAStream))
 }
 
 // --- The managed tools (spec 6.6) ---------------------------------------------------------------

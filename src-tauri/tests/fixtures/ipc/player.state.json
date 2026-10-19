@@ -122,5 +122,6 @@
     }
   },
   { "changes": { "time-pos": 13 } },
-  { "changes": { "idle-active": true, "time-pos": null, "duration": null, "aid": null } }
+  { "changes": { "playlist-pos": 1, "path": "https://example.com/video/clip.mp4", "media-title": "Ukázka" } },
+  { "changes": { "idle-active": true, "time-pos": null, "duration": null, "aid": null, "path": null } }
 ]

@@ -1,0 +1,4 @@
+[
+  { "format": "bv*[height<=?1080]+ba/b[height<=?1080]" },
+  { "format": null }
+]
