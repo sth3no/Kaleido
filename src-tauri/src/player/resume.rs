@@ -1,7 +1,8 @@
 //! What a restart of the core takes from the old core to the new one (spec 6.3: after "Použít"
 //! the player goes on where it was): the playlist, which entry plays and where, the selected
-//! tracks, the subtitles added from files, and the pause. [`capture`] reads it from the old core
-//! and [`restore_commands`] gives the new one the commands that put it back.
+//! tracks, the subtitles added from files, the pause, and the volume and the speed of the player.
+//! [`capture`] reads it from the old core and [`restore_commands`] gives the new one the commands
+//! that put it back.
 
 use mpv_ffi::Mpv;
 use serde_json::Value;
@@ -34,6 +35,9 @@ pub struct ResumeState {
     /// change the volume). `None` where they could not be read.
     pub volume: Option<f64>,
     pub mute: Option<bool>,
+    /// The player's speed, as the volume: someone who watches at 1.5× goes on at 1.5× after Apply
+    /// (final review minor 4). `None` where it could not be read.
+    pub speed: Option<f64>,
 }
 
 /// One entry of the playlist.
@@ -130,6 +134,10 @@ pub(crate) fn capture_with_entry(
             .ok()
             .filter(|volume| volume.is_finite() && *volume >= 0.0),
         mute: mpv.get_flag("mute").ok(),
+        speed: mpv
+            .get_f64("speed")
+            .ok()
+            .filter(|speed| speed.is_finite() && *speed > 0.0),
         ..ResumeState::default()
     };
     // The time and the tracks are the playing file's. Only when the current entry is the one mpv
@@ -190,19 +198,23 @@ pub(crate) fn unsettled(state: &mut ResumeState, entry: Option<i64>, restored: O
         .clone_from(&restored.state.external_subs);
 }
 
-/// The commands that give a new (idle) core the volume and mute of `state`, its playlist, and
-/// play its current entry where it was, with its tracks and subtitles, paused or not. Every entry
-/// gets [`NO_FOLDER_PLAYLIST`] (Ruling R55) and its own options; the current one its start, its
-/// tracks and its subtitle files besides. Values are quoted as `load_commands` quotes them. For an
-/// empty playlist only the volume and mute; nothing plays where no entry was current.
+/// The commands that give a new (idle) core the volume, mute and speed of `state`, its playlist,
+/// and play its current entry where it was, with its tracks and subtitles, paused or not. Every
+/// entry gets [`NO_FOLDER_PLAYLIST`] (Ruling R55) and its own options; the current one its start,
+/// its tracks and its subtitle files besides. Values are quoted as `load_commands` quotes them.
+/// For an empty playlist only the volume, mute and speed; nothing plays where no entry was
+/// current.
 pub fn restore_commands(state: &ResumeState) -> Vec<Vec<String>> {
     let mut commands = Vec::new();
-    // Before any file loads, so that none starts at mpv.conf's volume.
+    // Before any file loads, so that none starts at mpv.conf's volume or speed.
     if let Some(volume) = state.volume {
         commands.push(args(&["set", "volume", &volume.to_string()]));
     }
     if let Some(mute) = state.mute {
         commands.push(args(&["set", "mute", yes_no(mute)]));
+    }
+    if let Some(speed) = state.speed {
+        commands.push(args(&["set", "speed", &speed.to_string()]));
     }
     if state.entries.is_empty() {
         return commands;
@@ -378,8 +390,8 @@ mod tests {
     }
 
     /// Two entries, the second (a link with a chosen quality) paused at 12.5 s with the second
-    /// subtitle track, the volume at 40.5 and muted: the volume first, then the playlist as it
-    /// was, and the second entry plays.
+    /// subtitle track, the volume at 40.5, muted, at 1.5×: the volume and the speed first, then
+    /// the playlist as it was, and the second entry plays.
     #[test]
     fn restore_commands_play_the_current_entry_with_its_options() {
         let state = ResumeState {
@@ -400,6 +412,7 @@ mod tests {
             external_subs: Vec::new(),
             volume: Some(40.5),
             mute: Some(true),
+            speed: Some(1.5),
         };
         // %N% is the length in bytes of the value that follows: 23 for the format.
         assert_eq!(
@@ -407,6 +420,7 @@ mod tests {
             [
                 text(&["set", "volume", "40.5"]),
                 text(&["set", "mute", "yes"]),
+                text(&["set", "speed", "1.5"]),
                 text(&["set", "pause", "yes"]),
                 text(&[
                     "loadfile",
@@ -450,6 +464,7 @@ mod tests {
             // Not read: not set.
             volume: None,
             mute: None,
+            speed: None,
         };
         let files = r"C:\Titulky\a, b.srt;C:\Titulky\díl\; 2.srt";
         assert_eq!(
@@ -486,18 +501,24 @@ mod tests {
         assert!(restore_commands(&idle).is_empty());
     }
 
-    /// The volume belongs to the player, not to a file: an idle player gets it back too.
+    /// The volume and the speed belong to the player, not to a file: an idle player gets them
+    /// back too.
     #[test]
     fn an_idle_player_gets_its_volume_back_and_nothing_else() {
         let idle = ResumeState {
             paused: true,
             volume: Some(37.0),
             mute: Some(false),
+            speed: Some(0.75),
             ..ResumeState::default()
         };
         assert_eq!(
             restore_commands(&idle),
-            [text(&["set", "volume", "37"]), text(&["set", "mute", "no"])]
+            [
+                text(&["set", "volume", "37"]),
+                text(&["set", "mute", "no"]),
+                text(&["set", "speed", "0.75"]),
+            ]
         );
     }
 
@@ -674,8 +695,9 @@ mod tests {
             .is_ok_and(|position| (position - seconds).abs() <= tolerance)
     }
 
-    /// [a, b, c] of 10 s each, b paused at 4 s, the volume at 40 and muted: the new core has the
-    /// same playlist, plays b, from 4 s, paused, as loud and as muted.
+    /// [a, b, c] of 10 s each, b paused at 4 s, the volume at 40, muted, at 1.5×: the new core has
+    /// the same playlist, plays b, from 4 s, paused, as loud, as muted and as fast. Needs a real
+    /// libmpv.
     #[test]
     fn restart_resumes_the_playlist_where_it_was() {
         let tmp = tempfile::tempdir().unwrap();
@@ -687,6 +709,7 @@ mod tests {
         engine.command(&["set", "pause", "yes"]);
         engine.command(&["set", "volume", "40"]);
         engine.command(&["set", "mute", "yes"]);
+        engine.command(&["set", "speed", "1.5"]);
         engine.command(&["playlist-play-index", "1"]);
         eventually(&engine, "b has loaded", |mpv| {
             mpv.get_f64("duration").is_ok()
@@ -708,6 +731,7 @@ mod tests {
         assert_eq!(engine.call(|mpv| mpv.get_string("path").unwrap()), path);
         assert_eq!(engine.call(|mpv| mpv.get_f64("volume").unwrap()), 40.0);
         assert!(engine.call(|mpv| mpv.get_flag("mute").unwrap()));
+        assert_eq!(engine.call(|mpv| mpv.get_f64("speed").unwrap()), 1.5);
     }
 
     /// With `keep-open` (Kaleido's mpv.conf) a clip played to its end stays loaded, paused on its
