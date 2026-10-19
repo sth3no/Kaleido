@@ -17,7 +17,7 @@ import {
   type SettingDescriptor,
 } from './descriptors';
 import { isLoaded, useSettingsStore, useSourcesLoaded } from './store';
-import { decodeKaleido, decodeMpv, encodeMpv, type FieldValue } from './values';
+import { decodeKaleido, decodeMpv, encodeKaleido, encodeMpv, type FieldValue } from './values';
 
 const ERROR_TYPES = ['notAllowed', 'invalid', 'io', 'unavailable'];
 
@@ -74,7 +74,7 @@ async function write(
     if (accept()) useSettingsStore.getState().setMpv(target.mpv, encoded);
   } else {
     // The patch holds this one setting; the answer is the settings as they are now.
-    const settings = await settingsSet(patchFor(target.kaleido, value));
+    const settings = await settingsSet(patchFor(target.kaleido, encodeKaleido(field, value)));
     if (accept()) useSettingsStore.getState().setKaleido(settings);
   }
 }

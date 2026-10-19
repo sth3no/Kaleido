@@ -1,11 +1,13 @@
 /**
  * The field that edits a setting, by the kind its descriptor names. The value is what `useSetting`
  * decoded for that kind (a boolean for a toggle, a number for a slider, a list of file names for
- * the shaders, a string for the rest); `onChange` hands the field's new value to it.
+ * the shaders, a string for the rest, `''` among them for "none" of the browser); `onChange` hands the
+ * field's new value to it.
  */
 
 import type { SettingDescriptor } from './descriptors';
 import AccentField from './fields/AccentField';
+import BrowserField from './fields/BrowserField';
 import ColorField from './fields/ColorField';
 import DeviceField from './fields/DeviceField';
 import type { FieldProps } from './fields/FieldProps';
@@ -28,7 +30,14 @@ export default function SettingField({ descriptor, value, ...common }: SettingFi
     case 'toggle':
       return <Toggle {...common} value={asBoolean(value)} />;
     case 'select':
-      return <Select {...common} value={asString(value)} options={field.options} />;
+      return (
+        <Select
+          {...common}
+          value={asString(value)}
+          options={field.options}
+          customLabelKey={field.customLabelKey}
+        />
+      );
     case 'slider':
       return (
         <Slider
@@ -53,5 +62,7 @@ export default function SettingField({ descriptor, value, ...common }: SettingFi
       return <DeviceField {...common} value={asString(value)} />;
     case 'shaderList':
       return <ShaderListField {...common} value={asList(value)} />;
+    case 'browser':
+      return <BrowserField {...common} value={asString(value)} />;
   }
 }

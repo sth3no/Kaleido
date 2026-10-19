@@ -3,13 +3,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../../i18n';
+import type { Browser } from '../../ipc/types';
 import AccentField from './AccentField';
+import BrowserField from './BrowserField';
 import ColorField from './ColorField';
 import DeviceField from './DeviceField';
 import Dropdown, { type DropdownProps } from './Dropdown';
 import type { FieldProps } from './FieldProps';
 import FontField from './FontField';
 import LangListField from './LangListField';
+import Select from './Select';
 import ShaderListField from './ShaderListField';
 import Slider, { SAVE_THROTTLE_MS, type SliderProps } from './Slider';
 import Toggle from './Toggle';
@@ -206,6 +209,54 @@ describe('Dropdown', () => {
   test('a disabled dropdown cannot be opened', () => {
     renderDropdown({ disabled: true });
     expect((trigger() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  describe('with notes', () => {
+    const NOTED = [
+      { value: 'a', label: 'Alpha' },
+      { value: 'b', label: 'Beta', note: 'Be careful with this one.' },
+      { value: 'c', label: 'Gamma', note: 'Nothing was found.', disabled: true },
+    ];
+    /** The sentence an option is described by, `null` where it has none. */
+    const noteOf = (name: string): string | null => {
+      const id = option(name).getAttribute('aria-describedby');
+      return id === null ? null : (document.getElementById(id)?.textContent ?? null);
+    };
+
+    test('an option is named by its label and described by its sentence', () => {
+      renderDropdown({ options: NOTED });
+      fireEvent.click(trigger());
+
+      // The name is the label alone: the sentence does not become part of it.
+      expect(noteOf('Beta')).toBe('Be careful with this one.');
+      expect(noteOf('Gamma')).toBe('Nothing was found.');
+      expect(noteOf('Alpha')).toBeNull();
+      expect(option('Alpha').hasAttribute('aria-labelledby')).toBe(false);
+      // The button still says what is chosen, with the label only.
+      expect(trigger().textContent).toBe('Beta');
+    });
+
+    test('an option that is disabled is read, can be reached with the arrows, and chooses nothing', () => {
+      const { onChange } = renderDropdown({ options: NOTED });
+      fireEvent.click(trigger());
+
+      expect(option('Gamma').getAttribute('aria-disabled')).toBe('true');
+      expect(option('Alpha').hasAttribute('aria-disabled')).toBe(false);
+      // The arrows reach it, so that its sentence can be read.
+      expect(fireEvent.keyDown(option('Beta'), { key: 'ArrowDown' })).toBe(false);
+      expect(document.activeElement).toBe(option('Gamma'));
+
+      // A press, and Enter or Space: nothing is chosen, and the list stays open.
+      fireEvent.click(option('Gamma'), { detail: 1 });
+      fireEvent.click(option('Gamma'), { detail: 0 });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole('listbox')).toBeTruthy();
+
+      // The others still choose.
+      fireEvent.click(option('Alpha'));
+      expect(onChange).toHaveBeenCalledWith('a');
+      expect(screen.queryByRole('listbox')).toBeNull();
+    });
   });
 
   describe('with a filter', () => {
@@ -802,6 +853,300 @@ describe('DeviceField', () => {
       </>,
     );
     expect((await screen.findByRole('alert')).textContent).toContain('The list could not be read.');
+  });
+});
+
+describe('Select with a value of its own', () => {
+  const OPTIONS = [
+    { value: '', labelKey: 'settings.items.streamQuality.options.best' },
+    { value: 'p720', labelKey: 'settings.items.streamQuality.options.p720' },
+  ];
+  const CUSTOM = 'settings.items.streamQuality.custom';
+
+  function renderSelect(value: string, customLabelKey?: string) {
+    const onChange = vi.fn();
+    render(
+      <>
+        <span id="label">Quality</span>
+        <Select
+          id="quality"
+          labelId="label"
+          value={value}
+          onChange={onChange}
+          options={OPTIONS}
+          customLabelKey={customLabelKey}
+        />
+      </>,
+    );
+    return onChange;
+  }
+  const button = () => screen.getByRole('button', { name: /^Quality/ });
+  const names = () => screen.getAllByRole('option').map((each) => each.textContent);
+
+  test('a value that is none of the options is listed as custom, chosen, and an option replaces it', () => {
+    const onChange = renderSelect('bestvideo[height<=360]+bestaudio', CUSTOM);
+    expect(button().textContent).toBe('Custom (mpv.conf)');
+
+    fireEvent.click(button());
+    expect(names()).toEqual(['Best', '720p', 'Custom (mpv.conf)']);
+    expect(screen.getByRole('option', { name: 'Custom (mpv.conf)' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('option', { name: 'Best' }).getAttribute('aria-selected')).toBe('false');
+
+    // Choosing it again changes nothing; choosing a preset saves that preset.
+    fireEvent.click(screen.getByRole('option', { name: 'Custom (mpv.conf)' }));
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(button());
+    fireEvent.click(screen.getByRole('option', { name: '720p' }));
+    expect(onChange).toHaveBeenCalledWith('p720');
+  });
+
+  test('a value that is one of the options, or empty, has no custom entry', () => {
+    renderSelect('p720', CUSTOM);
+    expect(button().textContent).toBe('720p');
+    fireEvent.click(button());
+    expect(names()).toEqual(['Best', '720p']);
+  });
+
+  test('the empty value is the option for it, not a custom one', () => {
+    renderSelect('', CUSTOM);
+    expect(button().textContent).toBe('Best');
+    fireEvent.click(button());
+    expect(names()).toEqual(['Best', '720p']);
+  });
+
+  test('without a name for it a value of its own is shown as it is, as before', () => {
+    renderSelect('weird');
+    expect(button().textContent).toBe('weird');
+    fireEvent.click(button());
+    expect(names()).toEqual(['Best', '720p']);
+  });
+});
+
+describe('BrowserField', () => {
+  const browser = (
+    id: string,
+    label: string,
+    spec: string,
+    warning: Browser['warning'] = null,
+  ): Browser => ({ id, label, spec, warning });
+  const FIREFOX = browser('firefox', 'Firefox', 'firefox');
+  const EDGE = browser('edge', 'Microsoft Edge', 'edge', 'chromiumCookies');
+  const CHROME = browser('chrome', 'Google Chrome', 'chrome', 'chromiumCookies');
+  const LIBREWOLF = browser('librewolf', 'LibreWolf', 'firefox:abc123.default-release');
+  const ZEN = browser('zen', 'Zen', '', 'noProfile');
+  /** As Rust lists them: Firefox first, the Chromium browsers, then the forks of Firefox. */
+  const FOUND = [FIREFOX, EDGE, CHROME, LIBREWOLF, ZEN];
+
+  const CHROMIUM_SENTENCE =
+    'yt-dlp usually cannot read the cookies of browsers based on Chromium on Windows, and the link then fails as a whole. Firefox works.';
+  const NO_PROFILE_SENTENCE = 'No profile with cookies was found.';
+  const GONE_SENTENCE =
+    'This browser or profile was not found on this PC. The setting stays until you change it.';
+
+  async function renderBrowser(value: string, browsers: Browser[] | 'failing' = FOUND) {
+    if (browsers === 'failing') {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.mocked(invoke).mockImplementation((() => Promise.reject('no disk')) as unknown as typeof invoke);
+    } else {
+      rust({ system_browsers: browsers });
+    }
+    const onChange = vi.fn();
+    render(
+      <>
+        <span id="label">Cookies</span>
+        <BrowserField id="cookies" labelId="label" value={value} onChange={onChange} describedBy="hint" />
+      </>,
+    );
+    return onChange;
+  }
+  const button = () => screen.getByRole('button', { name: /^Cookies/ }) as HTMLButtonElement;
+  /** The list has been read: the button can be pressed. */
+  const ready = () =>
+    waitFor(() => {
+      expect(button().disabled).toBe(false);
+    });
+  /** The names of the options, top to bottom. */
+  const names = () =>
+    screen.getAllByRole('option').map((each) => {
+      const named = each.getAttribute('aria-labelledby');
+      return named === null ? each.textContent : document.getElementById(named)?.textContent;
+    });
+  /** The sentence an option is described by, `null` where it has none. */
+  const noteOf = (name: string): string | null => {
+    const id = screen.getByRole('option', { name }).getAttribute('aria-describedby');
+    return id === null ? null : (document.getElementById(id)?.textContent ?? null);
+  };
+  const opened = () => {
+    fireEvent.click(button());
+  };
+
+  test('the cookies field lists the browsers Rust found with their warnings', async () => {
+    const onChange = await renderBrowser('');
+    await ready();
+    expect(button().textContent).toBe('Do not use');
+
+    opened();
+    // "Do not use", the browsers whose cookies work, the Chromium ones, those with no profile: Rust's
+    // order within each group.
+    expect(names()).toEqual([
+      'Do not use',
+      'Firefox',
+      'LibreWolf',
+      'Microsoft Edge',
+      'Google Chrome',
+      'Zen',
+    ]);
+    expect(noteOf('Firefox')).toBeNull();
+    expect(noteOf('LibreWolf')).toBeNull();
+    expect(noteOf('Microsoft Edge')).toBe(CHROMIUM_SENTENCE);
+    expect(noteOf('Google Chrome')).toBe(CHROMIUM_SENTENCE);
+    expect(noteOf('Zen')).toBe(NO_PROFILE_SENTENCE);
+
+    // A browser is saved as the spec Rust gave, a fork of Firefox with its profile.
+    fireEvent.click(screen.getByRole('option', { name: 'LibreWolf' }));
+    expect(onChange).toHaveBeenLastCalledWith('firefox:abc123.default-release');
+    opened();
+    fireEvent.click(screen.getByRole('option', { name: 'Firefox' }));
+    expect(onChange).toHaveBeenLastCalledWith('firefox');
+    // The warning does not forbid it: the user may still choose a Chromium browser.
+    opened();
+    fireEvent.click(screen.getByRole('option', { name: 'Microsoft Edge' }));
+    expect(onChange).toHaveBeenLastCalledWith('edge');
+  });
+
+  test('"Do not use" is the empty value, which Settings stores as none', async () => {
+    const onChange = await renderBrowser('firefox');
+    await ready();
+    expect(button().textContent).toBe('Firefox');
+
+    opened();
+    expect(screen.getByRole('option', { name: 'Firefox' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('option', { name: 'Do not use' }));
+    expect(onChange).toHaveBeenCalledWith('');
+  });
+
+  test('a browser with no profile is shown with its sentence and is never saved', async () => {
+    const onChange = await renderBrowser('');
+    await ready();
+    opened();
+
+    const zen = screen.getByRole('option', { name: 'Zen' });
+    expect(zen.getAttribute('aria-disabled')).toBe('true');
+    // The empty spec of the entry is not the value of "Do not use" either: pressing it does nothing.
+    fireEvent.click(zen, { detail: 1 });
+    fireEvent.click(zen, { detail: 0 });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    // Nothing but the saved value is marked chosen.
+    expect(screen.getByRole('option', { name: 'Do not use' }).getAttribute('aria-selected')).toBe('true');
+    expect(zen.getAttribute('aria-selected')).toBe('false');
+  });
+
+  test('the warning of the browser that is chosen stays under the field', async () => {
+    await renderBrowser('edge');
+    await ready();
+    expect(button().textContent).toBe('Microsoft Edge');
+
+    // With the list closed, the sentence is read once, under the field, and describes the button.
+    const note = screen.getByText(CHROMIUM_SENTENCE);
+    expect(note.tagName).toBe('P');
+    expect((button().getAttribute('aria-describedby') ?? '').split(' ')).toEqual(['hint', note.id]);
+
+    // A browser that works has nothing to say.
+    cleanup();
+    await renderBrowser('firefox');
+    await ready();
+    expect(screen.queryByText(CHROMIUM_SENTENCE)).toBeNull();
+    expect(button().getAttribute('aria-describedby')).toBe('hint');
+  });
+
+  test('a saved choice that no browser has is shown as itself with a note and is not rewritten', async () => {
+    const gone = String.raw`firefox:C:\Users\me\AppData\Roaming\Mozilla\Firefox\Profiles\gone.default`;
+    const onChange = await renderBrowser(gone);
+    await ready();
+    expect(button().textContent).toBe(gone);
+    expect(screen.getByText(GONE_SENTENCE).tagName).toBe('P');
+
+    opened();
+    // Listed as a choice that is chosen, with the note, among the real ones.
+    expect(names()).toContain(gone);
+    expect(screen.getByRole('option', { name: gone }).getAttribute('aria-selected')).toBe('true');
+    expect(noteOf(gone)).toBe(GONE_SENTENCE);
+    expect(onChange).not.toHaveBeenCalled();
+
+    // It stays until the user changes it.
+    fireEvent.click(screen.getByRole('option', { name: 'Firefox' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('firefox');
+  });
+
+  test('a PC with no browser that can be used says so, and "Do not use" is all there is', async () => {
+    await renderBrowser('', []);
+    await ready();
+    expect(screen.getByText('No browser was found whose cookies can be used.')).toBeTruthy();
+    opened();
+    expect(names()).toEqual(['Do not use']);
+  });
+
+  test('the field is not for changing while the list is on its way', async () => {
+    vi.mocked(invoke).mockImplementation((() => new Promise(() => undefined)) as unknown as typeof invoke);
+    render(
+      <>
+        <span id="label">Cookies</span>
+        <BrowserField id="cookies" labelId="label" value="edge" onChange={() => undefined} />
+      </>,
+    );
+    expect(button().disabled).toBe(true);
+    // What is saved is shown meanwhile, as it is.
+    expect(button().textContent).toBe('edge');
+    expect(screen.queryByText(GONE_SENTENCE)).toBeNull();
+  });
+
+  test('a list that cannot be read is said, and "Do not use" still gets out of a choice', async () => {
+    const onChange = await renderBrowser('edge', 'failing');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('The list could not be read.');
+    // The saved choice is shown as it is, and not called gone: nothing is known of the browsers.
+    expect(button().textContent).toBe('edge');
+    expect(screen.queryByText(GONE_SENTENCE)).toBeNull();
+    expect(button().disabled).toBe(false);
+
+    opened();
+    expect(names()).toEqual(['Do not use']);
+    fireEvent.click(screen.getByRole('option', { name: 'Do not use' }));
+    expect(onChange).toHaveBeenCalledWith('');
+
+    // Read again: the list comes.
+    rust({ system_browsers: FOUND });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+    await ready();
+    expect(screen.getByText(CHROMIUM_SENTENCE)).toBeTruthy();
+  });
+
+  test('an answer that is no list is a failure too', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    rust({ system_browsers: { not: 'a list' } });
+    render(
+      <>
+        <span id="label">Cookies</span>
+        <BrowserField id="cookies" labelId="label" value="" onChange={() => undefined} />
+      </>,
+    );
+    expect((await screen.findByRole('alert')).textContent).toContain('The list could not be read.');
+  });
+
+  test('in Czech', async () => {
+    setLanguage('cs');
+    await renderBrowser('');
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: /^Cookies/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(button().textContent).toBe('Nepoužívat');
+    opened();
+    expect(noteOf('Zen')).toBe('Profil s cookies se nenašel.');
   });
 });
 

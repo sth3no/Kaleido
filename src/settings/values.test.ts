@@ -8,6 +8,7 @@ import {
   decimalsOf,
   decodeKaleido,
   decodeMpv,
+  encodeKaleido,
   encodeMpv,
   formatShaders,
   isColor,
@@ -99,6 +100,23 @@ describe('mpv values and field values', () => {
     expect(decodeKaleido(SLIDER, undefined)).toBe(10);
     expect(decodeKaleido({ kind: 'select', options: [] }, 'append')).toBe('append');
     expect(decodeKaleido({ kind: 'select', options: [] }, undefined)).toBe('');
+  });
+
+  test('the browser for cookies is its spec, and none (null) is the empty text and back', () => {
+    const browser: FieldKind = { kind: 'browser' };
+    expect(decodeKaleido(browser, 'firefox')).toBe('firefox');
+    expect(decodeKaleido(browser, 'firefox:abc.default-release')).toBe('firefox:abc.default-release');
+    // `null` is what Settings has for no browser: the field's empty text.
+    expect(decodeKaleido(browser, null)).toBe('');
+    expect(decodeKaleido(browser, undefined)).toBe('');
+    // A merge patch takes the key out with `null`; the spec goes as it is.
+    expect(encodeKaleido(browser, '')).toBeNull();
+    expect(encodeKaleido(browser, 'edge')).toBe('edge');
+    // The other fields pass through as they are, the empty text of a select included.
+    expect(encodeKaleido({ kind: 'select', options: [] }, '')).toBe('');
+    expect(encodeKaleido({ kind: 'select', options: [] }, 'append')).toBe('append');
+    expect(encodeKaleido(YES_NO, true)).toBe(true);
+    expect(encodeKaleido(SLIDER, 40)).toBe(40);
   });
 });
 

@@ -10,10 +10,12 @@
  * the options' `labelKey` and a slider's `unitKey`), in both locale files.
  *
  * Shortcuts and About have no descriptors: they are lists of bindings and of facts, not rows of
- * settings (sections/Shortcuts.tsx, sections/About.tsx).
+ * settings (sections/Shortcuts.tsx, sections/About.tsx). Updates has one (the channel of yt-dlp) between
+ * rows of its own that show the tools (sections/Updates.tsx).
  */
 
 import type { SettingsPatch } from '../ipc/types';
+import { AUDIO_ONLY_SELECTOR, heightSelector } from '../streams/quality';
 
 export type SectionId =
   | 'playback'
@@ -22,6 +24,7 @@ export type SectionId =
   | 'video'
   | 'appearance'
   | 'shortcuts'
+  | 'updates'
   | 'about';
 
 /** The sections in the order the page lists them. */
@@ -32,6 +35,7 @@ export const SECTIONS: readonly SectionId[] = [
   'video',
   'appearance',
   'shortcuts',
+  'updates',
   'about',
 ];
 
@@ -44,7 +48,16 @@ export interface SelectOption {
 export type FieldKind =
   /** `on` and `off` are the words mpv.conf has for the two states (`yes` and `no` where left out). */
   | { kind: 'toggle'; on?: string; off?: string }
-  | { kind: 'select'; options: readonly SelectOption[] }
+  | {
+      kind: 'select';
+      options: readonly SelectOption[];
+      /**
+       * The text of a value that is none of the options (the key of the text): the field then lists it
+       * as one more choice, the one that is chosen, under this name. Choosing another option replaces it.
+       * Left out, such a value is shown as it is.
+       */
+      customLabelKey?: string;
+    }
   | {
       kind: 'slider';
       min: number;
@@ -65,7 +78,9 @@ export type FieldKind =
   /** An audio output out of mpv's. */
   | { kind: 'device' }
   /** Files of the shaders folder. */
-  | { kind: 'shaderList' };
+  | { kind: 'shaderList' }
+  /** The browser whose cookies yt-dlp takes, out of the ones Rust finds on this PC; `''` for none. */
+  | { kind: 'browser' };
 
 /** Where a setting is kept: an mpv option, or a dotted path into Kaleido's settings. */
 export type SettingTarget = { mpv: string } | { kaleido: string };
@@ -153,6 +168,39 @@ export const DESCRIPTORS: readonly SettingDescriptor[] = [
       ],
     },
     target: { kaleido: 'playback.openWhilePlaying' },
+  },
+  {
+    // The default quality of links is mpv's `ytdl-format`, which `ytdl_hook` reads for every link it opens
+    // (plan decision 10). The presets are Rust's `STREAM_QUALITY_PRESETS` in its order, `''` is yt-dlp's
+    // own default; a test reads them from mpv_keys.rs.
+    id: 'ytdl-format',
+    section: 'playback',
+    ...texts('streamQuality'),
+    hintKey: 'settings.items.streamQuality.hint',
+    field: {
+      kind: 'select',
+      options: [
+        option('streamQuality', '', 'best'),
+        option('streamQuality', heightSelector(2160), 'p2160'),
+        option('streamQuality', heightSelector(1440), 'p1440'),
+        option('streamQuality', heightSelector(1080), 'p1080'),
+        option('streamQuality', heightSelector(720), 'p720'),
+        option('streamQuality', heightSelector(480), 'p480'),
+        option('streamQuality', AUDIO_ONLY_SELECTOR, 'audio'),
+      ],
+      // A `ytdl-format` the user wrote in mpv.conf by hand.
+      customLabelKey: 'settings.items.streamQuality.custom',
+    },
+    target: { mpv: 'ytdl-format' },
+  },
+  {
+    // The browser whose cookies yt-dlp takes for links (plan decision 13): `BROWSER` or `BROWSER:PROFILE`.
+    id: 'playback.cookiesFromBrowser',
+    section: 'playback',
+    ...texts('cookiesFromBrowser'),
+    hintKey: 'settings.items.cookiesFromBrowser.hint',
+    field: { kind: 'browser' },
+    target: { kaleido: 'playback.cookiesFromBrowser' },
   },
 
   // Subtitles
@@ -411,6 +459,22 @@ export const DESCRIPTORS: readonly SettingDescriptor[] = [
     ...texts('uiScale'),
     field: { kind: 'slider', min: 0.9, max: 1.5, step: 0.05, unitKey: PERCENT, percent: true },
     target: { kaleido: 'appearance.uiScale' },
+  },
+
+  // Updates (Kaleido's settings.json). The tools themselves are rows of the section's own, with the
+  // channel between them; the app's channel comes with the updater (M4). The words are Rust's `Channel`.
+  {
+    // The search finds the whole section by it, so its keywords name the tools it shows (Deno and the
+    // libmpv have no setting of their own).
+    id: 'updates.ytdlpChannel',
+    section: 'updates',
+    ...texts('ytdlpChannel'),
+    hintKey: 'settings.items.ytdlpChannel.hint',
+    field: {
+      kind: 'select',
+      options: [option('ytdlpChannel', 'stable', 'stable'), option('ytdlpChannel', 'nightly', 'nightly')],
+    },
+    target: { kaleido: 'updates.ytdlpChannel' },
   },
 ];
 

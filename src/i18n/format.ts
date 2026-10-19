@@ -35,6 +35,33 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions):
   return new Intl.NumberFormat(currentLocale(), options).format(value);
 }
 
+/** The units a past time is told in, the biggest first, each with the seconds it holds. */
+const RELATIVE_UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
+  ['year', 365 * 24 * 3600],
+  ['month', 30 * 24 * 3600],
+  ['week', 7 * 24 * 3600],
+  ['day', 24 * 3600],
+  ['hour', 3600],
+  ['minute', 60],
+];
+
+/**
+ * How long ago `from` was, in the current language: `3 hours ago`, `yesterday`, `před 3 hodinami`.
+ * The biggest unit it fills, cut off (never rounded up, so that it never claims longer than it has
+ * been); under a minute is `now`, and so is a time ahead of `now` (a clock that is a little off).
+ * `from` can be an RFC 3339 text, as Rust writes its times. A time that is none is an empty string.
+ */
+export function formatRelativeTime(from: Date | number | string, now: number = Date.now()): string {
+  const time = new Date(from).getTime();
+  if (Number.isNaN(time)) return '';
+  const ago = Math.max(0, Math.trunc((now - time) / 1000));
+  const formatter = new Intl.RelativeTimeFormat(currentLocale(), { numeric: 'auto' });
+  for (const [unit, size] of RELATIVE_UNITS) {
+    if (ago >= size) return formatter.format(-Math.trunc(ago / size), unit);
+  }
+  return formatter.format(0, 'second');
+}
+
 /**
  * A date in the current language, `17. 10. 2026` or `Oct 17, 2026` by default. `options` choose
  * another form (`{ dateStyle: 'long', timeStyle: 'short' }`). A date that is not one is an empty

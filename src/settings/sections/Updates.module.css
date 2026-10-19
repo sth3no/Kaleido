@@ -1,0 +1,104 @@
+/*
+ * The Updates section (Updates.tsx): a row for each tool and for libmpv, laid out like the rows of the
+ * other sections (SettingRow.module.css), so that the channel row between them is one of the family. They
+ * sit on the settings page's glass card, so the text colour is the glass' own and the quieter tones are
+ * that colour at a lower strength.
+ */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  align-items: center;
+  gap: var(--k-space-s) var(--k-space-xl);
+  padding: var(--k-space-m) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--k-font-size-m);
+}
+
+.hint {
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* Version, last check and state: facts about the tool. */
+.line {
+  font-size: var(--k-font-size-s);
+  overflow-wrap: anywhere;
+}
+
+/* Rust's reason a check failed, after the state; it can be long, so it wraps. */
+.detail {
+  display: block;
+  margin-top: 2px;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--k-space-xs);
+  min-width: 0;
+}
+
+.value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.button {
+  padding: var(--k-space-s) var(--k-space-l);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.button:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--k-color-selected);
+}
+
+/* While a check runs the button keeps the focus: aria-disabled, not disabled. */
+.button:disabled,
+.button[aria-disabled='true'] {
+  opacity: 0.5;
+}
+
+/* The text keeps the glass' text colour (the danger red is thin on a light glass); the bar is red. */
+.error {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+/* High contrast: system colours. */
+@media (forced-colors: active) {
+  .button {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .error {
+    border-inline-start-color: CanvasText;
+  }
+}

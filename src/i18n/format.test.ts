@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { formatDate, formatNumber, formatTime } from './format';
+import { formatDate, formatNumber, formatRelativeTime, formatTime } from './format';
 import { initI18n, setLanguage } from './index';
 
 /** Intl separates with no-break and narrow no-break spaces (both are `\s`); the tests write a plain one. */
@@ -123,5 +123,48 @@ describe('formatDate', () => {
     expect(formatDate(new Date(Number.NaN))).toBe('');
     expect(formatDate(Number.NaN)).toBe('');
     expect(formatDate(1e20)).toBe('');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  const now = Date.parse('2026-10-18T12:00:00Z');
+  const before = (seconds: number): string => new Date(now - seconds * 1000).toISOString();
+
+  test('tells how long ago in the language, from a time as Rust writes it', () => {
+    setLanguage('en');
+    expect(formatRelativeTime(before(3 * 3600), now)).toBe('3 hours ago');
+    expect(formatRelativeTime(before(5 * 60), now)).toBe('5 minutes ago');
+    expect(formatRelativeTime(before(2 * 86400), now)).toBe('2 days ago');
+    expect(formatRelativeTime(before(86400), now)).toBe('yesterday');
+    setLanguage('cs');
+    const czech = formatRelativeTime(before(3 * 3600), now);
+    expect(czech).toContain('před');
+    expect(czech).toContain('3');
+    setLanguage('en');
+  });
+
+  test('keeps to the biggest unit it fills, cut off and not rounded up', () => {
+    setLanguage('en');
+    // 119 minutes are one hour and not yet two.
+    expect(formatRelativeTime(before(119 * 60), now)).toBe('1 hour ago');
+    expect(formatRelativeTime(before(13 * 86400), now)).toBe('last week');
+    expect(formatRelativeTime(before(400 * 86400), now)).toBe('last year');
+  });
+
+  test('under a minute, and a time ahead of now, are now', () => {
+    setLanguage('en');
+    expect(formatRelativeTime(before(0), now)).toBe('now');
+    expect(formatRelativeTime(before(59), now)).toBe('now');
+    // The clock of the other side is a little ahead.
+    expect(formatRelativeTime(before(-30), now)).toBe('now');
+    expect(formatRelativeTime(before(-3 * 3600), now)).toBe('now');
+  });
+
+  test('takes a Date and a number of milliseconds too, and a time that is none is empty', () => {
+    setLanguage('en');
+    expect(formatRelativeTime(new Date(now - 2 * 3600 * 1000), now)).toBe('2 hours ago');
+    expect(formatRelativeTime(now - 2 * 3600 * 1000, now)).toBe('2 hours ago');
+    expect(formatRelativeTime('not a time', now)).toBe('');
+    expect(formatRelativeTime(Number.NaN, now)).toBe('');
   });
 });

@@ -117,6 +117,30 @@
   opacity: 0.72;
 }
 
+/* The sentence under the name of an option (it wraps), and an option that is read and not chosen. */
+.optionNote {
+  display: block;
+  font-size: var(--k-font-size-xs);
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+.optionOff[aria-disabled='true'] {
+  opacity: 0.6;
+}
+
+.optionOff[aria-disabled='true']:hover {
+  background: transparent;
+}
+
+/* A sentence under a field that says what to know about the value it shows. */
+.note {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  overflow-wrap: anywhere;
+}
+
 /* A list the field needs could not be read: the message, and a button to read it again. */
 .listError {
   display: flex;

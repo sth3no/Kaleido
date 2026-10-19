@@ -239,6 +239,7 @@
       "video": "Video",
       "appearance": "Appearance",
       "shortcuts": "Shortcuts",
+      "updates": "Updates",
       "about": "About"
     },
     "loading": "Loading…",
@@ -286,6 +287,10 @@
         "kaleido": "Kaleido",
         "custom": "My color",
         "colour": "Accent color code"
+      },
+      "browser": {
+        "none": "Do not use",
+        "gone": "This browser or profile was not found on this PC. The setting stays until you change it."
       }
     },
     "items": {
@@ -313,6 +318,26 @@
           "replace": "Replace what is playing",
           "append": "Add to the playlist"
         }
+      },
+      "streamQuality": {
+        "label": "Default stream quality",
+        "keywords": "quality, resolution, 4k, 1080p, 720p, bandwidth, data, links, streams, web, online, youtube, yt-dlp",
+        "hint": "Applies to links opened from now on.",
+        "custom": "Custom (mpv.conf)",
+        "options": {
+          "best": "Best",
+          "p2160": "2160p",
+          "p1440": "1440p",
+          "p1080": "1080p",
+          "p720": "720p",
+          "p480": "480p",
+          "audio": "Audio only"
+        }
+      },
+      "cookiesFromBrowser": {
+        "label": "Cookies from a browser",
+        "keywords": "cookies, browser, sign in, login, account, session, age, firefox, chrome, edge, yt-dlp, links, private videos",
+        "hint": "yt-dlp takes the cookies of this browser for links, so that it can play what you can watch when you are signed in."
       },
       "subFont": {
         "label": "Subtitle font",
@@ -460,6 +485,15 @@
       "uiScale": {
         "label": "Interface scale",
         "keywords": "scale, size, zoom, dpi, bigger, smaller, interface, ui"
+      },
+      "ytdlpChannel": {
+        "label": "yt-dlp release channel",
+        "keywords": "yt-dlp, ytdlp, deno, libmpv, nightly, stable, channel, release, update, version, tools, download",
+        "hint": "Stable is the tested release. Nightly gets yt-dlp’s fixes for websites sooner, but is tested less. Deno always follows its stable releases.",
+        "options": {
+          "stable": "Stable",
+          "nightly": "Nightly"
+        }
       }
     },
     "appearance": {
@@ -505,6 +539,31 @@
         "generic": "The shortcut could not be changed."
       }
     },
+    "updates": {
+      "tools": {
+        "ytDlp": "yt-dlp",
+        "deno": "Deno"
+      },
+      "purpose": {
+        "ytDlp": "Opens web links. Kaleido looks for a new version every day.",
+        "deno": "Lets yt-dlp read YouTube. Kaleido looks for a new version every week."
+      },
+      "version": "Version {{version}}",
+      "notInstalled": "Not installed",
+      "checked": "Checked {{when}}",
+      "neverChecked": "Not checked yet",
+      "state": {
+        "missing": "Not downloaded yet",
+        "checking": "Checking for a new version…",
+        "downloading": "Downloading a new version…",
+        "ready": "Up to date",
+        "failed": "The last check failed"
+      },
+      "check": "Check now",
+      "checkFailed": "The check could not be started.",
+      "unreadable": "The state of this tool could not be read.",
+      "libmpvHint": "The video engine Kaleido plays with. It comes with Kaleido and changes with its releases."
+    },
     "about": {
       "versions": {
         "kaleido": "Kaleido",
@@ -512,6 +571,7 @@
         "ffmpeg": "FFmpeg"
       },
       "unknown": "Unknown",
+      "downloading": "Downloading…",
       "screenshotNote": "A screenshot that a plugin takes with the screenshot command includes the glass. Screenshots from Kaleido’s own shortcuts do not.",
       "openLogs": "Open logs folder",
       "copyDiagnostics": "Copy diagnostics",

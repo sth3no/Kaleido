@@ -1,11 +1,11 @@
 /**
  * The settings (spec 8.10), a page beside the docked sidebar:
  *
- * - A list of the sections (Playback, Subtitles, Audio, Video, Appearance, Shortcuts, About) and a
- *   search field. The list is navigated with the arrows (Home and End too; one item is the one Tab
- *   reaches, the one that had the focus last). Enter or Space opens a section, and the focus goes
- *   to its heading, so that a keyboard or screen reader user starts reading at the section. The keys
- *   it handles say so with `preventDefault`, so that mpv does not also get them.
+ * - A list of the sections (Playback, Subtitles, Audio, Video, Appearance, Shortcuts, Updates,
+ *   About) and a search field. The list is navigated with the arrows (Home and End too; one item is
+ *   the one Tab reaches, the one that had the focus last). Enter or Space opens a section, and the
+ *   focus goes to its heading, so that a keyboard or screen reader user starts reading at the
+ *   section. The keys it handles say so with `preventDefault`, so that mpv does not also get them.
  * - The section that is open, as rows (`SettingRow`) on a glass card. Every setting is saved as soon
  *   as it is changed, and what Rust refuses is said at the setting (`useSetting`).
  * - The search (`searchSettings`) replaces the section with the settings that match, grouped under
@@ -21,8 +21,10 @@
  * missing and offers to read again. The search counts and enters only the rows that are drawn.
  *
  * Appearance has rows like the others (and a preview above them), Shortcuts and About are lists of
- * their own; `BODIES` is where a section's body is named. The search finds the settings of
- * Appearance (the language among them) with the rest; Shortcuts and About have a search of their own.
+ * their own, and Updates has rows of its own for the tools around its one setting; `BODIES` is where a
+ * section's body is named. The search finds the settings of Appearance (the language among them) and
+ * the channel of yt-dlp (which brings the whole of Updates) with the rest; Shortcuts and About have a
+ * search of their own.
  *
  * The top of a docked page is the window's title bar (a drag strip over it), so nothing of the page
  * is there. While a video plays, the mini player is in the corner and the shell clips the page
@@ -57,6 +59,7 @@ import Playback from './sections/Playback';
 import type { SectionProps } from './sections/SettingsList';
 import Shortcuts from './sections/Shortcuts';
 import Subtitles from './sections/Subtitles';
+import Updates from './sections/Updates';
 import Video from './sections/Video';
 import styles from './SettingsPage.module.css';
 import { isLoaded, useSettingsStore, useSourcesLoaded } from './store';
@@ -72,6 +75,7 @@ const BODIES: Partial<Record<SectionId, ComponentType<SectionProps>>> = {
   video: Video,
   appearance: Appearance,
   shortcuts: Shortcuts,
+  updates: Updates,
   about: About,
 };
 

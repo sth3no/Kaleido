@@ -80,4 +80,45 @@ describe('searching the settings', () => {
     const found = ids('volume', english());
     expect(found).toEqual(['volume', 'volume-max']);
   });
+
+  test('search finds yt-dlp, Deno, cookies and quality', () => {
+    // yt-dlp is named by the three rows that are about links; Deno has no row of its own, so the
+    // channel row (whose keywords name it) brings the Updates section, which shows both tools.
+    expect(ids('yt-dlp', english())).toEqual([
+      'ytdl-format',
+      'playback.cookiesFromBrowser',
+      'updates.ytdlpChannel',
+    ]);
+    expect(ids('Deno', english())).toEqual(['updates.ytdlpChannel']);
+    expect(ids('cookies', english())).toEqual(['playback.cookiesFromBrowser']);
+    // The quality of the link and the quality preset of the picture are both "quality".
+    expect(ids('quality', english())).toEqual(['ytdl-format', 'profile']);
+    expect(ids('stream quality', english())).toEqual(['ytdl-format']);
+    expect(ids('updates', english())).toEqual(['updates.ytdlpChannel']);
+    expect(ids('nightly', english())).toEqual(['updates.ytdlpChannel']);
+  });
+
+  test('the same words are found in Czech, with or without the accents', () => {
+    expect(ids('yt-dlp', czech())).toEqual([
+      'ytdl-format',
+      'playback.cookiesFromBrowser',
+      'updates.ytdlpChannel',
+    ]);
+    expect(ids('deno', czech())).toEqual(['updates.ytdlpChannel']);
+    expect(ids('cookies', czech())).toEqual(['playback.cookiesFromBrowser']);
+    expect(ids('prohlizec', czech())).toEqual(['playback.cookiesFromBrowser']);
+    expect(ids('kvalita', czech())).toEqual(['ytdl-format', 'profile']);
+    expect(ids('Výchozí kvalita', czech())).toEqual(['ytdl-format']);
+    expect(ids('aktualizace', czech())).toEqual(['updates.ytdlpChannel']);
+    expect(ids('kanal', czech())).toEqual(['updates.ytdlpChannel']);
+  });
+
+  test('the new rows do not change what the other words find', () => {
+    // The words the older tests (and the page's) lean on still find the same settings.
+    expect(ids('language', english())).toEqual(['slang', 'alang', 'language']);
+    expect(ids('audio', english())).toEqual(['audio-device', 'volume', 'volume-max', 'alang']);
+    expect(ids('playlist', english())).toEqual(['autocreate-playlist', 'playback.openWhilePlaying']);
+    expect(ids('gpu', english())).toEqual(['hwdec', 'profile']);
+    expect(ids('zvuk', czech())).toEqual(['audio-device', 'volume', 'volume-max', 'alang']);
+  });
 });

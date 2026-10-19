@@ -17,6 +17,9 @@
  *   (Space would then press it, not pause the video); after the keyboard it is.
  * - A value the list does not have (a font mpv.conf names that is not installed, a device that was
  *   unplugged) is shown as it is on the button, and nothing is marked chosen.
+ * - An option can have a `note`, a sentence under its name that describes it (the warning of a browser),
+ *   and can be `disabled`: it is read, and stays among the others for the arrows to reach (so that its
+ *   note can be read), but a press on it chooses nothing and the list stays open.
  */
 
 import {
@@ -36,8 +39,13 @@ import styles from './Fields.module.css';
 import type { FieldProps } from './FieldProps';
 
 export interface DropdownOption {
+  /** What `onChange` gets; it tells the options apart, so no two share one. */
   value: string;
   label: string;
+  /** A sentence under the name that describes the option. */
+  note?: string;
+  /** Shown, but not to be chosen. */
+  disabled?: boolean;
 }
 
 export interface DropdownProps extends FieldProps<string> {
@@ -101,6 +109,8 @@ export default function Dropdown({
   }, [open]);
 
   const choose = (option: DropdownOption, byKeyboard: boolean) => {
+    // It can be read, not chosen: the list stays open.
+    if (option.disabled === true) return;
     close(byKeyboard);
     if (option.value !== value) onChange(option.value);
   };
@@ -223,6 +233,8 @@ export default function Dropdown({
           >
             {shown.map((option, index) => {
               const selected = index === chosen;
+              const nameId = `${listId}-name-${index}`;
+              const noteId = `${listId}-note-${index}`;
               return (
                 <button
                   key={option.value}
@@ -231,8 +243,13 @@ export default function Dropdown({
                   }}
                   type="button"
                   role="option"
-                  className={panel.option}
+                  className={option.disabled === true ? `${panel.option} ${styles.optionOff}` : panel.option}
                   aria-selected={selected}
+                  // Focusable, so that the sentence that says why it cannot be chosen can be reached.
+                  aria-disabled={option.disabled === true ? true : undefined}
+                  // The name is the name; the sentence under it describes.
+                  aria-labelledby={option.note === undefined ? undefined : nameId}
+                  aria-describedby={option.note === undefined ? undefined : noteId}
                   tabIndex={index === entry ? 0 : -1}
                   data-autofocus={filterLabel === undefined && index === entry ? '' : undefined}
                   // No `blurAfterPointer` here: the blur at the pointer's release would close the
@@ -242,7 +259,18 @@ export default function Dropdown({
                     choose(option, e.detail === 0);
                   }}
                 >
-                  <span className={panel.name}>{option.label}</span>
+                  {option.note === undefined ? (
+                    <span className={panel.name}>{option.label}</span>
+                  ) : (
+                    <span className={panel.text}>
+                      <span id={nameId} className={panel.name}>
+                        {option.label}
+                      </span>
+                      <span id={noteId} className={styles.optionNote}>
+                        {option.note}
+                      </span>
+                    </span>
+                  )}
                   {selected && <Icon path={CHECK} />}
                 </button>
               );

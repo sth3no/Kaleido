@@ -11,7 +11,9 @@
  *   told too, in the page.
  * - A note that a screenshot a plugin asks for with the `screenshot` command has the glass in it
  *   (Kaleido's own shortcuts leave it out, spec 8.2).
- * - The licenses of the third-party software, with a search. Their full texts come later (M4).
+ * - The licenses of the third-party software, with a search. Their full texts come later (M4). yt-dlp
+ *   and Deno are tools Kaleido downloads and keeps up to date itself: their entries show the version that
+ *   is installed (`tools_status`), or "Not installed" / "Downloading…", in place of the word `managed`.
  *
  * The list of licenses scrolls inside the page. It can take the focus, and the arrows, Page Up and
  * Down, Home and End scroll it (and say so with `preventDefault`, so that mpv does not also get them).
@@ -24,15 +26,15 @@ import { useTranslation } from 'react-i18next';
 import { blurAfterPointer } from '../../input/forward';
 import {
   systemCopyDiagnostics,
-  systemDiagnostics,
   systemLicenses,
   systemOpenLogs,
   systemOpenSource,
 } from '../../ipc/commands';
-import type { SourcePage } from '../../ipc/types';
-import { filterLicenses, parseVersions, type Versions } from '../about';
+import type { SourcePage, ToolId } from '../../ipc/types';
+import { filterLicenses, readVersions, withToolVersions, type Versions } from '../about';
 import ListError from '../fields/ListError';
 import { useRustList } from '../fields/useRustList';
+import { useToolStatuses } from '../tools';
 import styles from './About.module.css';
 
 /** What the page tells about the last thing the buttons did: a text, and whether it went wrong. */
@@ -67,6 +69,7 @@ export default function About() {
   const [copying, setCopying] = useState(false);
   const [query, setQuery] = useState('');
   const licenses = useRustList(systemLicenses, 'system_licenses');
+  const { statuses: tools, failed: toolsFailed } = useToolStatuses();
 
   useEffect(() => {
     let mounted = true;
@@ -79,16 +82,7 @@ export default function About() {
         return null;
       }
     })();
-    const versions = (async (): Promise<Versions> => {
-      try {
-        const text = await systemDiagnostics();
-        return parseVersions(typeof text === 'string' ? text : '');
-      } catch (error) {
-        console.warn('cannot read the versions in the diagnostics', error);
-        return { libmpv: null, ffmpeg: null };
-      }
-    })();
-    void Promise.all([kaleido, versions]).then(([version, rest]) => {
+    void Promise.all([kaleido, readVersions()]).then(([version, rest]) => {
       if (mounted) setFacts({ kaleido: version, ...rest });
     });
     return () => {
@@ -132,10 +126,18 @@ export default function About() {
     open(`the sources of ${page}`, () => systemOpenSource(page));
   };
 
-  const shown = useMemo(
-    () => (licenses.items === null ? [] : filterLicenses(licenses.items, query)),
-    [licenses.items, query],
-  );
+  // The version of yt-dlp and Deno is what is installed, so the search finds it as it is shown.
+  const entries = useMemo(() => {
+    if (licenses.items === null) return [];
+    const versionOf = (tool: ToolId): string => {
+      const status = tools?.[tool];
+      if (status === undefined) return toolsFailed ? t('settings.about.unknown') : t('settings.loading');
+      if (status.version !== null) return status.version;
+      return status.state === 'downloading' ? t('settings.about.downloading') : t('settings.updates.notInstalled');
+    };
+    return withToolVersions(licenses.items, versionOf);
+  }, [licenses.items, tools, toolsFailed, t]);
+  const shown = useMemo(() => filterLicenses(entries, query), [entries, query]);
   const searching = query.trim() !== '';
 
   const onListKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {

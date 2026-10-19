@@ -239,6 +239,7 @@
       "video": "Obraz",
       "appearance": "Vzhled",
       "shortcuts": "Zkratky",
+      "updates": "Aktualizace",
       "about": "O aplikaci"
     },
     "loading": "Načítání…",
@@ -286,6 +287,10 @@
         "kaleido": "Kaleido",
         "custom": "Vlastní barva",
         "colour": "Kód barvy zvýraznění"
+      },
+      "browser": {
+        "none": "Nepoužívat",
+        "gone": "Tento prohlížeč nebo profil se na tomto počítači nenašel. Nastavení zůstane, dokud ho nezměníš."
       }
     },
     "items": {
@@ -313,6 +318,26 @@
           "replace": "Nahradit přehrávané",
           "append": "Přidat do playlistu"
         }
+      },
+      "streamQuality": {
+        "label": "Výchozí kvalita streamů",
+        "keywords": "kvalita, rozlišení, 4k, 1080p, 720p, datový tok, data, odkazy, streamy, web, online, youtube, yt-dlp",
+        "hint": "Platí pro odkazy otevřené od teď.",
+        "custom": "Vlastní (mpv.conf)",
+        "options": {
+          "best": "Nejlepší",
+          "p2160": "2160p",
+          "p1440": "1440p",
+          "p1080": "1080p",
+          "p720": "720p",
+          "p480": "480p",
+          "audio": "Jen zvuk"
+        }
+      },
+      "cookiesFromBrowser": {
+        "label": "Cookies z prohlížeče",
+        "keywords": "cookies, prohlížeč, přihlášení, účet, relace, věk, firefox, chrome, edge, yt-dlp, odkazy, soukromá videa",
+        "hint": "yt-dlp použije cookies tohoto prohlížeče pro odkazy, aby přehrál to, co vidíš po přihlášení."
       },
       "subFont": {
         "label": "Písmo titulků",
@@ -460,6 +485,15 @@
       "uiScale": {
         "label": "Měřítko rozhraní",
         "keywords": "měřítko, velikost, zoom, dpi, větší, menší, rozhraní"
+      },
+      "ytdlpChannel": {
+        "label": "Kanál yt-dlp",
+        "keywords": "yt-dlp, ytdlp, deno, libmpv, nightly, stabilní, kanál, vydání, aktualizace, verze, nástroje, stahování",
+        "hint": "Stabilní je otestované vydání. Nightly dostává opravy yt-dlp pro weby dřív, ale je méně otestované. Deno vždy sleduje svá stabilní vydání.",
+        "options": {
+          "stable": "Stabilní",
+          "nightly": "Nightly"
+        }
       }
     },
     "appearance": {
@@ -505,6 +539,31 @@
         "generic": "Zkratku se nepodařilo změnit."
       }
     },
+    "updates": {
+      "tools": {
+        "ytDlp": "yt-dlp",
+        "deno": "Deno"
+      },
+      "purpose": {
+        "ytDlp": "Otevírá webové odkazy. Kaleido hledá novou verzi každý den.",
+        "deno": "Umožňuje yt-dlp číst YouTube. Kaleido hledá novou verzi každý týden."
+      },
+      "version": "Verze {{version}}",
+      "notInstalled": "Není nainstalováno",
+      "checked": "Zkontrolováno {{when}}",
+      "neverChecked": "Zatím nezkontrolováno",
+      "state": {
+        "missing": "Zatím nestaženo",
+        "checking": "Hledám novou verzi…",
+        "downloading": "Stahuji novou verzi…",
+        "ready": "Aktuální",
+        "failed": "Poslední kontrola selhala"
+      },
+      "check": "Zkontrolovat teď",
+      "checkFailed": "Kontrolu se nepodařilo spustit.",
+      "unreadable": "Stav tohoto nástroje se nepodařilo načíst.",
+      "libmpvHint": "Přehrávací jádro, se kterým Kaleido přehrává. Je součástí Kaleida a mění se s jeho vydáními."
+    },
     "about": {
       "versions": {
         "kaleido": "Kaleido",
@@ -512,6 +571,7 @@
         "ffmpeg": "FFmpeg"
       },
       "unknown": "Neznámá",
+      "downloading": "Stahuje se…",
       "screenshotNote": "Snímek, který plugin pořídí příkazem screenshot, obsahuje sklo. Snímky z vlastních zkratek Kaleida sklo neobsahují.",
       "openLogs": "Otevřít složku s logy",
       "copyDiagnostics": "Zkopírovat diagnostiku",

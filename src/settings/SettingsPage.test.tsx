@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 
 import { initI18n, setLanguage } from '../i18n';
 import { attachVideoInput } from '../input/forward';
-import type { Binding, License, Settings } from '../ipc/types';
+import type { Binding, Browser, License, Settings, ToolStatus } from '../ipc/types';
 import { MINI } from '../surface/mini';
 import { DEFAULT_APPEARANCE } from '../theme/tokens';
 import SettingsPage from './SettingsPage';
@@ -35,6 +35,7 @@ const MPV: Record<string, string | null> = {
   hwdec: 'auto-safe',
   'autocreate-playlist': 'filter',
   'save-position-on-quit': 'yes',
+  'ytdl-format': null,
   'sub-font': 'sans-serif',
   'sub-font-size': '55',
   'sub-color': '#FFFFFFFF',
@@ -62,6 +63,28 @@ const LICENSES: License[] = [
   { name: 'libmpv', version: '0.41.0', license: 'GPL-3.0-or-later', url: 'https://mpv.io' },
 ];
 
+const BROWSERS: Browser[] = [
+  { id: 'firefox', label: 'Firefox', spec: 'firefox', warning: null },
+  { id: 'edge', label: 'Microsoft Edge', spec: 'edge', warning: 'chromiumCookies' },
+];
+
+const TOOLS: ToolStatus[] = [
+  {
+    tool: 'ytDlp',
+    state: 'ready',
+    version: '2026.08.19',
+    checkedAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+    error: null,
+  },
+  {
+    tool: 'deno',
+    state: 'ready',
+    version: '2.9.7',
+    checkedAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
+    error: null,
+  },
+];
+
 const DEVICES = [
   { name: 'auto', description: 'Autoselect device' },
   { name: 'wasapi/{0.0.0.00000000}.{abc}', description: 'Speakers (Realtek)' },
@@ -83,6 +106,8 @@ function rust(answers: Answers = {}) {
     settings_bindings: () => BINDINGS,
     system_diagnostics: () => 'Kaleido: 0.1.0\nlibmpv: mpv v0.41.0\nFFmpeg: n7.1\n',
     system_licenses: () => LICENSES,
+    system_browsers: () => BROWSERS,
+    tools_status: () => TOOLS,
     ...answers,
   };
   vi.mocked(invoke).mockImplementation(((command: string, args?: unknown) =>
@@ -177,6 +202,7 @@ describe('the page', () => {
       'Video',
       'Appearance',
       'Shortcuts',
+      'Updates',
       'About',
     ]);
     expect(items[0]?.getAttribute('aria-current')).toBe('true');
@@ -188,6 +214,8 @@ describe('the page', () => {
       'autocreate-playlist',
       'save-position-on-quit',
       'playback.openWhilePlaying',
+      'ytdl-format',
+      'playback.cookiesFromBrowser',
     ]);
   });
 
@@ -307,6 +335,8 @@ describe('the page', () => {
       'autocreate-playlist',
       'save-position-on-quit',
       'playback.openWhilePlaying',
+      'ytdl-format',
+      'playback.cookiesFromBrowser',
     ]);
   });
 
@@ -352,8 +382,8 @@ describe('the page', () => {
     // No slider at its minimum, no list with nothing chosen: the rows of the mpv options are not there.
     expect(screen.queryByRole('switch', { name: 'Remember position' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Hardware decoding/ })).toBeNull();
-    // Kaleido's own setting does not need the player: its source has answered, so its row shows.
-    expect(shownIds()).toEqual(['playback.openWhilePlaying']);
+    // Kaleido's own settings do not need the player: their source has answered, so their rows show.
+    expect(shownIds()).toEqual(['playback.openWhilePlaying', 'playback.cookiesFromBrowser']);
     expect(picker('When a file is opened during playback').disabled).toBe(false);
     fireEvent.click(sectionButton('Audio'));
     expect(shownIds()).toEqual([]);
@@ -405,6 +435,8 @@ describe('the page', () => {
         'autocreate-playlist',
         'save-position-on-quit',
         'playback.openWhilePlaying',
+        'ytdl-format',
+        'playback.cookiesFromBrowser',
       ]);
     });
     // Every row that is there can be changed.
@@ -898,6 +930,268 @@ describe('outside changes', () => {
   });
 });
 
+describe('the default quality of links and the cookies', () => {
+  const quality = () => picker('Default stream quality');
+  const cookies = () => picker('Cookies from a browser');
+  const GONE = 'This browser or profile was not found on this PC. The setting stays until you change it.';
+  /** Kaleido's settings with the browser for cookies `spec` saved. */
+  const withCookies = (spec: string | null): Settings => ({
+    ...SETTINGS,
+    playback: { ...SETTINGS.playback, cookiesFromBrowser: spec },
+  });
+  /** The names of the options of the list that is open, top to bottom (an option with a sentence is named by its label). */
+  const optionNames = () =>
+    screen.getAllByRole('option').map((each) => {
+      const named = each.getAttribute('aria-labelledby');
+      return named === null ? each.textContent : document.getElementById(named)?.textContent;
+    });
+  /** The browsers are read: the field can be changed. */
+  const cookiesReady = () =>
+    waitFor(() => {
+      expect(cookies().disabled).toBe(false);
+    });
+
+  test('the quality says when it applies, and the cookies what they are for', async () => {
+    await open();
+    expect(quality().textContent).toBe('Best');
+    // It applies to links opened from now on; it is not one of the settings that wait for the next start.
+    expect(description(quality())).toEqual(['Applies to links opened from now on.']);
+    expect(description(cookies()).at(0)).toContain('yt-dlp takes the cookies of this browser');
+  });
+
+  test('the default quality offers Best and the presets, and saves the preset Rust allows', async () => {
+    await open();
+    fireEvent.click(quality());
+    expect(screen.getAllByRole('option').map((each) => each.textContent)).toEqual([
+      'Best',
+      '2160p',
+      '1440p',
+      '1080p',
+      '720p',
+      '480p',
+      'Audio only',
+    ]);
+
+    fireEvent.click(screen.getByRole('option', { name: '1080p' }));
+    expect(mpvWrites()).toEqual([{ key: 'ytdl-format', value: 'bv*[height<=?1080]+ba/b[height<=?1080]' }]);
+    await waitFor(() => {
+      expect(quality().textContent).toBe('1080p');
+    });
+    expect(useSettingsStore.getState().mpv['ytdl-format']).toBe('bv*[height<=?1080]+ba/b[height<=?1080]');
+
+    fireEvent.click(quality());
+    fireEvent.click(screen.getByRole('option', { name: 'Audio only' }));
+    expect(mpvWrites().at(-1)).toEqual({ key: 'ytdl-format', value: 'ba/b' });
+
+    // Best is yt-dlp's own default: the line leaves mpv.conf.
+    await waitFor(() => {
+      expect(quality().textContent).toBe('Audio only');
+    });
+    fireEvent.click(quality());
+    fireEvent.click(screen.getByRole('option', { name: 'Best' }));
+    expect(mpvWrites().at(-1)).toEqual({ key: 'ytdl-format', value: null });
+    await waitFor(() => {
+      expect(useSettingsStore.getState().mpv['ytdl-format']).toBeNull();
+    });
+  });
+
+  test('a custom ytdl-format shows as custom and a preset replaces it', async () => {
+    rust({ settings_get_mpv: () => ({ ...MPV, 'ytdl-format': 'bestvideo[height<=360]+bestaudio' }) });
+    await open();
+    expect(quality().textContent).toBe('Custom (mpv.conf)');
+
+    fireEvent.click(quality());
+    expect(screen.getByRole('option', { name: 'Custom (mpv.conf)' }).getAttribute('aria-selected')).toBe('true');
+    // Showing it writes nothing.
+    expect(mpvWrites()).toEqual([]);
+
+    fireEvent.click(screen.getByRole('option', { name: '720p' }));
+    expect(mpvWrites()).toEqual([{ key: 'ytdl-format', value: 'bv*[height<=?720]+ba/b[height<=?720]' }]);
+    await waitFor(() => {
+      expect(quality().textContent).toBe('720p');
+    });
+    // The custom value is replaced, so it is not listed any more.
+    fireEvent.click(quality());
+    expect(screen.queryByRole('option', { name: 'Custom (mpv.conf)' })).toBeNull();
+  });
+
+  test('a refused quality goes back to the one it had', async () => {
+    rust({ settings_set_mpv: () => Promise.reject({ type: 'invalid', key: 'ytdl-format', reason: 'not a preset' }) });
+    await open();
+    fireEvent.click(quality());
+    fireEvent.click(screen.getByRole('option', { name: '480p' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('That value is not valid.');
+    expect(quality().textContent).toBe('Best');
+  });
+
+  test('the cookies field saves the spec of the browser as a patch with that one setting', async () => {
+    rust({ settings_set: () => withCookies('firefox') });
+    await open();
+    await cookiesReady();
+    expect(cookies().textContent).toBe('Do not use');
+
+    fireEvent.click(cookies());
+    expect(optionNames()).toEqual(['Do not use', 'Firefox', 'Microsoft Edge']);
+    fireEvent.click(screen.getByRole('option', { name: 'Firefox' }));
+
+    expect(sent('settings_set')).toEqual([['settings_set', { patch: { playback: { cookiesFromBrowser: 'firefox' } } }]]);
+    // A setting of Kaleido's own, not an mpv option.
+    expect(sent('settings_set_mpv')).toEqual([]);
+    await waitFor(() => {
+      expect(useSettingsStore.getState().kaleido?.playback.cookiesFromBrowser).toBe('firefox');
+    });
+    expect(cookies().textContent).toBe('Firefox');
+  });
+
+  test('"Do not use" sends null, which takes the browser out of the settings', async () => {
+    rust({ settings_get: () => withCookies('firefox'), settings_set: () => withCookies(null) });
+    await open();
+    await cookiesReady();
+    expect(cookies().textContent).toBe('Firefox');
+
+    fireEvent.click(cookies());
+    fireEvent.click(screen.getByRole('option', { name: 'Do not use' }));
+
+    expect(sent('settings_set')).toEqual([['settings_set', { patch: { playback: { cookiesFromBrowser: null } } }]]);
+    await waitFor(() => {
+      expect(useSettingsStore.getState().kaleido?.playback.cookiesFromBrowser).toBeNull();
+    });
+    expect(cookies().textContent).toBe('Do not use');
+  });
+
+  test('a Chromium browser is offered with its warning, and one that is chosen keeps it under the field', async () => {
+    rust({ settings_get: () => withCookies('edge') });
+    await open();
+    await cookiesReady();
+    expect(cookies().textContent).toBe('Microsoft Edge');
+    expect(
+      screen.getByText(/yt-dlp usually cannot read the cookies of browsers based on Chromium on Windows/),
+    ).toBeTruthy();
+  });
+
+  test('a saved browser that is not on this PC any more is shown as it is, with a note, and stays', async () => {
+    const gone = 'firefox:D:\\gone\\profile';
+    rust({ settings_get: () => withCookies(gone) });
+    await open();
+    await cookiesReady();
+    expect(cookies().textContent).toBe(gone);
+    expect(screen.getByText(GONE)).toBeTruthy();
+    // Nothing rewrote it.
+    expect(sent('settings_set')).toEqual([]);
+    expect(useSettingsStore.getState().kaleido?.playback.cookiesFromBrowser).toBe(gone);
+  });
+
+  test('a change of the cookies made elsewhere shows here', async () => {
+    await open();
+    await cookiesReady();
+    expect(cookies().textContent).toBe('Do not use');
+    emit('settings:changed', withCookies('firefox'));
+    expect(cookies().textContent).toBe('Firefox');
+  });
+});
+
+describe('updates', () => {
+  test('updates lists the tools around the channel, and the libmpv', async () => {
+    await open();
+    fireEvent.click(sectionButton('Updates'));
+
+    const region = screen.getByRole('region', { name: 'Updates' });
+    expect(within(region).getByRole('heading', { level: 2 }).textContent).toBe('Updates');
+    expect(shownIds()).toEqual(['updates.ytdlpChannel']);
+    expect(await within(region).findByText('Version 2026.08.19')).toBeTruthy();
+    expect(within(region).getByText('Version 2.9.7')).toBeTruthy();
+    expect(within(region).getByText('Checked 3 hours ago')).toBeTruthy();
+    expect(within(region).getAllByRole('button', { name: 'Check now' })).toHaveLength(2);
+    expect(await within(region).findByText('mpv v0.41.0')).toBeTruthy();
+    expect(picker('yt-dlp release channel').textContent).toBe('Stable');
+    expect(sent('tools_status')).toHaveLength(1);
+  });
+
+  test('the channel is saved from the page, and a check is asked for from it', async () => {
+    rust({
+      settings_set: () => ({ ...SETTINGS, updates: { ytdlpChannel: 'nightly' } }),
+      tools_check: () => TOOLS[0],
+    });
+    await open();
+    fireEvent.click(sectionButton('Updates'));
+    await screen.findByText('Version 2026.08.19');
+
+    fireEvent.click(picker('yt-dlp release channel'));
+    fireEvent.click(screen.getByRole('option', { name: 'Nightly' }));
+    expect(sent('settings_set')).toEqual([['settings_set', { patch: { updates: { ytdlpChannel: 'nightly' } } }]]);
+    await waitFor(() => {
+      expect(picker('yt-dlp release channel').textContent).toBe('Nightly');
+    });
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Deno' })).getByRole('button', { name: 'Check now' }));
+    expect(sent('tools_check')).toEqual([['tools_check', { tool: 'deno' }]]);
+  });
+
+  test('the tools do not wait for the player: Updates needs only Kaleido\'s settings', async () => {
+    rust({ settings_get_mpv: () => ({}) });
+    render(<SettingsPage />);
+    await screen.findByRole('alert');
+    fireEvent.click(sectionButton('Updates'));
+    expect(shownIds()).toEqual(['updates.ytdlpChannel']);
+    expect(await screen.findByText('Version 2026.08.19')).toBeTruthy();
+  });
+
+  test('search finds yt-dlp, Deno, cookies and quality', async () => {
+    await open();
+
+    // Deno has no row of its own: the channel's keywords bring the section, which shows both tools.
+    fireEvent.change(searchField(), { target: { value: 'deno' } });
+    expect(sectionHeadings()).toEqual(['Updates']);
+    expect(shownIds()).toEqual(['updates.ytdlpChannel']);
+    expect(searchStatus()?.textContent).toBe('Found: 1');
+    expect(await screen.findByRole('group', { name: 'Deno' })).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'yt-dlp' })).toBeTruthy();
+
+    fireEvent.change(searchField(), { target: { value: 'yt-dlp' } });
+    expect(sectionHeadings()).toEqual(['Playback', 'Updates']);
+    expect(shownIds()).toEqual(['ytdl-format', 'playback.cookiesFromBrowser', 'updates.ytdlpChannel']);
+    expect(searchStatus()?.textContent).toBe('Found: 3');
+
+    fireEvent.change(searchField(), { target: { value: 'cookies' } });
+    expect(sectionHeadings()).toEqual(['Playback']);
+    expect(shownIds()).toEqual(['playback.cookiesFromBrowser']);
+
+    fireEvent.change(searchField(), { target: { value: 'quality' } });
+    expect(sectionHeadings()).toEqual(['Playback', 'Video']);
+    expect(shownIds()).toEqual(['ytdl-format', 'profile']);
+
+    fireEvent.change(searchField(), { target: { value: 'updates' } });
+    expect(sectionHeadings()).toEqual(['Updates']);
+    expect(shownIds()).toEqual(['updates.ytdlpChannel']);
+  });
+
+  test('a found quality row can be changed there', async () => {
+    await open();
+    fireEvent.change(searchField(), { target: { value: 'stream quality' } });
+    expect(shownIds()).toEqual(['ytdl-format']);
+    fireEvent.click(picker('Default stream quality'));
+    fireEvent.click(screen.getByRole('option', { name: '720p' }));
+    expect(mpvWrites()).toEqual([{ key: 'ytdl-format', value: 'bv*[height<=?720]+ba/b[height<=?720]' }]);
+  });
+
+  test('in Czech the section and its search are in Czech', async () => {
+    setLanguage('cs');
+    render(<SettingsPage />);
+    await waitFor(() => {
+      expect((screen.getByRole('switch', { name: 'Pamatovat pozici' }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(screen.getByRole('button', { name: /^Výchozí kvalita streamů/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Cookies z prohlížeče/ })).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Hledat v nastavení' }), {
+      target: { value: 'aktualizace' },
+    });
+    expect(sectionHeadings()).toEqual(['Aktualizace']);
+    expect(shownIds()).toEqual(['updates.ytdlpChannel']);
+    expect(await screen.findAllByRole('button', { name: 'Zkontrolovat teď' })).toHaveLength(2);
+  });
+});
+
 describe('the section list', () => {
   test('sections are reachable with the keyboard', async () => {
     await open();
@@ -905,7 +1199,7 @@ describe('the section list', () => {
     try {
       const items = nav().getAllByRole('button') as HTMLButtonElement[];
       // One stop for Tab: the open section.
-      expect(items.map((item) => item.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+      expect(items.map((item) => item.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1]);
 
       act(() => {
         items[0]?.focus();
@@ -914,18 +1208,18 @@ describe('the section list', () => {
       expect(fireEvent.keyDown(items[0] as Element, { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false);
       expect(document.activeElement).toBe(items[1]);
       // Where the focus is, Tab reaches; moving is not opening.
-      expect(items.map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1]);
+      expect(items.map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1, -1]);
       expect(items[0]?.getAttribute('aria-current')).toBe('true');
       expect(sectionHeadings()).toEqual(['Playback']);
 
       expect(fireEvent.keyDown(items[1] as Element, { key: 'End', code: 'End' })).toBe(false);
-      expect(document.activeElement).toBe(items[6]);
+      expect(document.activeElement).toBe(items[7]);
       // Round the end and back.
-      fireEvent.keyDown(items[6] as Element, { key: 'ArrowDown', code: 'ArrowDown' });
+      fireEvent.keyDown(items[7] as Element, { key: 'ArrowDown', code: 'ArrowDown' });
       expect(document.activeElement).toBe(items[0]);
       fireEvent.keyDown(items[0] as Element, { key: 'ArrowUp', code: 'ArrowUp' });
-      expect(document.activeElement).toBe(items[6]);
-      fireEvent.keyDown(items[6] as Element, { key: 'Home', code: 'Home' });
+      expect(document.activeElement).toBe(items[7]);
+      fireEvent.keyDown(items[7] as Element, { key: 'Home', code: 'Home' });
       expect(document.activeElement).toBe(items[0]);
       expect(forwarded()).toEqual([]);
 
@@ -944,7 +1238,7 @@ describe('the section list', () => {
       expect(items[2]?.getAttribute('aria-current')).toBe('true');
       expect(items[0]?.hasAttribute('aria-current')).toBe(false);
       // The section that is open is where Tab goes back to.
-      expect(items.map((item) => item.tabIndex)).toEqual([-1, -1, 0, -1, -1, -1, -1]);
+      expect(items.map((item) => item.tabIndex)).toEqual([-1, -1, 0, -1, -1, -1, -1, -1]);
 
       // A key the list does not handle still goes to mpv (so the checks above look at something).
       fireEvent.keyDown(items[2] as Element, { key: 'ArrowLeft', code: 'ArrowLeft' });
@@ -1320,6 +1614,7 @@ describe('the search', () => {
       'Obraz',
       'Vzhled',
       'Zkratky',
+      'Aktualizace',
       'O aplikaci',
     ]);
 

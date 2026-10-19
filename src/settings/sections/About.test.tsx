@@ -1,15 +1,24 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../../i18n';
 import { attachVideoInput } from '../../input/forward';
-import type { License } from '../../ipc/types';
+import type { License, ToolStatus } from '../../ipc/types';
 import About from './About';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn() }));
+const events = vi.hoisted(() => ({
+  handlers: new Map<string, (event: { payload: unknown }) => void>(),
+}));
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn((name: string, handler: (event: { payload: unknown }) => void) => {
+    events.handlers.set(name, handler);
+    return Promise.resolve(() => undefined);
+  }),
+}));
 
 const DIAGNOSTICS = [
   'Kaleido: 0.1.0',
@@ -34,6 +43,7 @@ function rust(answers: Answers = {}) {
   const all: Answers = {
     system_diagnostics: () => DIAGNOSTICS,
     system_licenses: () => LICENSES,
+    tools_status: () => [],
     system_copy_diagnostics: () => null,
     system_open_logs: () => null,
     system_open_source: () => null,
@@ -77,6 +87,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  events.handlers.clear();
   vi.mocked(invoke).mockReset();
   vi.mocked(getVersion).mockReset();
   vi.mocked(getVersion).mockResolvedValue('0.1.0');
@@ -358,6 +369,111 @@ describe('the licenses', () => {
     expect(await screen.findByText('Total: 0')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'List of licenses' })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('the licenses of the tools Kaleido manages', () => {
+  const MANAGED: License[] = [
+    ...LICENSES,
+    { name: 'yt-dlp', version: 'managed', license: 'Unlicense', url: 'https://github.com/yt-dlp/yt-dlp' },
+    { name: 'Deno', version: 'managed', license: 'MIT', url: 'https://github.com/denoland/deno' },
+  ];
+  const status = (tool: ToolStatus['tool'], over: Partial<ToolStatus> = {}): ToolStatus => ({
+    tool,
+    state: 'ready',
+    version: tool === 'ytDlp' ? '2026.08.19' : '2.9.7',
+    checkedAt: '2026-10-18T10:00:00Z',
+    error: null,
+    ...over,
+  });
+  /** The row of a license, by its name. */
+  const entry = (name: string) =>
+    screen
+      .getAllByRole('listitem')
+      .find((item) => item.firstElementChild?.firstChild?.textContent === name);
+  /** The version a license row says, `undefined` where there is no such row. */
+  const versionOfEntry = (name: string) => entry(name)?.querySelector('span span')?.textContent;
+
+  /** The page, once the licenses are in. */
+  async function openManaged(answers: Answers = {}) {
+    rust({ system_licenses: () => MANAGED, ...answers });
+    const view = render(<About />);
+    await screen.findByText('Total: 6');
+    await settle();
+    return view;
+  }
+
+  test('show the version that is installed, in place of the word managed', async () => {
+    await openManaged({ tools_status: () => [status('ytDlp'), status('deno')] });
+
+    expect(versionOfEntry('yt-dlp')).toBe('2026.08.19');
+    expect(versionOfEntry('Deno')).toBe('2.9.7');
+    expect(screen.queryByText('managed')).toBeNull();
+    expect(sent('tools_status')).toHaveLength(1);
+    // The other entries are as they were.
+    expect(versionOfEntry('thumbfast')).toBe('0f711de');
+    expect(entry('yt-dlp')?.textContent).toContain('Unlicense');
+  });
+
+  test('a tool that is not there says so, or that it is being downloaded', async () => {
+    await openManaged({
+      tools_status: () => [
+        status('ytDlp', { state: 'downloading', version: null }),
+        status('deno', { state: 'missing', version: null, checkedAt: null }),
+      ],
+    });
+    expect(versionOfEntry('yt-dlp')).toBe('Downloading…');
+    expect(versionOfEntry('Deno')).toBe('Not installed');
+
+    // It arrives while the page is open.
+    act(() => {
+      events.handlers.get('tools:status')?.({ payload: status('ytDlp', { version: '2026.10.12' }) });
+    });
+    expect(versionOfEntry('yt-dlp')).toBe('2026.10.12');
+    expect(versionOfEntry('Deno')).toBe('Not installed');
+  });
+
+  test('say they are loading until the tools are read, and unknown when they cannot be', async () => {
+    let answer: (list: ToolStatus[]) => void = () => undefined;
+    rust({
+      system_licenses: () => MANAGED,
+      tools_status: () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    });
+    render(<About />);
+    await screen.findByText('Total: 6');
+    expect(versionOfEntry('yt-dlp')).toBe('Loading…');
+    expect(versionOfEntry('Deno')).toBe('Loading…');
+    await act(async () => {
+      answer([status('ytDlp'), status('deno')]);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(versionOfEntry('yt-dlp')).toBe('2026.08.19');
+    });
+
+    cleanup();
+    rust({ system_licenses: () => MANAGED, tools_status: () => Promise.reject('no tools') });
+    render(<About />);
+    await screen.findByText('Total: 6');
+    await waitFor(() => {
+      expect(versionOfEntry('yt-dlp')).toBe('Unknown');
+    });
+    expect(versionOfEntry('Deno')).toBe('Unknown');
+    // The rest of the page does not depend on them.
+    expect(button('Open logs folder')).toBeTruthy();
+  });
+
+  test('are searched by the version they show', async () => {
+    await openManaged({ tools_status: () => [status('ytDlp'), status('deno')] });
+
+    fireEvent.change(searchField(), { target: { value: '2026.08' } });
+    expect(licenseNames()).toEqual(['yt-dlp']);
+    // The word the file has for them is not what the page shows, so it finds nothing.
+    fireEvent.change(searchField(), { target: { value: 'managed' } });
+    expect(licenseNames()).toEqual([]);
   });
 });
 

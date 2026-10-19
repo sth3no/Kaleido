@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import mpvKeysSource from '../../src-tauri/src/settings/mpv_keys.rs?raw';
 import storeSource from '../../src-tauri/src/settings/store.rs?raw';
+import toolsSource from '../../src-tauri/src/tools/mod.rs?raw';
 import cs from '../i18n/locales/cs.json';
 import en from '../i18n/locales/en.json';
 import {
@@ -31,7 +32,10 @@ function keysOf(descriptor: SettingDescriptor): string[] {
   if (descriptor.keywordsKey !== undefined) keys.push(descriptor.keywordsKey);
   if (descriptor.hintKey !== undefined) keys.push(descriptor.hintKey);
   const { field } = descriptor;
-  if (field.kind === 'select') keys.push(...field.options.map((option) => option.labelKey));
+  if (field.kind === 'select') {
+    keys.push(...field.options.map((option) => option.labelKey));
+    if (field.customLabelKey !== undefined) keys.push(field.customLabelKey);
+  }
   if (field.kind === 'slider' && field.unitKey !== undefined) keys.push(field.unitKey);
   return keys;
 }
@@ -85,6 +89,8 @@ describe('the descriptors', () => {
       'autocreate-playlist',
       'save-position-on-quit',
       'playback.openWhilePlaying',
+      'ytdl-format',
+      'playback.cookiesFromBrowser',
     ]);
     expect(ids('subtitles')).toEqual([
       'sub-font',
@@ -120,6 +126,9 @@ describe('the descriptors', () => {
     // Lists of their own, not rows of settings (sections/Shortcuts.tsx, sections/About.tsx).
     expect(ids('shortcuts')).toEqual([]);
     expect(ids('about')).toEqual([]);
+    // Updates has the channel of yt-dlp; the rows of the tools around it are the section's own
+    // (sections/Updates.tsx). The app's own channel comes with the updater (M4), and has no row.
+    expect(ids('updates')).toEqual(['updates.ytdlpChannel']);
     expect(SECTIONS).toEqual([
       'playback',
       'subtitles',
@@ -127,6 +136,7 @@ describe('the descriptors', () => {
       'video',
       'appearance',
       'shortcuts',
+      'updates',
       'about',
     ]);
   });
@@ -191,12 +201,11 @@ function parseAllowList(source: string): RustSetting[] {
 }
 
 /**
- * Allowed in Rust, with no row on the settings page yet: the default quality of links
- * (`ytdl-format`, its words are `STREAM_QUALITY_PRESETS`) gets its field with the Playback settings
- * of Task 17, which adds its descriptor (`''` for yt-dlp's default and the presets, see the parse
- * test) and takes it out of this list.
+ * Allowed in Rust, with no row on the settings page yet. Empty since Task 17 gave the default quality
+ * of links (`ytdl-format`, its words are `STREAM_QUALITY_PRESETS`) its row in Playback: every option the
+ * allow-list names has a descriptor. A later option that waits for its row goes in here, and out again.
  */
-const WITHOUT_A_ROW_YET = ['ytdl-format'];
+const WITHOUT_A_ROW_YET: string[] = [];
 
 describe('the descriptors against the allow-list of mpv_keys.rs', () => {
   const allowed = parseAllowList(mpvKeysSource);
@@ -301,7 +310,35 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
       DESCRIPTORS.filter((descriptor) => descriptor.field.kind === 'select' && isMpvTarget(descriptor.target))
         .map(mpvTarget)
         .sort(),
-    ).toEqual(['deinterlace', 'hdr-compute-peak', 'hwdec', 'profile', 'tone-mapping']);
+    ).toEqual(['deinterlace', 'hdr-compute-peak', 'hwdec', 'profile', 'tone-mapping', 'ytdl-format']);
+  });
+
+  test('the default stream quality offers the presets Rust allows', () => {
+    // `STREAM_QUALITY_PRESETS` of mpv_keys.rs, read from the source itself, in its order: yt-dlp's own
+    // default first (the empty word, which takes the line out of mpv.conf), then the presets.
+    const rustEntry = allowed.find((setting) => setting.key === 'ytdl-format');
+    expect(rustEntry?.kind).toBe('ChoiceOrNone');
+    expect(rustEntry?.live).toBe(true);
+    expect(rustEntry?.words).toHaveLength(6);
+    const { field, hintKey, target } = byKey('ytdl-format');
+    expect(field.kind).toBe('select');
+    if (field.kind !== 'select') return;
+    expect(field.options.map((option) => option.value)).toEqual(['', ...(rustEntry?.words ?? [])]);
+    // Best, then the heights from the tallest, then audio only.
+    expect(field.options.map((option) => option.labelKey.split('.').at(-1))).toEqual([
+      'best',
+      'p2160',
+      'p1440',
+      'p1080',
+      'p720',
+      'p480',
+      'audio',
+    ]);
+    // An mpv.conf value that is none of them is shown as custom, and a preset replaces it.
+    expect(field.customLabelKey).toBe('settings.items.streamQuality.custom');
+    // It applies to the links opened from now on, which is its own sentence: not "from the next start".
+    expect(hintKey).toBe('settings.items.streamQuality.hint');
+    expect(target).toEqual({ mpv: 'ytdl-format' });
   });
 
   test('the toggles use the words of their options', () => {
@@ -357,6 +394,7 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
     const own = DESCRIPTORS.filter((descriptor) => !isMpvTarget(descriptor.target));
     expect(own.map((descriptor) => descriptor.target)).toEqual([
       { kaleido: 'playback.openWhilePlaying' },
+      { kaleido: 'playback.cookiesFromBrowser' },
       { kaleido: 'language' },
       { kaleido: 'appearance.mode' },
       { kaleido: 'appearance.accent' },
@@ -368,6 +406,7 @@ describe('the descriptors against the allow-list of mpv_keys.rs', () => {
       { kaleido: 'appearance.mica' },
       { kaleido: 'appearance.reduceTransparency' },
       { kaleido: 'appearance.uiScale' },
+      { kaleido: 'updates.ytdlpChannel' },
     ]);
     // The id of each is its path (the id of an mpv option is the option).
     for (const descriptor of own) {
@@ -480,6 +519,68 @@ describe('the appearance against store.rs', () => {
       for (const tree of [cs, en]) expect(typeof textAt(tree, key), key).toBe('string');
     }
     expect(own('appearance.mica').hintKey).toBe('settings.items.mica.hint');
+  });
+});
+
+/**
+ * What Rust accepts of the browser for cookies and the channel of yt-dlp: `playback.cookiesFromBrowser`
+ * is a spec that `system_browsers` gives (a field of its own, `''` for none), and `updates.ytdlpChannel`
+ * takes the words of `Channel` in src-tauri/src/tools/mod.rs, read from the source itself.
+ */
+describe('the cookies and the channel', () => {
+  const own = (id: string): SettingDescriptor => {
+    const found = DESCRIPTORS.find((descriptor) => descriptor.id === id);
+    if (!found) throw new Error(`no descriptor ${id}`);
+    return found;
+  };
+
+  /** The variants of `pub enum Channel { ... }`, as the lower case words serde writes. */
+  function channelWords(): string[] {
+    const body = /pub enum Channel \{([^}]*)\}/.exec(toolsSource)?.[1];
+    if (body === undefined) throw new Error('tools/mod.rs has no enum Channel where this test looks for it');
+    return body
+      .replace(/\/\/.*$/gm, '')
+      .replace(/#\[[^\]]*\]/g, '')
+      .split(',')
+      .map((variant) => variant.trim().toLowerCase())
+      .filter((variant) => variant !== '');
+  }
+
+  test('the channel offers the words of the Rust enum, and only those', () => {
+    expect(channelWords()).toEqual(['stable', 'nightly']);
+    const { field, target, hintKey } = own('updates.ytdlpChannel');
+    expect(field.kind).toBe('select');
+    if (field.kind === 'select') {
+      expect(field.options.map((option) => option.value)).toEqual(channelWords());
+    }
+    expect(target).toEqual({ kaleido: 'updates.ytdlpChannel' });
+    // Why one would choose nightly.
+    expect(hintKey).toBe('settings.items.ytdlpChannel.hint');
+  });
+
+  test('the cookies are a browser field, in Playback after the default quality', () => {
+    const cookies = own('playback.cookiesFromBrowser');
+    expect(cookies.field).toEqual({ kind: 'browser' });
+    expect(cookies.section).toBe('playback');
+    expect(cookies.target).toEqual({ kaleido: 'playback.cookiesFromBrowser' });
+    const playback = descriptorsOf('playback').map((descriptor) => descriptor.id);
+    expect(playback.indexOf('playback.cookiesFromBrowser')).toBeGreaterThan(playback.indexOf('ytdl-format'));
+  });
+
+  test('the words the search finds the new rows by are keywords of theirs, in both languages', () => {
+    const keywords = (id: string, tree: unknown): string[] =>
+      String(textAt(tree, own(id).keywordsKey ?? ''))
+        .split(',')
+        .map((word) => word.trim().toLowerCase());
+    for (const tree of [cs, en]) {
+      expect(keywords('ytdl-format', tree)).toContain('yt-dlp');
+      expect(keywords('playback.cookiesFromBrowser', tree)).toContain('cookies');
+      expect(keywords('updates.ytdlpChannel', tree)).toEqual(
+        expect.arrayContaining(['yt-dlp', 'deno', 'nightly']),
+      );
+    }
+    expect(keywords('ytdl-format', cs)).toContain('kvalita');
+    expect(keywords('ytdl-format', en)).toContain('quality');
   });
 });
 

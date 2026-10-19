@@ -1,9 +1,11 @@
 /**
  * What the About page works out of what Rust gives it (spec 8.10, 11.6), without React: the
- * versions in the diagnostics text, and the search of the licenses.
+ * versions in the diagnostics text, the version of the tools in the list of licenses, and the search
+ * of the licenses.
  */
 
-import type { License } from '../ipc/types';
+import { systemDiagnostics } from '../ipc/commands';
+import type { License, ToolId } from '../ipc/types';
 import { normalizeText } from './search';
 
 /** The versions the page lists, `null` for one the diagnostics could not find out. */
@@ -28,6 +30,48 @@ export function parseVersions(diagnostics: string): Versions {
     return null;
   };
   return { libmpv: valueOf('libmpv'), ffmpeg: valueOf('ffmpeg') };
+}
+
+/**
+ * Reads the versions out of the diagnostics Rust writes. A diagnostics that cannot be read leaves them
+ * unknown (and goes to the console), so that the page around them still works. The About page and
+ * Settings → Updates (the libmpv) read them the same way.
+ */
+export async function readVersions(): Promise<Versions> {
+  try {
+    const text = await systemDiagnostics();
+    return parseVersions(typeof text === 'string' ? text : '');
+  } catch (error) {
+    console.warn('cannot read the versions in the diagnostics', error);
+    return { libmpv: null, ffmpeg: null };
+  }
+}
+
+/**
+ * What the licenses file (resources/licenses/extra.json) writes as the version of a tool that Kaleido
+ * downloads and updates itself: there is no version to print until the tool is there.
+ */
+export const MANAGED_VERSION = 'managed';
+
+/** The managed tools, by the name their entry has in the list of licenses. */
+const TOOL_OF_LICENSE = new Map<string, ToolId>([
+  ['yt-dlp', 'ytDlp'],
+  ['Deno', 'deno'],
+]);
+
+/**
+ * The licenses with the version of the managed tools put in: `versionOf(tool)` is what the page says
+ * for yt-dlp and Deno (their real version, or why there is none) in place of the word `managed`.
+ * Every other entry is as it was.
+ */
+export function withToolVersions(
+  licenses: readonly License[],
+  versionOf: (tool: ToolId) => string,
+): License[] {
+  return licenses.map((entry) => {
+    const tool = entry.version === MANAGED_VERSION ? TOOL_OF_LICENSE.get(entry.name) : undefined;
+    return tool === undefined ? entry : { ...entry, version: versionOf(tool) };
+  });
 }
 
 /**

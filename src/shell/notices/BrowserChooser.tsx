@@ -33,8 +33,8 @@ import Icon, { CHECK } from '../Icon';
 import styles from './BrowserChooser.module.css';
 import card from './ErrorCards.module.css';
 
-/** An entry with nothing to save: yt-dlp knows no profile of it. */
-const isUnusable = (browser: Browser): boolean =>
+/** An entry with nothing to save: yt-dlp knows no profile of it. Settings → Playback tells them the same way. */
+export const isUnusable = (browser: Browser): boolean =>
   browser.spec === '' || browser.warning === 'noProfile';
 
 /** A browser that cannot be chosen sorts after the ones that can; one with a warning after those without. */

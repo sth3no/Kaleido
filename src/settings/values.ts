@@ -3,7 +3,8 @@
  * string (or `null` where mpv.conf does not set it): a field works with a boolean, a number, a
  * string or a list, and `decodeMpv` and `encodeMpv` translate. A value of Kaleido's own settings is
  * JSON and passes through. `''` is the field's "not set": it is sent as `null`, which takes the
- * option out of mpv.conf and puts mpv's default back.
+ * option out of mpv.conf and puts mpv's default back (and, for the browser of the cookies, the
+ * setting back to none).
  */
 
 import type { FieldKind } from './descriptors';
@@ -88,6 +89,19 @@ export function decodeKaleido(field: FieldKind, raw: unknown): FieldValue {
     default:
       return typeof raw === 'string' ? raw : '';
   }
+}
+
+/**
+ * What goes into the settings patch for the field's `value`. A value passes through as it is, except
+ * the browser for cookies: its field has `''` for "none", and the setting has `null` (a JSON merge
+ * patch with `null` takes the key out).
+ */
+export function encodeKaleido(field: FieldKind, value: FieldValue): FieldValue | null {
+  if (field.kind === 'browser') {
+    const text = asString(value);
+    return text === '' ? null : text;
+  }
+  return value;
 }
 
 // --- Text fields -----------------------------------------------------------------------------------
