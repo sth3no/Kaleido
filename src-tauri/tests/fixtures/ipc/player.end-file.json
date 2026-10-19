@@ -1,9 +1,19 @@
 [
-  { "reason": "eof", "error": null, "file": null, "continues": false },
-  { "reason": "stop", "error": null, "file": null, "continues": false },
-  { "reason": "quit", "error": null, "file": null, "continues": false },
-  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": true },
-  { "reason": "redirect", "error": null, "file": null, "continues": false },
-  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": false },
-  { "reason": "error", "error": "loading failed", "file": null, "continues": false }
+  { "reason": "eof", "error": null, "file": null, "continues": false, "streamError": null },
+  { "reason": "stop", "error": null, "file": null, "continues": false, "streamError": null },
+  { "reason": "quit", "error": null, "file": null, "continues": false, "streamError": null },
+  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": true, "streamError": null },
+  { "reason": "redirect", "error": null, "file": null, "continues": false, "streamError": null },
+  { "reason": "error", "error": "loading failed", "file": "C:\\Videa\\poškozený.mkv", "continues": false, "streamError": null },
+  { "reason": "error", "error": "loading failed", "file": null, "continues": false, "streamError": null },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "outdated" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "missing" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "cookies" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "signIn" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "ageRestricted" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "geoBlocked" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "private" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "removed" },
+  { "reason": "error", "error": "loading failed", "file": "https://www.youtube.com/watch?v=abc", "continues": false, "streamError": "network" },
+  { "reason": "error", "error": "loading failed", "file": "https://example.com/video.mp4", "continues": true, "streamError": null }
 ]

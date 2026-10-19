@@ -590,6 +590,42 @@ pub async fn plugins_apply(app: AppHandle) -> Result<PluginsState, PluginError> 
     .unwrap_or(Err(PluginError::Unavailable))
 }
 
+// --- Links that failed (spec 10.3) -------------------------------------------------------------
+
+/// "Zkusit znovu" and "Aktualizovat a zkusit znovu" on the card of a link that failed: opens `url`
+/// again as a pasted link opens (the open queue, and the open-while-playing setting). With
+/// `update` yt-dlp is checked first, from the channel of the settings, due or not, and the link
+/// opens once that is over: a newer yt-dlp is what the card promises. An update that fails does
+/// not stop the retry (it is logged): the yt-dlp that is there, or the lack of one, makes the link
+/// fail as before, and the card says so. Rejects with a `LoadIssue`, before anything is updated,
+/// for text that is no http(s) link. Waits for the download, hence asynchronous.
+#[tauri::command]
+pub async fn stream_retry(app: AppHandle, url: String, update: bool) -> Result<(), LoadIssue> {
+    let link = system::clipboard::checked_link(&url)?;
+    if update {
+        let tools_app = app.clone();
+        on_blocking_thread(move || update_yt_dlp(&tools_app)).await;
+    }
+    system::clipboard::open_link(&app, link);
+    Ok(())
+}
+
+/// Checks yt-dlp now for a retry that asked for the newest. Blocks for as long as the download
+/// takes.
+fn update_yt_dlp(app: &AppHandle) {
+    let Some(tools) = app.try_state::<tools::Service>() else {
+        tracing::warn!("yt-dlp is not updated for the retry: the tools are not running");
+        return;
+    };
+    let status = tools.check_now(ToolId::YtDlp);
+    if status.state == ToolState::Failed {
+        tracing::warn!(
+            "yt-dlp is not up to date for the retry: {}",
+            status.error.as_deref().unwrap_or("the check failed")
+        );
+    }
+}
+
 // --- The managed tools (spec 6.6) ---------------------------------------------------------------
 //
 // Thin glue over `tools::Service`. A tool's every change of state reaches the UI as `tools:status`

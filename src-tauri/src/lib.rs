@@ -113,6 +113,7 @@ pub fn run() {
             commands::plugins_apply,
             commands::tools_status,
             commands::tools_check,
+            commands::stream_retry,
         ])
         // A failed start is logged with its whole chain of causes and shown in a message box
         // before Tauri turns it into a panic, whose message has nowhere to go (Ruling R53).
@@ -458,6 +459,17 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
             }
             false
         }
+        // A link that failed for want of a (newer) yt-dlp: yt-dlp is checked now (spec 6.6). The UI
+        // hears the end all the same, and its card offers the update.
+        PlayerEvent::EndFile {
+            stream_error: Some(class),
+            ..
+        } => {
+            if class.wants_new_yt_dlp() {
+                check_yt_dlp(app);
+            }
+            false
+        }
         // mpv's own `quit` (the `q` key) ends the app (spec 5.1).
         PlayerEvent::Shutdown => {
             app.exit(0);
@@ -497,6 +509,24 @@ fn route(app: &AppHandle, event: &PlayerEvent) -> bool {
             _ => false,
         },
         _ => false,
+    }
+}
+
+/// Checks yt-dlp if it is due (a missing one at once, see `tools::Service::check_if_due`) on a
+/// thread of its own: this is the mpv event thread, which waits for nothing, and the check may
+/// download. A check that runs already is waited for there, so a failure that comes twice makes
+/// one check.
+fn check_yt_dlp(app: &AppHandle) {
+    let app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("yt-dlp-check".to_owned())
+        .spawn(move || {
+            if let Some(tools) = app.try_state::<tools::Service>() {
+                tools.check_if_due(tools::ToolId::YtDlp);
+            }
+        });
+    if let Err(error) = spawned {
+        tracing::warn!("yt-dlp is not checked after the link failed: {error}");
     }
 }
 

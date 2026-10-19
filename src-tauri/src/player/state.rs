@@ -8,6 +8,7 @@ use mpv_ffi::{EndFileReason, Event, Mpv, PropertyKind, PropertyValue};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 
+use super::stream_error::{HookLog, StreamError, is_link};
 use super::{ENGINE_OBSERVE_BASE, EventLoop};
 
 /// The properties the UI renders, observed under their index as reply id.
@@ -98,6 +99,11 @@ pub enum PlayerEvent {
         /// in the playlist, or the playlist loops and has more than one entry. `false` for every
         /// other end, and where the playlist cannot be read.
         continues: bool,
+        /// Why a link failed, from the lines mpv's `ytdl_hook` logged for it (plan decision 12);
+        /// `None` for every end but an error of an http(s) entry, and for an error whose lines say
+        /// nothing we know.
+        #[serde(rename = "streamError")]
+        stream_error: Option<StreamError>,
     },
     /// A `script-message kaleido …`, without the leading `kaleido`.
     Message {
@@ -195,6 +201,11 @@ pub struct StateLoop<S: EventSink> {
     sink: S,
     changes: BTreeMap<String, Value>,
     time_pos: Throttle<Value>,
+    /// What `ytdl_hook` logged since the entry that plays or failed started (plan decision 12).
+    hook_log: HookLog,
+    /// The end of an http(s) entry that failed, until the log lines mpv still has for it are in
+    /// (see [`StateLoop::handle_with`]); its `stream_error` is read from them when it is sent.
+    held_end: Option<PlayerEvent>,
 }
 
 impl<S: EventSink> StateLoop<S> {
@@ -203,6 +214,8 @@ impl<S: EventSink> StateLoop<S> {
             sink,
             changes: BTreeMap::new(),
             time_pos: Throttle::new(TIME_POS_INTERVAL),
+            hook_log: HookLog::default(),
+            held_end: None,
         }
     }
 
@@ -222,6 +235,14 @@ impl<S: EventSink> StateLoop<S> {
     /// `property` reads the text of a property of mpv's (`None` where it cannot). It is asked for
     /// the end of a file that failed, and for nothing else: see [`failure`].
     ///
+    /// The end of an http(s) entry that failed is told its `stream_error` (plan decision 12), from
+    /// the `ytdl_hook` lines logged since the entry started (cleared at `StartFile`, and at
+    /// `FileLoaded`). mpv hands a client the events it has queued before the log lines it has
+    /// pending, so the lines `ytdl_hook` logged just before it gave up may come after the end
+    /// itself: such an end is held until the events mpv has right now are all in. The event loop
+    /// is idle then ([`flush`]), or the next event that has to come after the end arrives. What
+    /// the UI is sent keeps its order: the changes before the end go first, those after it follow.
+    ///
     /// [`flush`]: StateLoop::flush
     fn handle_with(
         &mut self,
@@ -231,7 +252,15 @@ impl<S: EventSink> StateLoop<S> {
     ) {
         match event {
             Event::PropertyChange { name, value, .. } => self.change(now, name, value),
-            Event::FileLoaded => self.send(PlayerEvent::FileLoaded),
+            Event::StartFile => {
+                // The end of the entry before (it failed, and mpv goes on) is told first.
+                self.release_end();
+                self.hook_log.clear();
+            }
+            Event::FileLoaded => {
+                self.send(PlayerEvent::FileLoaded);
+                self.hook_log.clear();
+            }
             Event::EndFile {
                 reason,
                 playlist_entry_id,
@@ -242,12 +271,22 @@ impl<S: EventSink> StateLoop<S> {
                 } else {
                     (None, false)
                 };
-                self.send(PlayerEvent::EndFile {
+                let held = file.as_deref().is_some_and(is_link);
+                let end = PlayerEvent::EndFile {
                     reason,
                     error,
                     file,
                     continues,
-                });
+                    stream_error: None,
+                };
+                if held {
+                    // What came before it goes first; the end waits for the log lines.
+                    self.release_end();
+                    self.send_changes();
+                    self.held_end = Some(end);
+                } else {
+                    self.send(end);
+                }
             }
             Event::ClientMessage { args } => match client_message(args) {
                 // Rust's own, not part of what the UI sees in order.
@@ -262,6 +301,7 @@ impl<S: EventSink> StateLoop<S> {
             } => {
                 // `request_log_messages("warn")` keeps the others away already.
                 if matches!(level.as_str(), "warn" | "error" | "fatal") {
+                    self.hook_log.note(&prefix, &text);
                     self.sink.emit(PlayerEvent::Log(LogLine {
                         level,
                         prefix,
@@ -274,9 +314,11 @@ impl<S: EventSink> StateLoop<S> {
         }
     }
 
-    /// The event loop is idle: sends the batch, and the held `time-pos` if its interval has
-    /// ended. Returns when to be called again for a `time-pos` still held.
+    /// The event loop is idle: sends the end that waited for the log lines, then the batch, and the
+    /// held `time-pos` if its interval has ended. Returns when to be called again for a `time-pos`
+    /// still held.
     fn flush(&mut self, now: Instant) -> Option<Duration> {
+        self.release_end();
         if let Some(value) = self.time_pos.due(now) {
             self.changes.insert(TIME_POS.to_owned(), value);
         }
@@ -296,10 +338,22 @@ impl<S: EventSink> StateLoop<S> {
         }
     }
 
-    /// Sends `event` after the changes collected so far.
+    /// Sends `event` after the end that waits for the log lines, if there is one, and after the
+    /// changes collected so far.
     fn send(&mut self, event: PlayerEvent) {
+        self.release_end();
         self.send_changes();
         self.sink.emit(event);
+    }
+
+    /// Sends the end that waited for the log lines, with the class of the failure they tell.
+    fn release_end(&mut self) {
+        if let Some(mut end) = self.held_end.take() {
+            if let PlayerEvent::EndFile { stream_error, .. } = &mut end {
+                *stream_error = self.hook_log.class();
+            }
+            self.sink.emit(end);
+        }
     }
 
     fn send_changes(&mut self) {
@@ -453,8 +507,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        BTreeMap, EndReason, EventSink, LogLine, OBSERVED, PlayerEvent, StateLoop, Throttle,
-        observe_all, snapshot,
+        BTreeMap, EndReason, EventSink, LogLine, OBSERVED, PlayerEvent, StateLoop, StreamError,
+        Throttle, observe_all, snapshot,
     };
     use crate::player::Engine;
     use crate::player::testing::{NoEvents, clip, headless, temp_paths};
@@ -768,7 +822,8 @@ mod tests {
                     reason: EndReason::Eof,
                     error: None,
                     file: None,
-                    continues: false
+                    continues: false,
+                    stream_error: None,
                 },
             ]
         );
@@ -802,6 +857,7 @@ mod tests {
             error: error.map(str::to_owned),
             file: None,
             continues: false,
+            stream_error: None,
         };
         assert_eq!(
             recorder.events(),
@@ -836,11 +892,14 @@ mod tests {
             },
             playlist_entry_id: id,
         };
-        state.handle_with(Instant::now(), event, |name| match name {
+        let now = Instant::now();
+        state.handle_with(now, event, |name| match name {
             "playlist" => playlist.map(str::to_owned),
             "loop-playlist" => looping.map(str::to_owned),
             other => panic!("read {other}"),
         });
+        // The end of a link waits for the log lines, until the loop is idle.
+        state.flush(now);
         match recorder.events().as_slice() {
             [
                 PlayerEvent::EndFile {
@@ -974,7 +1033,260 @@ mod tests {
                 error: Some("loading failed".into()),
                 file: Some(r"C:\Videa\a.mkv".into()),
                 continues: true,
+                stream_error: None,
             })
+        );
+    }
+
+    /// Two links and a file; mpv's `playlist` as the entries of the tests below have it.
+    const LINKS: &str = r#"[
+        {"filename": "https://www.youtube.com/watch?v=abc", "id": 7},
+        {"filename": "https://example.com/video.mp4", "id": 8},
+        {"filename": "C:\\Videa\\a.mkv", "id": 9}
+    ]"#;
+
+    const PRIVATE: &str =
+        "ERROR: [youtube] abc: Private video. Sign in if you’ve been granted access to this video";
+
+    /// Gives `state` the event the way the event loop does, with mpv's properties as `LINKS` and
+    /// no looping.
+    fn feed(state: &mut StateLoop<Recorder>, event: Event) {
+        state.handle_with(Instant::now(), event, |name| {
+            Some(if name == "playlist" { LINKS } else { "no" }.to_owned())
+        });
+    }
+
+    fn log_of(prefix: &str, level: &str, text: &str) -> Event {
+        Event::LogMessage {
+            prefix: prefix.into(),
+            level: level.into(),
+            text: text.into(),
+        }
+    }
+
+    /// `ytdl_hook` says `text` as an error, as it does with what yt-dlp wrote.
+    fn hook_error(text: &str) -> Event {
+        log_of("ytdl_hook", "error", text)
+    }
+
+    /// The entry `id` of `LINKS` fails.
+    fn fails(id: i64) -> Event {
+        Event::EndFile {
+            reason: EndFileReason::Error {
+                code: -13,
+                message: "loading failed".into(),
+            },
+            playlist_entry_id: id,
+        }
+    }
+
+    /// The `stream_error` of each end the recorder has, in order.
+    fn stream_errors(recorder: &Recorder) -> Vec<Option<StreamError>> {
+        recorder
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                PlayerEvent::EndFile { stream_error, .. } => Some(stream_error),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Plan decision 12: the end of a link that failed says what `ytdl_hook` logged for it, and
+    /// the next entry starts with nothing.
+    #[test]
+    fn end_file_carries_the_stream_error_of_its_entry() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        // yt-dlp's stderr and then ytdl_hook's own line, which says nothing; the first link fails.
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, hook_error(PRIVATE));
+        feed(
+            &mut state,
+            hook_error("youtube-dl failed: unexpected error occurred"),
+        );
+        feed(&mut state, fails(7));
+        // The second fails at once and logs nothing: it is not told what the first logged.
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, fails(8));
+        state.flush(Instant::now());
+
+        assert_eq!(stream_errors(&recorder), [Some(StreamError::Private), None]);
+        let ends: Vec<PlayerEvent> = recorder
+            .events()
+            .into_iter()
+            .filter(|event| matches!(event, PlayerEvent::EndFile { .. }))
+            .collect();
+        assert_eq!(
+            ends[0],
+            PlayerEvent::EndFile {
+                reason: EndReason::Error,
+                error: Some("loading failed".into()),
+                file: Some("https://www.youtube.com/watch?v=abc".into()),
+                continues: true,
+                stream_error: Some(StreamError::Private),
+            }
+        );
+    }
+
+    /// mpv hands a client the events it has queued before the log lines it has pending: the end of
+    /// a link may come before the lines `ytdl_hook` logged just before it. The end waits until
+    /// what mpv has is in (the loop is idle), and the UI still sees the changes in their order.
+    #[test]
+    fn a_link_that_fails_waits_for_the_log_lines_that_come_after_its_end() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, property("pause", PropertyValue::Flag(true)));
+        feed(&mut state, fails(7));
+        feed(
+            &mut state,
+            hook_error("youtube-dl failed: unexpected error occurred"),
+        );
+        feed(
+            &mut state,
+            hook_error("ERROR: [youtube] abc: Video unavailable"),
+        );
+        feed(&mut state, property("volume", PropertyValue::Double(20.0)));
+
+        let log = |text: &str| {
+            PlayerEvent::Log(LogLine {
+                level: "error".into(),
+                prefix: "ytdl_hook".into(),
+                text: text.into(),
+            })
+        };
+        // The changes before the end are out, and the log lines (the UI hears them as they come);
+        // the end is not.
+        assert_eq!(
+            recorder.events(),
+            [
+                changes([("pause", json!(true))]),
+                log("youtube-dl failed: unexpected error occurred"),
+                log("ERROR: [youtube] abc: Video unavailable"),
+            ]
+        );
+
+        state.flush(Instant::now());
+        let events = recorder.events();
+        assert_eq!(events.len(), 5, "{events:#?}");
+        assert_eq!(
+            events[3],
+            PlayerEvent::EndFile {
+                reason: EndReason::Error,
+                error: Some("loading failed".into()),
+                file: Some("https://www.youtube.com/watch?v=abc".into()),
+                continues: true,
+                stream_error: Some(StreamError::Removed),
+            }
+        );
+        // What changed after the end follows it.
+        assert_eq!(events[4], changes([("volume", json!(20.0))]));
+    }
+
+    /// An event that has to come after the end is sent after it, whatever the loop is doing, and
+    /// the end is told what was logged before it.
+    #[test]
+    fn a_waiting_end_goes_out_before_the_next_event_of_the_order() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, hook_error(PRIVATE));
+        feed(&mut state, fails(7));
+        feed(&mut state, message(&["kaleido", "osd", "volume"]));
+
+        let events = recorder.events();
+        assert_eq!(events.len(), 3, "{events:#?}");
+        assert!(matches!(events[0], PlayerEvent::Log(_)));
+        assert!(
+            matches!(
+                events[1],
+                PlayerEvent::EndFile {
+                    stream_error: Some(StreamError::Private),
+                    ..
+                }
+            ),
+            "{:?}",
+            events[1]
+        );
+        assert_eq!(
+            events[2],
+            PlayerEvent::Message {
+                args: vec!["osd".into(), "volume".into()]
+            }
+        );
+    }
+
+    /// A file on a disk never has a stream error, whatever `ytdl_hook` logged, and its end does not
+    /// wait. Nor has an end that is no error, nor an entry the playlist no longer has.
+    #[test]
+    fn local_files_never_get_a_stream_error() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        let ended = |entry: i64, reason: EndFileReason| Event::EndFile {
+            reason,
+            playlist_entry_id: entry,
+        };
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, hook_error(PRIVATE));
+        feed(&mut state, fails(9));
+        assert_eq!(
+            stream_errors(&recorder),
+            [None],
+            "the end of a file is sent at once"
+        );
+        // The entry is gone from the playlist: not known to be a link.
+        feed(&mut state, fails(99));
+        feed(&mut state, ended(7, EndFileReason::Eof));
+        feed(&mut state, ended(7, EndFileReason::Stop));
+        feed(&mut state, ended(7, EndFileReason::Quit));
+        state.flush(Instant::now());
+        assert_eq!(stream_errors(&recorder), [None; 5]);
+    }
+
+    /// Only what `ytdl_hook` says as a warning or worse counts, and only from the start of the
+    /// entry to the moment it has loaded.
+    #[test]
+    fn the_log_lines_of_an_entry_are_those_of_ytdl_hook_while_it_starts() {
+        let recorder = Recorder::default();
+        let mut state = StateLoop::new(recorder.clone());
+        let end_after = |state: &mut StateLoop<Recorder>, lines: Vec<Event>| {
+            feed(state, Event::StartFile);
+            for line in lines {
+                feed(state, line);
+            }
+            feed(state, fails(7));
+            state.flush(Instant::now());
+        };
+        // Another program's line, a line that is not a warning.
+        end_after(
+            &mut state,
+            vec![
+                log_of("ffmpeg", "error", PRIVATE),
+                log_of("ytdl_hook", "info", PRIVATE),
+                log_of("ytdl_hook", "v", PRIVATE),
+            ],
+        );
+        // Warnings count, too.
+        end_after(
+            &mut state,
+            vec![log_of(
+                "ytdl_hook",
+                "warn",
+                "WARNING: [youtube] abc: Video unavailable",
+            )],
+        );
+        // What was logged before the entry loaded is not about a failure later (a stream that
+        // played and then broke).
+        feed(&mut state, Event::StartFile);
+        feed(&mut state, hook_error(PRIVATE));
+        feed(&mut state, Event::FileLoaded);
+        feed(&mut state, fails(7));
+        state.flush(Instant::now());
+
+        assert_eq!(
+            stream_errors(&recorder),
+            [None, Some(StreamError::Removed), None]
         );
     }
 
@@ -1053,13 +1365,31 @@ mod tests {
                 reason: EndReason::Error,
                 error: Some("loading failed".into()),
                 file: Some(r"C:\Videa\a.mkv".into()),
-                continues: true
+                continues: true,
+                stream_error: None,
             }),
             json!({
                 "reason": "error",
                 "error": "loading failed",
                 "file": r"C:\Videa\a.mkv",
-                "continues": true
+                "continues": true,
+                "streamError": null
+            })
+        );
+        assert_eq!(
+            payload(&PlayerEvent::EndFile {
+                reason: EndReason::Error,
+                error: Some("loading failed".into()),
+                file: Some("https://www.youtube.com/watch?v=abc".into()),
+                continues: false,
+                stream_error: Some(StreamError::AgeRestricted),
+            }),
+            json!({
+                "reason": "error",
+                "error": "loading failed",
+                "file": "https://www.youtube.com/watch?v=abc",
+                "continues": false,
+                "streamError": "ageRestricted"
             })
         );
         assert_eq!(
@@ -1067,9 +1397,16 @@ mod tests {
                 reason: EndReason::Eof,
                 error: None,
                 file: None,
-                continues: false
+                continues: false,
+                stream_error: None,
             }),
-            json!({"reason": "eof", "error": null, "file": null, "continues": false})
+            json!({
+                "reason": "eof",
+                "error": null,
+                "file": null,
+                "continues": false,
+                "streamError": null
+            })
         );
         assert_eq!(
             payload(&PlayerEvent::Message {
@@ -1100,6 +1437,7 @@ mod tests {
             error: None,
             file: None,
             continues: false,
+            stream_error: None,
         };
         let message = PlayerEvent::Message { args: vec![] };
         assert_eq!(state.channel(), Some("player:state"));

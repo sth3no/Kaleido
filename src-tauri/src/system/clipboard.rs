@@ -34,14 +34,18 @@ pub fn paste(app: &AppHandle) -> PasteOutcome {
 
 /// Opens `text` from the paste field if it is one link; otherwise says why not.
 pub fn open_text(app: &AppHandle, text: &str) -> Result<(), LoadIssue> {
-    let Some(link) = link_from_text(text) else {
-        return Err(LoadIssue {
-            source: text.to_owned(),
-            kind: not_a_link(text),
-        });
-    };
-    open_link(app, link);
+    open_link(app, checked_link(text)?);
     Ok(())
+}
+
+/// The link `text` is if it is exactly one (see [`link_from_text`]); otherwise why not. What
+/// opens only after this: the paste field, and the retry of a link that failed (which updates
+/// yt-dlp first, and not for a text that would not open).
+pub fn checked_link(text: &str) -> Result<Url, LoadIssue> {
+    link_from_text(text).ok_or_else(|| LoadIssue {
+        source: text.to_owned(),
+        kind: not_a_link(text),
+    })
 }
 
 /// `Protocol` for a link with another scheme (`file://`, `edl://`, ...), `Invalid` for text that
@@ -56,7 +60,9 @@ fn not_a_link(text: &str) -> SourceError {
     }
 }
 
-fn open_link(app: &AppHandle, link: Url) {
+/// Opens `link` as a pasted one opens: through the open queue, and by the open-while-playing
+/// setting (spec 8.10).
+pub fn open_link(app: &AppHandle, link: Url) {
     let request = OpenRequest {
         sources: vec![Source::Url(link)],
         ..OpenRequest::default()
@@ -88,6 +94,45 @@ mod tests {
         ] {
             assert_eq!(not_a_link(text), SourceError::Invalid, "{text:?}");
         }
+    }
+
+    /// `stream_retry` opens a link again, after updating yt-dlp if it is asked to; it checks the
+    /// text first, so that nothing is updated for what would not open.
+    #[test]
+    fn retry_refuses_anything_but_http_links() {
+        for (text, kind) in [
+            ("file:///C:/a.mkv", SourceError::Protocol),
+            ("edl://x", SourceError::Protocol),
+            ("ftp://example.com/a.mp4", SourceError::Protocol),
+            (r"C:\Videa\a.mkv", SourceError::Invalid),
+            ("youtu.be/x", SourceError::Invalid),
+            (
+                "https://youtu.be/x https://youtu.be/y",
+                SourceError::Invalid,
+            ),
+            ("", SourceError::Invalid),
+        ] {
+            assert_eq!(
+                checked_link(text),
+                Err(LoadIssue {
+                    source: text.to_owned(),
+                    kind
+                }),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "https://www.youtube.com/watch?v=abc",
+            "  http://example.com/a.mp4\n",
+            "HTTPS://EXAMPLE.COM/A",
+        ] {
+            assert!(checked_link(text).is_ok(), "{text:?}");
+        }
+        // The link as it is, not as typed.
+        assert_eq!(
+            checked_link("  https://youtu.be/x\n").unwrap().as_str(),
+            "https://youtu.be/x"
+        );
     }
 
     #[test]

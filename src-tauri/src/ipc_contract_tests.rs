@@ -39,6 +39,7 @@ use crate::player::command::{ScreenshotMode, SeekMode, TrackKind};
 use crate::player::load::SourceError;
 use crate::player::{
     self, CommandError, EndReason, LoadIssue, LoadMode, LogLine, PlayerCommand, PlayerEvent,
+    StreamError,
 };
 use crate::plugins::registry::PluginSource;
 use crate::plugins::schema::{Localized, SettingKind, SettingSpec};
@@ -370,6 +371,17 @@ variants!(end_reason_name, END_REASON_NAMES: EndReason {
     EndReason::Quit => "quit",
     EndReason::Error => "error",
     EndReason::Redirect => "redirect",
+});
+variants!(stream_error_name, STREAM_ERROR_NAMES: StreamError {
+    StreamError::Outdated => "outdated",
+    StreamError::Missing => "missing",
+    StreamError::Cookies => "cookies",
+    StreamError::SignIn => "signIn",
+    StreamError::AgeRestricted => "ageRestricted",
+    StreamError::GeoBlocked => "geoBlocked",
+    StreamError::Private => "private",
+    StreamError::Removed => "removed",
+    StreamError::Network => "network",
 });
 variants!(glass_reason_name, GLASS_REASON_NAMES: GlassReason {
     GlassReason::User => "user",
@@ -846,6 +858,20 @@ fn check_command(command: &str, calls: &[Value]) {
             assert_eq!(tools, ToolId::ALL);
             covers("ToolId", &tools, tool_id_name, TOOL_ID_NAMES, None);
         }
+        // With and without the update of yt-dlp; the links are ones the retry opens.
+        "stream_retry" => {
+            let retries = pairs::<String, bool>(command, calls, ["url", "update"]);
+            assert_eq!(
+                retries,
+                [
+                    ("https://www.youtube.com/watch?v=abc".to_owned(), true),
+                    ("https://example.com/video.mp4".to_owned(), false),
+                ]
+            );
+            for (url, _) in &retries {
+                assert!(system::clipboard::checked_link(url).is_ok(), "{url}");
+            }
+        }
         other => panic!("{other} is registered, but has no check here: add its fixture"),
     }
 }
@@ -888,7 +914,8 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     ];
     // Only an error is told with its file (a string, or null where the playlist no longer has the
     // entry) and with whether mpv goes on by itself; the other ends have neither. The fixture has
-    // an error that continues, one that does not, and one without a file.
+    // an error that continues, one that does not, and one without a file. Only an error of a link
+    // has a class of failure (`streamError`), and the others null.
     let failed_file = || Some(r"C:\Videa\poškozený.mkv".to_owned());
     for reason in end_reasons {
         let error = reason == EndReason::Error;
@@ -897,6 +924,7 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             error: error.then(|| "loading failed".to_owned()),
             file: if error { failed_file() } else { None },
             continues: error,
+            stream_error: None,
         });
     }
     for (file, continues) in [(failed_file(), false), (None, false)] {
@@ -905,6 +933,7 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             error: Some("loading failed".to_owned()),
             file,
             continues,
+            stream_error: None,
         });
     }
     covers(
@@ -912,6 +941,41 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
         &end_reasons,
         end_reason_name,
         END_REASON_NAMES,
+        None,
+    );
+    // A link that failed: each class of failure once, and one whose lines said nothing we know.
+    let stream_errors = [
+        StreamError::Outdated,
+        StreamError::Missing,
+        StreamError::Cookies,
+        StreamError::SignIn,
+        StreamError::AgeRestricted,
+        StreamError::GeoBlocked,
+        StreamError::Private,
+        StreamError::Removed,
+        StreamError::Network,
+    ];
+    for stream_error in stream_errors {
+        ui_events.push(PlayerEvent::EndFile {
+            reason: EndReason::Error,
+            error: Some("loading failed".to_owned()),
+            file: Some("https://www.youtube.com/watch?v=abc".to_owned()),
+            continues: false,
+            stream_error: Some(stream_error),
+        });
+    }
+    ui_events.push(PlayerEvent::EndFile {
+        reason: EndReason::Error,
+        error: Some("loading failed".to_owned()),
+        file: Some("https://example.com/video.mp4".to_owned()),
+        continues: true,
+        stream_error: None,
+    });
+    covers(
+        "StreamError",
+        &stream_errors,
+        stream_error_name,
+        STREAM_ERROR_NAMES,
         None,
     );
     for args in [["osd", "volume"], ["osd", "seek"], ["osd", "speed"]] {
@@ -1207,6 +1271,13 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     serialized(out, "rejects.player_load", &load_issues);
     for found in &text_issues {
         serialized(out, "rejects.system_open_text", found);
+    }
+    // The retry of a link takes what the paste field takes, and rejects as it does.
+    for found in [
+        issue("file:///C:/Videa/film.mkv", SourceError::Protocol),
+        issue("not a link", SourceError::Invalid),
+    ] {
+        serialized(out, "rejects.stream_retry", &found);
     }
     let settings_errors = [
         SettingsError::NotAllowed {

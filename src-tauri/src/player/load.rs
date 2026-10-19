@@ -166,7 +166,8 @@ pub(crate) fn scheme(text: &str) -> Option<&str> {
     valid.then_some(scheme)
 }
 
-fn is_http(scheme: &str) -> bool {
+/// Whether `scheme` (see [`scheme`]) is `http` or `https`, in any case.
+pub(crate) fn is_http(scheme: &str) -> bool {
     scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
 }
 

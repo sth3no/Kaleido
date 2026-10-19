@@ -43,6 +43,7 @@ import pluginsUninstallJson from '../../src-tauri/tests/fixtures/ipc/plugins_uni
 import rejectsPlayerLoadJson from '../../src-tauri/tests/fixtures/ipc/rejects.player_load.json';
 import rejectsPluginsSetSettingJson from '../../src-tauri/tests/fixtures/ipc/rejects.plugins_set_setting.json';
 import rejectsSettingsSetJson from '../../src-tauri/tests/fixtures/ipc/rejects.settings_set.json';
+import rejectsStreamRetryJson from '../../src-tauri/tests/fixtures/ipc/rejects.stream_retry.json';
 import rejectsSystemOpenTextJson from '../../src-tauri/tests/fixtures/ipc/rejects.system_open_text.json';
 import returnsPluginsListJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_list.json';
 import returnsPluginsLogJson from '../../src-tauri/tests/fixtures/ipc/returns.plugins_log.json';
@@ -64,6 +65,7 @@ import settingsRebindJson from '../../src-tauri/tests/fixtures/ipc/settings_rebi
 import settingsResetBindingJson from '../../src-tauri/tests/fixtures/ipc/settings_reset_binding.json';
 import settingsSetJson from '../../src-tauri/tests/fixtures/ipc/settings_set.json';
 import settingsSetMpvJson from '../../src-tauri/tests/fixtures/ipc/settings_set_mpv.json';
+import streamRetryJson from '../../src-tauri/tests/fixtures/ipc/stream_retry.json';
 import surfaceSetCaptionButtonsJson from '../../src-tauri/tests/fixtures/ipc/surface_set_caption_buttons.json';
 import surfaceSetLayoutJson from '../../src-tauri/tests/fixtures/ipc/surface_set_layout.json';
 import systemAppearanceEventJson from '../../src-tauri/tests/fixtures/ipc/system.appearance-changed.json';
@@ -139,6 +141,7 @@ import type {
   SettingsForm,
   SourceError,
   SourcePage,
+  StreamError,
   SystemAppearance,
   ThemeMode,
   ThumbReady,
@@ -199,6 +202,7 @@ const commandFixtures = {
   settings_reset_binding: settingsResetBindingJson,
   settings_set: settingsSetJson,
   settings_set_mpv: settingsSetMpvJson,
+  stream_retry: streamRetryJson,
   surface_set_caption_buttons: surfaceSetCaptionButtonsJson,
   surface_set_layout: surfaceSetLayoutJson,
   system_appearance: systemAppearanceJson,
@@ -273,9 +277,15 @@ const rejectFixtures = {
   player_load: rejectsPlayerLoadJson,
   plugins_set_setting: rejectsPluginsSetSettingJson,
   settings_set: rejectsSettingsSetJson,
+  stream_retry: rejectsStreamRetryJson,
   system_open_text: rejectsSystemOpenTextJson,
 } satisfies {
-  [K in 'player_load' | 'plugins_set_setting' | 'settings_set' | 'system_open_text']: Fixture<CommandErrors[K]>;
+  [K in
+    | 'player_load'
+    | 'plugins_set_setting'
+    | 'settings_set'
+    | 'stream_retry'
+    | 'system_open_text']: Fixture<CommandErrors[K]>;
 };
 
 // --- The names of the types --------------------------------------------------------------------
@@ -368,7 +378,13 @@ const CAPTION_BUTTON: Shape<CaptionButton> = {
   fields: { x: 'required', y: 'required', w: 'required', h: 'required' },
 };
 const END_FILE: Shape<EndFile> = {
-  fields: { reason: 'required', error: 'required', file: 'required', continues: 'required' },
+  fields: {
+    reason: 'required',
+    error: 'required',
+    file: 'required',
+    continues: 'required',
+    streamError: 'required',
+  },
 };
 const LOG_LINE: Shape<LogLine> = {
   fields: { level: 'required', prefix: 'required', text: 'required' },
@@ -568,6 +584,17 @@ const LOG_LEVELS = names<LogLine['level']>({ warn: true, error: true, fatal: tru
 const GLASS_REASONS = names<GlassReason>({ user: true, system: true, gpuFailure: true });
 const PASTE_OUTCOMES = names<PasteOutcome>({ played: true, empty: true });
 const SOURCE_ERRORS = names<SourceError>({ notFound: true, protocol: true, invalid: true });
+const STREAM_ERRORS = names<StreamError>({
+  outdated: true,
+  missing: true,
+  cookies: true,
+  signIn: true,
+  ageRestricted: true,
+  geoBlocked: true,
+  private: true,
+  removed: true,
+  network: true,
+});
 const LANGUAGES = names<Language>({ system: true, cs: true, en: true });
 const THEME_MODES = names<ThemeMode>({ system: true, dark: true, light: true });
 const REDUCE_TRANSPARENCY = names<ReduceTransparency>({ auto: true, on: true, off: true });
@@ -659,10 +686,22 @@ describe('fixtures type-check against the IPC types', () => {
     expect(errors.some(({ file }) => file === null)).toBe(true);
     expect(errors.some(({ continues }) => continues)).toBe(true);
     expect(errors.some(({ continues }) => !continues)).toBe(true);
-    for (const { reason, file, continues } of ends) {
+    for (const { reason, file, continues, streamError } of ends) {
       expect(file === null || typeof file === 'string').toBe(true);
-      if (reason !== 'error') expect([file, continues]).toEqual([null, false]);
+      if (reason !== 'error') expect([file, continues, streamError]).toEqual([null, false, null]);
     }
+    // Every class of failure is in the fixture, and each comes with a link: it is only a link that
+    // yt-dlp fails for. A link whose failure Rust cannot class has none, and a file on a disk never has.
+    expectAll(
+      ends.flatMap(({ streamError }) => (streamError === null ? [] : [streamError])),
+      STREAM_ERRORS,
+      'stream error',
+    );
+    for (const { streamError, file } of ends) {
+      if (streamError !== null) expect(file, streamError).toMatch(/^https?:\/\//i);
+    }
+    expect(errors.some(({ file, streamError }) => file?.startsWith('http') && streamError === null)).toBe(true);
+    expect(errors.some(({ file, streamError }) => !file?.startsWith('http') && streamError === null)).toBe(true);
     expectAll(eventFixtures['player:log'].map(({ level }) => level), LOG_LEVELS, 'log level');
     const glass = eventFixtures['glass:state'];
     expectAll(glass.flatMap(({ reason }) => (reason === null ? [] : [reason])), GLASS_REASONS, 'glass reason');
@@ -749,7 +788,7 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(returnFixtures.tools_status.flat(), TOOL_STATUS, 'ToolStatus');
     expectShape(returnFixtures.tools_check, TOOL_STATUS, 'ToolStatus');
     expectShape(
-      [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text],
+      [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text, ...rejectFixtures.stream_retry],
       LOAD_ISSUE,
       'LoadIssue',
     );
@@ -772,6 +811,12 @@ describe('fixtures type-check against the IPC types', () => {
       [...issues, ...rejectFixtures.system_open_text].map(({ kind }) => kind),
       SOURCE_ERRORS,
       'source error',
+    );
+    // The retry of a link rejects as the paste field does: for a scheme that is no http, and for no link.
+    expectAll(
+      rejectFixtures.stream_retry.map(({ kind }) => kind),
+      ['protocol', 'invalid'],
+      'stream retry error',
     );
     expectVariants(rejectFixtures.settings_set, 'type', SETTINGS_ERROR_SHAPES, 'settings error');
     expectVariants(rejectFixtures.plugins_set_setting, 'type', PLUGIN_ERROR_SHAPES, 'plugin error');
@@ -809,6 +854,13 @@ describe('fixtures type-check against the IPC types', () => {
       LOG_LEVELS,
       'plugin log level',
     );
+  });
+});
+
+describe('stream_retry', () => {
+  test('is asked with and without the update of yt-dlp, for links', () => {
+    expectAll(commandFixtures.stream_retry.map(({ update }) => String(update)), ['true', 'false'], 'update');
+    for (const { url } of commandFixtures.stream_retry) expect(url).toMatch(/^https?:\/\//);
   });
 });
 
@@ -863,6 +915,7 @@ const wrappers = {
   settings_reset_binding: ({ key }) => commands.settingsResetBinding(key),
   settings_set: ({ patch }) => commands.settingsSet(patch),
   settings_set_mpv: ({ key, value }) => commands.settingsSetMpv(key, value),
+  stream_retry: ({ url, update }) => commands.streamRetry(url, update),
   surface_set_caption_buttons: ({ rects }) => commands.surfaceSetCaptionButtons(rects),
   surface_set_layout: ({ layout }) => commands.surfaceSetLayout(layout),
   system_appearance: () => commands.systemAppearance(),

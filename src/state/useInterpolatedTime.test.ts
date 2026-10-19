@@ -155,7 +155,7 @@ test('a time-pos that arrives after the file ended does not start the loop again
   advance(500);
 
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'eof', error: null, file: null, continues: false });
+    usePlayerStore.getState().endFile({ reason: 'eof', error: null, file: null, continues: false, streamError: null });
   });
   // end-file comes before idle-active turns true, and a late time-pos can follow it.
   apply({ 'time-pos': 42 });

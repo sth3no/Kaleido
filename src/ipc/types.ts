@@ -495,6 +495,30 @@ export type OsdDimensions = { w: number; h: number; ml: number; mr: number; mt: 
 export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
 
 /**
+ * Why a link did not play, read by Rust from what mpv's `ytdl_hook` logged for it (yt-dlp's own
+ * words, see src-tauri/src/player/stream_error.rs).
+ */
+export type StreamError =
+  /** yt-dlp no longer understands the site (an extractor that is out of date): a newer yt-dlp may. */
+  | 'outdated'
+  /** There is no yt-dlp to run (still downloading, or the download failed): as `outdated`. */
+  | 'missing'
+  /** The cookies of the browser the user chose cannot be read. */
+  | 'cookies'
+  /** The site wants the user signed in (also "confirm you are not a bot"). */
+  | 'signIn'
+  /** The video is for adults. */
+  | 'ageRestricted'
+  /** Not available in the user's region. */
+  | 'geoBlocked'
+  /** A private video. */
+  | 'private'
+  /** Deleted, terminated, or never there. */
+  | 'removed'
+  /** yt-dlp could not reach the site. */
+  | 'network';
+
+/**
  * The payload of `player:end-file`. For an error (`reason: "error"`), and only then, Rust has looked
  * at mpv's playlist as it is at that moment:
  *
@@ -503,14 +527,17 @@ export type EndReason = 'eof' | 'stop' | 'quit' | 'error' | 'redirect';
  *   longer has it.
  * - `continues`: mpv goes on by itself, because an entry follows the failed one, or the playlist
  *   loops and has another entry to play. `false` where it does not, or Rust could not tell.
+ * - `streamError`: for a `file` that is an http(s) link, why yt-dlp failed; `null` where the lines
+ *   of `ytdl_hook` say nothing Rust knows.
  *
- * Any other end has `file: null` and `continues: false`.
+ * Any other end has `file: null`, `continues: false` and `streamError: null`.
  */
 export type EndFile = {
   reason: EndReason;
   error: string | null;
   file: string | null;
   continues: boolean;
+  streamError: StreamError | null;
 };
 
 /** The payload of `player:log`: only the warnings and errors of mpv's log. */
@@ -613,6 +640,13 @@ export interface CommandTable {
   tools_status: { args: undefined; result: ToolStatus[] };
   /** Checks a tool now, due or not; a failed check resolves with a `failed` state. */
   tools_check: { args: { tool: ToolId }; result: ToolStatus };
+  /**
+   * Opens a link that failed again, as a pasted link opens. With `update` yt-dlp is checked first
+   * (due or not) and the promise resolves once the link is handed to the player, so after the
+   * download; an update that fails does not stop the retry. Rejects with a `LoadIssue` for text
+   * that is no http(s) link, before anything is updated.
+   */
+  stream_retry: { args: { url: string; update: boolean }; result: Nothing };
 }
 
 /**
@@ -623,6 +657,7 @@ export interface CommandErrors {
   player_command: string;
   player_load: LoadIssue[];
   system_open_text: LoadIssue;
+  stream_retry: LoadIssue;
   settings_set: SettingsError;
   settings_set_mpv: SettingsError;
   settings_rebind: SettingsError;

@@ -1034,6 +1034,19 @@ impl Service {
         status
     }
 
+    /// Checks `tool` if it is due, as the scheduler would now, from the channel of the settings,
+    /// and returns its state after; a check that runs already is waited for. For a link that
+    /// failed because yt-dlp is missing or out of date (spec 6.6: yt-dlp is checked at such a
+    /// failure): a missing yt-dlp is due at once unless a failed attempt still backs off, and an
+    /// installed one only by its schedule, so that a link that keeps failing does not ask the
+    /// release over and over. Blocks for as long as the downloads take: not for the event thread.
+    pub fn check_if_due(&self, tool: ToolId) -> ToolStatus {
+        let status = self.shared.check(tool, self.shared.host.channel(), false);
+        // When the next check is due may be another time now (a failure backs off).
+        self.shared.wake();
+        status
+    }
+
     /// The user chose the other channel for yt-dlp: the scheduler looks at once (a switch is due
     /// at once). Returns at once.
     pub fn channel_changed(&self) {
@@ -2285,6 +2298,43 @@ mod tests {
 
         // Gone, the scheduler ends.
         drop(service);
+    }
+
+    /// A link failed because yt-dlp is missing or out of date (Task 10): the check that follows is
+    /// the scheduler's, made now. A yt-dlp that is not there is downloaded and the running core
+    /// hears of it; one that was checked just now is left alone, so that a link that keeps
+    /// failing does not ask the release again and again.
+    #[test]
+    fn a_failed_link_checks_yt_dlp_only_when_it_is_due() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host.clone());
+        let yt_dlp = setup.exe(ToolId::YtDlp).to_string_lossy().into_owned();
+        let source = source(ToolId::YtDlp, Channel::Stable);
+        // The core started without it.
+        service.options_for_new_core();
+
+        let status = service.check_if_due(ToolId::YtDlp);
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(setup.web.calls(), [source.sums_url(), source.asset_url()]);
+        assert_eq!(
+            host.sent(),
+            [command(&[
+                "change-list",
+                "script-opts",
+                "append",
+                &format!("ytdl_hook-ytdl_path={yt_dlp}")
+            ])]
+        );
+
+        // Checked just now: not due, the release is not asked, the core hears nothing.
+        let status = service.check_if_due(ToolId::YtDlp);
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(setup.web.calls().len(), 2);
+        assert_eq!(host.sent().len(), 1);
     }
 
     /// Ruling R10: a virus scanner that quarantines yt-dlp.exe right after its `--version` ran.

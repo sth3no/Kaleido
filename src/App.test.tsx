@@ -119,6 +119,7 @@ test('a file that fails to open leaves its card on the start screen, where mpv i
       error: 'loading failed',
       file: 'C:\\Videa\\poškozený.mkv',
       continues: false,
+      streamError: null,
     });
   });
 

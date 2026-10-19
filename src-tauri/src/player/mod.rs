@@ -7,6 +7,7 @@ pub mod load;
 pub mod options;
 pub mod resume;
 pub mod state;
+pub mod stream_error;
 
 pub use command::{CommandError, PlayerCommand, to_mpv};
 pub use engine::{
@@ -15,6 +16,7 @@ pub use engine::{
 };
 pub use load::{LoadIssue, LoadMode, open_sources};
 pub use state::{EndReason, EventSink, LogLine, PlayerEvent, StateLoop, observe_all, snapshot};
+pub use stream_error::StreamError;
 
 /// The event that tells the UI the core was restarted ("Použít" for plugins, spec 6.3); its
 /// payload is `{}`. The new core reports every observed property itself.

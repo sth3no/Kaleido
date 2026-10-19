@@ -75,7 +75,7 @@ describe('the store', () => {
     expect(store.getState().loaded).toBe(true);
 
     // The same snapshot after the file ended, or of an idle player, still clears it.
-    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false });
+    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false, streamError: null });
     store.getState().applySnapshot({ 'idle-active': false, 'time-pos': null, duration: null });
     expect(store.getState().loaded).toBe(false);
     store.getState().fileLoaded();
@@ -111,23 +111,23 @@ describe('the store', () => {
     expect(store.getState().loaded).toBe(false);
     store.getState().fileLoaded();
     expect(store.getState().loaded).toBe(true);
-    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false });
+    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false, streamError: null });
     expect(store.getState().loaded).toBe(false);
-    expect(store.getState().lastEnd).toEqual({ reason: 'eof', error: null, file: null, continues: false });
+    expect(store.getState().lastEnd).toEqual({ reason: 'eof', error: null, file: null, continues: false, streamError: null });
   });
 
   test('every end of a file is a new object, also an identical one', () => {
-    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false });
+    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false, streamError: null });
     const first = store.getState().lastEnd;
-    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false });
+    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false, streamError: null });
     expect(store.getState().lastEnd).toEqual(first);
     expect(store.getState().lastEnd).not.toBe(first);
   });
 
   test('a file that loads after an error does not clear the error', () => {
-    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false });
+    store.getState().endFile({ reason: 'error', error: 'loading failed', file: null, continues: false, streamError: null });
     store.getState().fileLoaded();
-    expect(store.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed', file: null, continues: false });
+    expect(store.getState().lastEnd).toEqual({ reason: 'error', error: 'loading failed', file: null, continues: false, streamError: null });
     expect(store.getState().loaded).toBe(true);
   });
 
@@ -205,7 +205,7 @@ describe('selectors on a playing file', () => {
     store.getState().fileLoaded();
     expect(selectPlaying(store.getState())).toBe(true);
 
-    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false });
+    store.getState().endFile({ reason: 'eof', error: null, file: null, continues: false, streamError: null });
     // end-file comes first; idle-active only turns true after it, and mpv can still send a time.
     store.getState().applyChanges({ 'time-pos': 42, pause: false });
     expect(selectPlaying(store.getState())).toBe(false);

@@ -71,7 +71,7 @@ const fails = (
   continues = false,
 ) => {
   act(() => {
-    usePlayerStore.getState().endFile({ reason: 'error', error, file, continues });
+    usePlayerStore.getState().endFile({ reason: 'error', error, file, continues, streamError: null });
   });
 };
 
@@ -232,14 +232,14 @@ describe('a file that cannot be played', () => {
 
   test('only an error makes a card, and one that was there before the stack is no card', () => {
     act(() => {
-      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed', file: null, continues: false } });
+      usePlayerStore.setState({ lastEnd: { reason: 'error', error: 'loading failed', file: null, continues: false, streamError: null } });
     });
     render(<ErrorCards />);
     expect(cards()).toHaveLength(0);
 
     for (const reason of ['eof', 'stop', 'quit', 'redirect'] as const) {
       act(() => {
-        usePlayerStore.getState().endFile({ reason, error: null, file: null, continues: false });
+        usePlayerStore.getState().endFile({ reason, error: null, file: null, continues: false, streamError: null });
       });
     }
     expect(cards()).toHaveLength(0);

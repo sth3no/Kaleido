@@ -1,0 +1,4 @@
+[
+  { "source": "file:///C:/Videa/film.mkv", "kind": "protocol" },
+  { "source": "not a link", "kind": "invalid" }
+]
