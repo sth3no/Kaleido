@@ -929,6 +929,9 @@ const SCHEDULER_SLACK: std::time::Duration = std::time::Duration::from_secs(1);
 pub trait Host: Send + Sync + 'static {
     /// yt-dlp's release channel, as the settings say now.
     fn channel(&self) -> Channel;
+    /// The browser whose cookies yt-dlp takes, as the settings say now: `BROWSER[:PROFILE]`
+    /// (`playback.cookiesFromBrowser`), `None` for none. Reads the settings only.
+    fn cookies(&self) -> Option<String>;
     /// A tool's state changed (`tools:status`). On the thread of the check.
     fn status(&self, status: &ToolStatus);
     /// Commands for the running core, as the tools' options changed ([`mpv`]). Must not wait for
@@ -945,7 +948,8 @@ pub trait Host: Send + Sync + 'static {
 ///
 /// After every check the running core gets what changed of the tools' options
 /// ([`Host::send`]): the managed yt-dlp once it is there, Deno once it came, was replaced by one
-/// at another place, or went. A new core gets them all ([`Service::options_for_new_core`]).
+/// at another place, or went, and the cookies of a browser when the user chooses another one
+/// ([`Service::cookies_changed`]). A new core gets them all ([`Service::options_for_new_core`]).
 pub struct Service {
     shared: Arc<Shared>,
     scheduler: Mutex<Option<thread::JoinHandle<()>>>,
@@ -1055,6 +1059,15 @@ impl Service {
         self.shared.wake();
     }
 
+    /// The user chose another browser for yt-dlp's cookies, or none (plan decision 13): the
+    /// running core gets the new `ytdl-raw-options` right away, on the way every change of the
+    /// tools' options goes ([`Host::send`]), so that what it was last sent stays right and the
+    /// next core ([`Service::options_for_new_core`]) has the same. Returns at once: it looks at
+    /// two files and queues the commands, and waits for no check and no core.
+    pub fn cookies_changed(&self) {
+        self.shared.refresh_core();
+    }
+
     /// The tools' options for a core that has just started ([`mpv::hook_commands`],
     /// [`mpv::raw_options`]): right after the start of the player, before anything the UI sends,
     /// and in the `prepare` of a restart. From then on that core gets what changes.
@@ -1145,10 +1158,13 @@ impl Shared {
         result.unwrap_or_else(|_| self.tools.status(tool))
     }
 
-    /// Kaleido's `ytdl-raw-options` as they are now: Deno when yt-dlp can use it.
+    /// Kaleido's `ytdl-raw-options` as they are now: Deno when yt-dlp can use it, and the browser
+    /// whose cookies the settings name.
     fn raw_options(&self) -> Vec<Vec<String>> {
-        // The cookies of a browser join them with their setting (Task 11).
-        mpv::raw_options(self.tools.path(ToolId::Deno).as_deref(), None)
+        mpv::raw_options(
+            self.tools.path(ToolId::Deno).as_deref(),
+            self.host.cookies().as_deref(),
+        )
     }
 
     /// Sends the running core the options that changed since it got them last, and makes its
@@ -2136,6 +2152,8 @@ mod tests {
     #[derive(Default)]
     struct FakeHost {
         channel: Mutex<Channel>,
+        /// The browser for the cookies, as the settings would say.
+        cookies: Mutex<Option<String>>,
         statuses: Mutex<Vec<ToolStatus>>,
         sent: Mutex<Vec<Vec<String>>>,
     }
@@ -2159,6 +2177,10 @@ mod tests {
     impl Host for FakeHost {
         fn channel(&self) -> Channel {
             *self.channel.lock().unwrap()
+        }
+
+        fn cookies(&self) -> Option<String> {
+            self.cookies.lock().unwrap().clone()
         }
 
         fn status(&self, status: &ToolStatus) {
@@ -2337,6 +2359,65 @@ mod tests {
         assert_eq!(status.state, ToolState::Ready);
         assert_eq!(setup.web.calls().len(), 2);
         assert_eq!(host.sent().len(), 1);
+    }
+
+    /// The browser for yt-dlp's cookies (plan decision 13) goes to the running core when the user
+    /// changes it, on the way every change of the tools' options goes, so what the core was last
+    /// sent stays right; a core that starts after it (a restart of the player) is given it with
+    /// the rest. Needs no network and no player.
+    #[test]
+    fn a_change_of_the_cookies_reaches_the_running_core_and_the_next_one() {
+        let setup = Setup::new();
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host.clone());
+        let append = |spec: &str| {
+            command(&[
+                "change-list",
+                "ytdl-raw-options",
+                "append",
+                &format!("cookies-from-browser={spec}"),
+            ])
+        };
+        let remove = command(&[
+            "change-list",
+            "ytdl-raw-options",
+            "remove",
+            "cookies-from-browser",
+        ]);
+
+        // A core that starts with none chosen.
+        assert!(service.options_for_new_core().contains(&remove));
+        assert_eq!(host.sent(), Vec::<Vec<String>>::new());
+
+        // Chosen: the core gets the key and nothing else.
+        *host.cookies.lock().unwrap() = Some("firefox".to_owned());
+        service.cookies_changed();
+        assert_eq!(host.sent(), [append("firefox")]);
+        // Told again with nothing new: nothing is sent.
+        service.cookies_changed();
+        assert_eq!(host.sent().len(), 1);
+
+        // A restart: the new core is given it with the rest, and what it has is what it was
+        // sent, so nothing is repeated.
+        let options = service.options_for_new_core();
+        assert!(options.contains(&append("firefox")), "{options:?}");
+        assert!(!options.contains(&remove), "{options:?}");
+        service.cookies_changed();
+        assert_eq!(host.sent().len(), 1);
+
+        // Another browser, with a profile as yt-dlp takes it: the key is replaced.
+        let profile = r"firefox:C:\Users\Jiří Novák\AppData\Roaming\zen\Profiles\x.Default";
+        *host.cookies.lock().unwrap() = Some(profile.to_owned());
+        service.cookies_changed();
+        assert_eq!(host.sent()[1..], [append(profile)]);
+
+        // None: the key goes, and a core that starts later does not have it.
+        *host.cookies.lock().unwrap() = None;
+        service.cookies_changed();
+        // Nothing else was sent: not the hook's path, not Deno.
+        assert_eq!(host.sent().len(), 3);
+        assert_eq!(host.sent()[2], remove);
+        assert!(service.options_for_new_core().contains(&remove));
     }
 
     /// Ruling R10: a virus scanner that quarantines yt-dlp.exe right after its `--version` ran.

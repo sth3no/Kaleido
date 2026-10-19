@@ -51,6 +51,7 @@ import returnsPluginsSettingsJson from '../../src-tauri/tests/fixtures/ipc/retur
 import returnsSettingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_audio_devices.json';
 import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/returns.settings_bindings.json';
 import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
+import returnsSystemBrowsersJson from '../../src-tauri/tests/fixtures/ipc/returns.system_browsers.json';
 import returnsSystemLicensesJson from '../../src-tauri/tests/fixtures/ipc/returns.system_licenses.json';
 import returnsSystemPasteJson from '../../src-tauri/tests/fixtures/ipc/returns.system_paste.json';
 import returnsToolsCheckJson from '../../src-tauri/tests/fixtures/ipc/returns.tools_check.json';
@@ -70,6 +71,7 @@ import surfaceSetCaptionButtonsJson from '../../src-tauri/tests/fixtures/ipc/sur
 import surfaceSetLayoutJson from '../../src-tauri/tests/fixtures/ipc/surface_set_layout.json';
 import systemAppearanceEventJson from '../../src-tauri/tests/fixtures/ipc/system.appearance-changed.json';
 import systemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/system_appearance.json';
+import systemBrowsersJson from '../../src-tauri/tests/fixtures/ipc/system_browsers.json';
 import systemCopyDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_copy_diagnostics.json';
 import systemDiagnosticsJson from '../../src-tauri/tests/fixtures/ipc/system_diagnostics.json';
 import systemErrorEventJson from '../../src-tauri/tests/fixtures/ipc/system.error.json';
@@ -99,6 +101,8 @@ import type {
   AudioDevice,
   Binding,
   BindingSource,
+  Browser,
+  BrowserWarning,
   CaptionButton,
   Channel,
   CommandErrors,
@@ -206,6 +210,7 @@ const commandFixtures = {
   surface_set_caption_buttons: surfaceSetCaptionButtonsJson,
   surface_set_layout: surfaceSetLayoutJson,
   system_appearance: systemAppearanceJson,
+  system_browsers: systemBrowsersJson,
   system_copy_diagnostics: systemCopyDiagnosticsJson,
   system_diagnostics: systemDiagnosticsJson,
   system_fonts: systemFontsJson,
@@ -254,6 +259,7 @@ const returnFixtures = {
   settings_audio_devices: returnsSettingsAudioDevicesJson,
   settings_bindings: returnsSettingsBindingsJson,
   system_appearance: returnsSystemAppearanceJson,
+  system_browsers: returnsSystemBrowsersJson,
   system_licenses: returnsSystemLicensesJson,
   system_paste: returnsSystemPasteJson,
   tools_check: returnsToolsCheckJson,
@@ -266,6 +272,7 @@ const returnFixtures = {
     | 'settings_audio_devices'
     | 'settings_bindings'
     | 'system_appearance'
+    | 'system_browsers'
     | 'system_licenses'
     | 'system_paste'
     | 'tools_check'
@@ -414,7 +421,9 @@ const APPEARANCE: Shape<Appearance> = {
 const SYSTEM_APPEARANCE: Shape<SystemAppearance> = {
   fields: { transparencyEffects: 'required', highContrast: 'required', windowsBuild: 'required' },
 };
-const PLAYBACK: Shape<Playback> = { fields: { openWhilePlaying: 'required' } };
+const PLAYBACK: Shape<Playback> = {
+  fields: { openWhilePlaying: 'required', cookiesFromBrowser: 'required' },
+};
 const UPDATES: Shape<Updates> = { fields: { ytdlpChannel: 'required' } };
 const SETTINGS: Shape<Settings> = {
   fields: {
@@ -431,6 +440,9 @@ const BINDING: Shape<Binding> = {
   fields: { key: 'required', command: 'required', source: 'required', comment: 'required' },
 };
 const AUDIO_DEVICE: Shape<AudioDevice> = { fields: { name: 'required', description: 'required' } };
+const BROWSER: Shape<Browser> = {
+  fields: { id: 'required', label: 'required', spec: 'required', warning: 'required' },
+};
 const LICENSE: Shape<License> = {
   fields: { name: 'required', version: 'required', license: 'required', url: 'required' },
 };
@@ -601,6 +613,9 @@ const REDUCE_TRANSPARENCY = names<ReduceTransparency>({ auto: true, on: true, of
 const PLUGIN_SOURCES = names<PluginSource>({ bundled: true, store: true, url: true, manual: true });
 const SETTINGS_FORMS = names<SettingsForm>({ schema: true, keyValue: true });
 const CHANNELS = names<Channel>({ stable: true, nightly: true });
+const BROWSER_WARNINGS = names<BrowserWarning>({ chromiumCookies: true, noProfile: true });
+/** What `--cookies-from-browser` of yt-dlp takes from Kaleido: a browser it knows, and a profile if there is a colon. */
+const COOKIES_SPEC = /^(brave|chrome|chromium|edge|firefox|opera|safari|vivaldi|whale)(:.+)?$/;
 const TOOL_IDS = names<ToolId>({ ytDlp: true, deno: true });
 const TOOL_STATES = names<ToolState>({ missing: true, checking: true, downloading: true, ready: true, failed: true });
 const SETTING_KINDS = names<SettingKind>({
@@ -719,6 +734,13 @@ describe('fixtures type-check against the IPC types', () => {
       'reduce transparency',
     );
     expectAll(changed.map(({ playback }) => playback.openWhilePlaying), LOAD_MODES, 'open while playing');
+    // The browser for the cookies: none in some samples, a spec of yt-dlp's in others.
+    const cookies = changed.map(({ playback }) => playback.cookiesFromBrowser);
+    expect(cookies.some((spec) => spec === null)).toBe(true);
+    expect(cookies.some((spec) => spec !== null)).toBe(true);
+    for (const spec of cookies) {
+      if (spec !== null) expect(spec).toMatch(COOKIES_SPEC);
+    }
     expectAll(changed.map(({ updates }) => updates.ytdlpChannel), CHANNELS, 'yt-dlp channel');
   });
 
@@ -784,6 +806,7 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(returnFixtures.settings_bindings.flat(), BINDING, 'Binding');
     expectShape(returnFixtures.settings_audio_devices.flat(), AUDIO_DEVICE, 'AudioDevice');
     expectShape(returnFixtures.system_appearance, SYSTEM_APPEARANCE, 'SystemAppearance');
+    expectShape(returnFixtures.system_browsers.flat(), BROWSER, 'Browser');
     expectShape(returnFixtures.system_licenses.flat(), LICENSE, 'License');
     expectShape(returnFixtures.tools_status.flat(), TOOL_STATUS, 'ToolStatus');
     expectShape(returnFixtures.tools_check, TOOL_STATUS, 'ToolStatus');
@@ -803,6 +826,26 @@ describe('fixtures type-check against the IPC types', () => {
       BINDING_SOURCE_SHAPES,
       'binding source',
     );
+  });
+
+  test('the browsers for the cookies', () => {
+    const lists = returnFixtures.system_browsers;
+    const browsers = lists.flat();
+    expectAll(
+      browsers.flatMap(({ warning }) => (warning === null ? [] : [warning])),
+      BROWSER_WARNINGS,
+      'browser warning',
+    );
+    // A PC with no browser gets an empty list, and no browser is listed twice in one.
+    expect(lists.some((list) => list.length === 0)).toBe(true);
+    for (const list of lists) expect(new Set(list.map(({ id }) => id)).size).toBe(list.length);
+    // Only a browser without a profile has no spec to save; every other one has what the setting takes.
+    for (const { id, spec, warning } of browsers) {
+      expect(spec === '', id).toBe(warning === 'noProfile');
+      if (spec !== '') expect(spec, id).toMatch(COOKIES_SPEC);
+    }
+    // The command takes no arguments.
+    expect(commandFixtures.system_browsers).toEqual([{}]);
   });
 
   test('what commands reject with', () => {
@@ -919,6 +962,7 @@ const wrappers = {
   surface_set_caption_buttons: ({ rects }) => commands.surfaceSetCaptionButtons(rects),
   surface_set_layout: ({ layout }) => commands.surfaceSetLayout(layout),
   system_appearance: () => commands.systemAppearance(),
+  system_browsers: () => commands.systemBrowsers(),
   system_copy_diagnostics: () => commands.systemCopyDiagnostics(),
   system_diagnostics: () => commands.systemDiagnostics(),
   system_fonts: () => commands.systemFonts(),

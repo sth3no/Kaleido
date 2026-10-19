@@ -26,7 +26,7 @@ const SETTINGS: Settings = {
   version: 1,
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
-  playback: { openWhilePlaying: 'replace' },
+  playback: { openWhilePlaying: 'replace', cookiesFromBrowser: null },
   updates: { ytdlpChannel: 'stable' },
 };
 
@@ -549,7 +549,9 @@ describe('saving', () => {
   });
 
   test('a patch carries only the changed field', async () => {
-    rust({ settings_set: () => ({ ...SETTINGS, playback: { openWhilePlaying: 'append' } }) });
+    rust({
+      settings_set: () => ({ ...SETTINGS, playback: { ...SETTINGS.playback, openWhilePlaying: 'append' } }),
+    });
     await open();
 
     fireEvent.click(picker('When a file is opened during playback'));
@@ -860,7 +862,7 @@ describe('outside changes', () => {
     await open();
     expect(picker('When a file is opened during playback').textContent).toBe('Replace what is playing');
 
-    emit('settings:changed', { ...SETTINGS, playback: { openWhilePlaying: 'append' } });
+    emit('settings:changed', { ...SETTINGS, playback: { ...SETTINGS.playback, openWhilePlaying: 'append' } });
 
     expect(picker('When a file is opened during playback').textContent).toBe('Add to the playlist');
     expect(useSettingsStore.getState().kaleido?.playback.openWhilePlaying).toBe('append');
@@ -884,7 +886,11 @@ describe('outside changes', () => {
     emit('settings:changed', { ...SETTINGS, language: 'cs' });
     expect(picker('When a file is opened during playback').textContent).toBe('Add to the playlist');
 
-    answer({ ...SETTINGS, language: 'cs', playback: { openWhilePlaying: 'append' } });
+    answer({
+      ...SETTINGS,
+      language: 'cs',
+      playback: { ...SETTINGS.playback, openWhilePlaying: 'append' },
+    });
     await waitFor(() => {
       expect(useSettingsStore.getState().kaleido?.playback.openWhilePlaying).toBe('append');
     });

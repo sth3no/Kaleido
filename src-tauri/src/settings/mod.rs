@@ -65,6 +65,27 @@ pub fn open_while_playing(app: &AppHandle) -> LoadMode {
     }
 }
 
+/// The browser whose cookies yt-dlp takes for links, from the settings (`BROWSER[:PROFILE]`,
+/// `None` for none): one value for mpv's `ytdl_hook` (the tools' options) and for Kaleido's own
+/// `yt-dlp -J`. Before the store is managed (it is, in the setup, before the player starts) none.
+pub fn cookies_from_browser(app: &AppHandle) -> Option<String> {
+    app.try_state::<SharedSettings>()
+        .and_then(|store| lock(&store).get().playback.cookies_from_browser.clone())
+}
+
+/// What a change of the settings did to the browser whose cookies yt-dlp takes
+/// (`playback.cookiesFromBrowser`): `Some(new choice)`, where `None` is no cookies, when the choice
+/// changed, and `None` when it stayed as it was. `settings_set` tells the tools' service when it
+/// changed, and the service sends mpv's `ytdl_hook` the cookies as `ytdl-raw-options`, the way
+/// every change of the tools' options goes (`tools::mpv::raw_options`).
+pub fn cookies_change(before: &Settings, after: &Settings) -> Option<Option<String>> {
+    let (before, after) = (
+        &before.playback.cookies_from_browser,
+        &after.playback.cookies_from_browser,
+    );
+    (before != after).then(|| after.clone())
+}
+
 /// Why a setting was not changed. In every case nothing changed: not the file, not the player.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -614,6 +635,68 @@ mod tests {
         // Into a folder that is not there: an error, and nothing is left behind.
         assert!(write_atomic(&tmp.path().join("missing").join("x.conf"), b"x").is_err());
         assert_eq!(files(tmp.path()), ["mpv.conf"]);
+    }
+
+    /// What `settings_set` does with a change of the browser for yt-dlp's cookies, without the
+    /// command: the change is told once with the new choice, and with `raw_options` that is the
+    /// change-list mpv gets, the key added or taken out.
+    #[test]
+    fn cookies_reach_mpvs_raw_options() {
+        use crate::tools::mpv::raw_options;
+        use serde_json::json;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let mut store = SettingsStore::load(tmp.path().join(SETTINGS_FILE));
+        // What `settings_set` sees: the settings before the change and after it.
+        let mut change = |patch: serde_json::Value| {
+            let before = store.get().clone();
+            let after = store.update(patch).unwrap();
+            cookies_change(&before, &after)
+        };
+        let command = |operation: &str, value: &str| -> Vec<String> {
+            ["change-list", "ytdl-raw-options", operation, value]
+                .map(str::to_owned)
+                .to_vec()
+        };
+        let cookies = |spec: &str| json!({ "playback": { "cookiesFromBrowser": spec } });
+
+        // Another setting is no change of the cookies.
+        assert_eq!(change(json!({ "language": "cs" })), None);
+
+        // "firefox": told once, and mpv gets the key.
+        let told = change(cookies("firefox")).expect("a new choice is told");
+        assert_eq!(told.as_deref(), Some("firefox"));
+        assert_eq!(
+            raw_options(None, told.as_deref())[1],
+            command("append", "cookies-from-browser=firefox")
+        );
+        // The same choice again, or another playback setting: nothing to tell.
+        assert_eq!(change(cookies("firefox")), None);
+        assert_eq!(
+            change(json!({ "playback": { "openWhilePlaying": "append" } })),
+            None
+        );
+
+        // Another browser, with a profile as it goes to yt-dlp.
+        let profile = r"firefox:C:\Users\Jiří Novák\AppData\Roaming\zen\Profiles\x.Default";
+        assert_eq!(change(cookies(profile)), Some(Some(profile.to_owned())));
+        assert_eq!(
+            raw_options(None, Some(profile))[1],
+            command("append", &format!("cookies-from-browser={profile}"))
+        );
+
+        // `null`: no cookies, and mpv gets the key taken out.
+        let told = change(json!({ "playback": { "cookiesFromBrowser": null } }))
+            .expect("no cookies is told");
+        assert_eq!(told, None);
+        assert_eq!(
+            raw_options(None, told.as_deref())[1],
+            command("remove", "cookies-from-browser")
+        );
+        assert_eq!(
+            change(json!({ "playback": { "cookiesFromBrowser": null } })),
+            None
+        );
     }
 
     #[test]

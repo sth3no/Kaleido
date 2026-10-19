@@ -1,5 +1,6 @@
 //! Kaleido's own settings in `settings.json` (spec 4.3, 8.10): language, appearance, how a file
-//! opened during playback is played, and where yt-dlp's updates come from. The store holds valid
+//! opened during playback is played, the browser whose cookies yt-dlp uses for links, and where
+//! yt-dlp's updates come from. The store holds valid
 //! settings only: a change is merged in, checked and written atomically, or nothing changes; a
 //! file with a bad field keeps its other fields (Ruling R23). It knows nothing of Tauri, so it can
 //! be tested on its own; the command layer tells the UI (`settings:changed`).
@@ -16,6 +17,7 @@ use serde_json::{Map, Value};
 
 use super::{SettingsError, is_hex_color, write_atomic};
 use crate::player::LoadMode;
+use crate::system::browsers;
 use crate::tools::Channel;
 
 /// The version of the file's layout this Kaleido writes and reads.
@@ -165,17 +167,23 @@ impl Default for Appearance {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Playback {
     /// What a file opened while another plays does (spec 8.10, 9.3).
     pub open_while_playing: LoadMode,
+    /// The browser whose cookies yt-dlp takes for links (plan decision 13): `BROWSER` or
+    /// `BROWSER:PROFILE` as `--cookies-from-browser` has it ([`browsers::is_spec`]), `null` for
+    /// none. It goes to mpv's `ytdl_hook` as `cookies-from-browser` in `ytdl-raw-options` and to
+    /// Kaleido's own `yt-dlp -J`.
+    pub cookies_from_browser: Option<String>,
 }
 
 impl Default for Playback {
     fn default() -> Playback {
         Playback {
             open_while_playing: LoadMode::Replace,
+            cookies_from_browser: None,
         }
     }
 }
@@ -226,6 +234,19 @@ impl Settings {
                     &format!("from {} to {}", range.start(), range.end()),
                 ));
             }
+        }
+        if let Some(spec) = &self.playback.cookies_from_browser
+            && !browsers::is_spec(spec)
+        {
+            return Err(SettingsError::invalid(
+                "playback.cookiesFromBrowser",
+                &format!(
+                    "null, or BROWSER or BROWSER:PROFILE with BROWSER one of {}, no control \
+                     characters, at most {} characters",
+                    browsers::YT_DLP_BROWSERS.join(", "),
+                    browsers::SPEC_LIMIT
+                ),
+            ));
         }
         Ok(())
     }
@@ -625,7 +646,7 @@ mod tests {
                     "reduceTransparency": "auto",
                     "uiScale": 1.0
                 },
-                "playback": { "openWhilePlaying": "replace" },
+                "playback": { "openWhilePlaying": "replace", "cookiesFromBrowser": null },
                 "updates": { "ytdlpChannel": "stable" }
             })
         );
@@ -922,6 +943,131 @@ mod tests {
         let path = file(tmp.path());
         fs::write(&path, r#"{ "version": 1, "language": "en" }"#).unwrap();
         assert_eq!(SettingsStore::load(&path).get().updates, Updates::default());
+        assert_eq!(names(tmp.path()), ["settings.json"]);
+    }
+
+    /// The browser for yt-dlp's cookies is `BROWSER` or `BROWSER:PROFILE` of a browser yt-dlp
+    /// knows, `null` for none; anything else is refused, and an old file with such a value takes
+    /// no cookies.
+    #[test]
+    fn cookie_specs_are_checked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let mut store = SettingsStore::load(&path);
+        assert_eq!(store.get().playback.cookies_from_browser, None);
+        assert_eq!(
+            serde_json::to_value(store.get().playback.clone()).unwrap(),
+            json!({ "openWhilePlaying": "replace", "cookiesFromBrowser": null })
+        );
+        let cookies = |store: &SettingsStore| store.get().playback.cookies_from_browser.clone();
+
+        for spec in [
+            "firefox",
+            r"firefox:C:\P\x.default",
+            "edge",
+            "chrome",
+            "safari",
+            "whale",
+            "firefox:default-release",
+            r"chromium:C:\Users\Jiří Novák\AppData\Local\Arc\User Data\Default",
+        ] {
+            let updated = store
+                .update(json!({ "playback": { "cookiesFromBrowser": spec } }))
+                .unwrap_or_else(|error| panic!("{spec}: {error}"));
+            assert_eq!(updated.playback.cookies_from_browser.as_deref(), Some(spec));
+            assert_eq!(
+                cookies(&SettingsStore::load(&path)).as_deref(),
+                Some(spec),
+                "it is written"
+            );
+        }
+        let kept = cookies(&store);
+
+        let long = format!("firefox:{}", "p".repeat(1024));
+        let bad_specs = [
+            "netscape",
+            "edge\n",
+            "edge:p\r\nrofile",
+            "firefox:a\0b",
+            "",
+            "Firefox",
+            "firefox:",
+            ":x",
+            "chrome+gnomekeyring",
+            "zen",
+            long.as_str(),
+        ];
+        let before = fs::read(&path).unwrap();
+        for spec in bad_specs {
+            let error = store
+                .update(json!({ "playback": { "cookiesFromBrowser": spec } }))
+                .unwrap_err();
+            assert!(
+                matches!(&error, SettingsError::Invalid { key, .. } if key == "playback.cookiesFromBrowser"),
+                "{spec:?}: {error:?}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), before, "{spec:?}");
+            assert_eq!(cookies(&store), kept, "{spec:?}");
+        }
+        // Not a string at all: the same key is named.
+        for value in [
+            json!(5),
+            json!(true),
+            json!(["firefox"]),
+            json!({ "browser": "edge" }),
+        ] {
+            let error = store
+                .update(json!({ "playback": { "cookiesFromBrowser": value } }))
+                .unwrap_err();
+            assert!(
+                matches!(&error, SettingsError::Invalid { key, .. } if key == "playback.cookiesFromBrowser"),
+                "{value}: {error:?}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), before, "{value}");
+        }
+        // The other playback setting is not touched by a change of this one, and the other way.
+        store
+            .update(json!({ "playback": { "openWhilePlaying": "append" } }))
+            .unwrap();
+        assert_eq!(cookies(&store), kept);
+        // `null`: no cookies.
+        let cleared = store
+            .update(json!({ "playback": { "cookiesFromBrowser": null } }))
+            .unwrap();
+        assert_eq!(cleared.playback.cookies_from_browser, None);
+        assert_eq!(cleared.playback.open_while_playing, LoadMode::Append);
+        assert_eq!(cookies(&SettingsStore::load(&path)), None);
+
+        // A file with a spec this Kaleido does not accept, or a value that is no string: no
+        // cookies, and the rest stays (Ruling R23).
+        for bad in [r#""netscape""#, r#""edge\n""#, "5", r#""firefox:""#] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = file(tmp.path());
+            let text = format!(
+                r#"{{ "language": "cs", "playback": {{ "openWhilePlaying": "append", "cookiesFromBrowser": {bad} }} }}"#
+            );
+            fs::write(&path, &text).unwrap();
+            let store = SettingsStore::load(&path);
+            assert_eq!(cookies(&store), None, "{bad}");
+            assert_eq!(store.get().playback.open_while_playing, LoadMode::Append);
+            assert_eq!(store.get().language, Language::Cs);
+            assert_eq!(kept_aside(tmp.path()), text, "{bad}");
+        }
+        // A good one is kept as it is, and a file from before this setting has none.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        fs::write(
+            &path,
+            r#"{ "playback": { "cookiesFromBrowser": "firefox:default-release" } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cookies(&SettingsStore::load(&path)).as_deref(),
+            Some("firefox:default-release")
+        );
+        assert_eq!(names(tmp.path()), ["settings.json"]);
+        fs::write(&path, r#"{ "playback": { "openWhilePlaying": "append" } }"#).unwrap();
+        assert_eq!(cookies(&SettingsStore::load(&path)), None);
         assert_eq!(names(tmp.path()), ["settings.json"]);
     }
 

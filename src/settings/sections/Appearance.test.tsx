@@ -26,7 +26,7 @@ const SETTINGS: Settings = {
   version: 1,
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
-  playback: { openWhilePlaying: 'replace' },
+  playback: { openWhilePlaying: 'replace', cookiesFromBrowser: null },
   updates: { ytdlpChannel: 'stable' },
 };
 

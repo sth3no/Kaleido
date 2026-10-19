@@ -52,6 +52,7 @@ use crate::settings::{
     Settings, SettingsError, SettingsStore, ThemeMode, Updates,
 };
 use crate::surface::{CaptionButton, Layout};
+use crate::system::browsers::{Browser, BrowserWarning};
 use crate::system::clipboard::PasteOutcome;
 use crate::system::diagnostics::License;
 use crate::system::dialog::DialogPurpose;
@@ -258,7 +259,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 22] = [
+const WITHOUT_ARGUMENTS: [&str; 23] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -277,6 +278,7 @@ const WITHOUT_ARGUMENTS: [&str; 22] = [
     "system_licenses",
     "system_appearance",
     "system_locale",
+    "system_browsers",
     "plugins_list",
     "plugins_restore_essentials",
     "plugins_apply",
@@ -463,6 +465,10 @@ variants!(tool_state_name, TOOL_STATE_NAMES: ToolState {
 variants!(channel_name, CHANNEL_NAMES: Channel {
     Channel::Stable => "stable",
     Channel::Nightly => "nightly",
+});
+variants!(browser_warning_name, BROWSER_WARNING_NAMES: BrowserWarning {
+    BrowserWarning::ChromiumCookies => "chromiumCookies",
+    BrowserWarning::NoProfile => "noProfile",
 });
 // The player's events are untagged, so their names are only these; two of them never reach the UI.
 variants!(event_name, EVENT_NAMES: PlayerEvent {
@@ -809,6 +815,8 @@ fn check_command(command: &str, calls: &[Value]) {
             // `null` took the key out, so it is the default again.
             assert_eq!(now.appearance.blur, Appearance::default().blur);
             assert_eq!(now.playback.open_while_playing, LoadMode::Append);
+            // A browser for the cookies was set and then taken out with `null`.
+            assert_eq!(now.playback.cookies_from_browser, None);
             assert_eq!(now.updates.ytdlp_channel, Channel::Nightly);
         }
         "settings_set_mpv" => assert_eq!(
@@ -1087,6 +1095,10 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             },
             playback: Playback {
                 open_while_playing: LoadMode::Append,
+                cookies_from_browser: Some(
+                    r"firefox:C:\Users\Jan\AppData\Roaming\Mozilla\Firefox\Profiles\ab12.default-release"
+                        .to_owned(),
+                ),
             },
             updates: Updates {
                 ytdlp_channel: Channel::Nightly,
@@ -1230,6 +1242,53 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             },
         ],
     );
+    // The browsers on the PC: what the picker of the cookies lists, one sample for each warning
+    // and one with none (`spec` is empty only for `noProfile`), and a PC with no browser.
+    let browser = |id: &str, label: &str, spec: &str, warning| Browser {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        spec: spec.to_owned(),
+        warning,
+    };
+    let browser_lists = [
+        vec![
+            browser("firefox", "Firefox", "firefox", None),
+            browser(
+                "edge",
+                "Microsoft Edge",
+                "edge",
+                Some(BrowserWarning::ChromiumCookies),
+            ),
+            browser(
+                "zen",
+                "Zen",
+                r"firefox:C:\Users\Jan\AppData\Roaming\zen\Profiles\cd34.Default (release)",
+                None,
+            ),
+        ],
+        vec![browser(
+            "librewolf",
+            "LibreWolf",
+            "",
+            Some(BrowserWarning::NoProfile),
+        )],
+        Vec::new(),
+    ];
+    let warnings: Vec<BrowserWarning> = browser_lists
+        .iter()
+        .flatten()
+        .filter_map(|browser| browser.warning)
+        .collect();
+    covers(
+        "BrowserWarning",
+        &warnings,
+        browser_warning_name,
+        BROWSER_WARNING_NAMES,
+        None,
+    );
+    for list in &browser_lists {
+        serialized(out, "returns.system_browsers", list);
+    }
     let outcomes = [PasteOutcome::Played, PasteOutcome::Empty];
     covers(
         "PasteOutcome",

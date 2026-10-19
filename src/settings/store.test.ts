@@ -11,11 +11,14 @@ const SETTINGS: Settings = {
   version: 1,
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
-  playback: { openWhilePlaying: 'replace' },
+  playback: { openWhilePlaying: 'replace', cookiesFromBrowser: null },
   updates: { ytdlpChannel: 'stable' },
 };
 
-const APPENDING: Settings = { ...SETTINGS, playback: { openWhilePlaying: 'append' } };
+const APPENDING: Settings = {
+  ...SETTINGS,
+  playback: { ...SETTINGS.playback, openWhilePlaying: 'append' },
+};
 
 /** A promise the test settles when it likes. */
 function deferred<T>() {

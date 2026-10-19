@@ -15,6 +15,7 @@ use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand};
 use crate::plugins::{self, PluginError, PluginSettings, Plugins, PluginsState};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
+use crate::system::browsers::{self, Browser, Roots};
 use crate::system::diagnostics::{self, License, ToolVersions};
 use crate::system::{
     self, ROADMAP_URL, Snapshot, SourcePage, clipboard::PasteOutcome, dialog::DialogPurpose,
@@ -223,8 +224,10 @@ pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
 /// Changes Kaleido's settings: `patch` is merged in (a JSON merge patch), checked and written;
 /// on an error nothing changed. The UI hears the new settings as `settings:changed`. A patch
 /// that touches the appearance is also applied here: the glass shader on or off, Mica, the
-/// window's theme; another channel for yt-dlp wakes the tools' scheduler, which checks it.
-/// Synchronous: it writes one small file and never waits for mpv or a download.
+/// window's theme; another channel for yt-dlp wakes the tools' scheduler, which checks it; another
+/// browser for the cookies (or none) is queued for the running player (`ytdl-raw-options`, see
+/// `tools::Service::cookies_changed`). Synchronous: it writes one small file and never waits for
+/// mpv or a download.
 #[tauri::command]
 pub fn settings_set(
     app: AppHandle,
@@ -232,10 +235,11 @@ pub fn settings_set(
     patch: Value,
 ) -> Result<Settings, SettingsError> {
     let appearance_changes = themes::touches_appearance(&patch);
-    let (channel_before, settings) = {
+    let (before, settings) = {
         let mut store = settings::lock(&store);
-        let before = store.get().updates.ytdlp_channel;
-        (before, store.update(patch)?)
+        let before = store.get().clone();
+        let after = store.update(patch)?;
+        (before, after)
     };
     if let Err(error) = app.emit(settings::CHANGED_EVENT, &settings) {
         tracing::warn!("cannot send {} to the UI: {error}", settings::CHANGED_EVENT);
@@ -245,10 +249,16 @@ pub fn settings_set(
     if appearance_changes {
         themes::on_settings_changed(&app, &settings.appearance);
     }
-    if settings.updates.ytdlp_channel != channel_before
-        && let Some(tools) = app.try_state::<tools::Service>()
-    {
-        tools.channel_changed();
+    if let Some(tools) = app.try_state::<tools::Service>() {
+        if settings.updates.ytdlp_channel != before.updates.ytdlp_channel {
+            tools.channel_changed();
+        }
+        // The service reads the new choice from the settings, which hold it by now. It goes to the
+        // running core through the service, so that what the core was sent stays right and a
+        // restarted core is given it too.
+        if settings::cookies_change(&before, &settings).is_some() {
+            tools.cookies_changed();
+        }
     }
     Ok(settings)
 }
@@ -464,6 +474,36 @@ pub async fn system_licenses(app: AppHandle) -> Vec<License> {
     })
     .await
     .unwrap_or_default()
+}
+
+/// The browsers on this PC whose cookies yt-dlp can use, for the choice in Settings → Playback
+/// (plan decision 13): Firefox first, the Chromium-based ones with a warning. Looks at the
+/// browsers' data folders, hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn system_browsers(app: AppHandle) -> Vec<Browser> {
+    on_blocking_thread(move || match browser_roots(&app) {
+        Some(roots) => browsers::detect(&roots),
+        None => Vec::new(),
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// `%LOCALAPPDATA%` and `%APPDATA%`, where the system puts them: the browsers' data is there, not
+/// under Kaleido's own folders.
+fn browser_roots(app: &AppHandle) -> Option<Roots> {
+    let resolver = app.path();
+    match (resolver.local_data_dir(), resolver.data_dir()) {
+        (Ok(local), Ok(roaming)) => Some(Roots { local, roaming }),
+        (local, roaming) => {
+            tracing::warn!(
+                "cannot tell where the browsers keep their data: {:?} {:?}",
+                local.err(),
+                roaming.err()
+            );
+            None
+        }
+    }
 }
 
 // --- Plugins (spec 6.3, 7.3, 10.4) -----------------------------------------------------------

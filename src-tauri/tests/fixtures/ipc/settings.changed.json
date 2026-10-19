@@ -14,7 +14,7 @@
       "reduceTransparency": "auto",
       "uiScale": 1
     },
-    "playback": { "openWhilePlaying": "replace" },
+    "playback": { "openWhilePlaying": "replace", "cookiesFromBrowser": null },
     "updates": { "ytdlpChannel": "stable" }
   },
   {
@@ -32,7 +32,10 @@
       "reduceTransparency": "on",
       "uiScale": 1.25
     },
-    "playback": { "openWhilePlaying": "append" },
+    "playback": {
+      "openWhilePlaying": "append",
+      "cookiesFromBrowser": "firefox:C:\\Users\\Jan\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\ab12.default-release"
+    },
     "updates": { "ytdlpChannel": "nightly" }
   },
   {
@@ -50,7 +53,7 @@
       "reduceTransparency": "off",
       "uiScale": 1
     },
-    "playback": { "openWhilePlaying": "replace" },
+    "playback": { "openWhilePlaying": "replace", "cookiesFromBrowser": null },
     "updates": { "ytdlpChannel": "stable" }
   }
 ]

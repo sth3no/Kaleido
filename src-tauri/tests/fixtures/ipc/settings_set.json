@@ -18,5 +18,13 @@
   },
   { "patch": { "appearance": { "blur": null } } },
   { "patch": { "playback": { "openWhilePlaying": "append" } } },
+  {
+    "patch": {
+      "playback": {
+        "cookiesFromBrowser": "firefox:C:\\Users\\Jan\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\ab12.default-release"
+      }
+    }
+  },
+  { "patch": { "playback": { "cookiesFromBrowser": null } } },
   { "patch": { "updates": { "ytdlpChannel": "nightly" } } }
 ]

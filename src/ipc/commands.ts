@@ -193,6 +193,12 @@ export const systemAppearance = () => call('system_appearance');
  */
 export const systemLocale = () => call('system_locale');
 
+/**
+ * The browsers on this PC whose cookies yt-dlp can use, Firefox first, each with the `spec` to save
+ * as `playback.cookiesFromBrowser` and a warning where it may not work. Reads the disk.
+ */
+export const systemBrowsers = () => call('system_browsers');
+
 // --- Plugins ---------------------------------------------------------------------------------
 // Every change resolves with the new state and sends it as `plugins:changed` too; it rejects with
 // a `PluginError`, and then nothing changed. `name` is always `PluginInfo.name`.

@@ -103,6 +103,7 @@ pub fn run() {
             commands::system_licenses,
             commands::system_appearance,
             commands::system_locale,
+            commands::system_browsers,
             commands::plugins_list,
             commands::plugins_set_enabled,
             commands::plugins_uninstall,
@@ -255,8 +256,8 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             tracing::error!("cannot observe the player state: {error}");
         }
     })));
-    // Then ytdl_hook's yt-dlp and Deno (plan decision 2): queued before anything the UI sends, so
-    // a link the UI opens finds them in place.
+    // Then ytdl_hook's yt-dlp, Deno and the cookies' browser (plan decisions 2 and 13): queued
+    // before anything the UI sends, so a link the UI opens finds them in place.
     for command in tools.options_for_new_core() {
         engine.request(Request::Command(command));
     }
@@ -370,8 +371,8 @@ fn prepare_core(app: &AppHandle, mpv: &Mpv) {
     }
 }
 
-/// What the tools' service asks of the app: the channel of the settings, `tools:status` for the
-/// UI, and commands for the running core.
+/// What the tools' service asks of the app: the channel and the cookies' browser of the settings,
+/// `tools:status` for the UI, and commands for the running core.
 struct AppTools {
     app: AppHandle,
 }
@@ -382,6 +383,10 @@ impl tools::Host for AppTools {
             .try_state::<settings::SharedSettings>()
             .map(|store| settings::lock(&store).get().updates.ytdlp_channel)
             .unwrap_or_default()
+    }
+
+    fn cookies(&self) -> Option<String> {
+        settings::cookies_from_browser(&self.app)
     }
 
     fn status(&self, status: &ToolStatus) {

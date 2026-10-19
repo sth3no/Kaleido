@@ -21,7 +21,7 @@ const settings = (changes: Partial<Appearance>): Settings => ({
   version: 1,
   language: 'system',
   appearance: { ...DEFAULT_APPEARANCE, ...changes },
-  playback: { openWhilePlaying: 'replace' },
+  playback: { openWhilePlaying: 'replace', cookiesFromBrowser: null },
   updates: { ytdlpChannel: 'stable' },
 });
 

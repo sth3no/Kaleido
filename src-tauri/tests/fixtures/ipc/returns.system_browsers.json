@@ -1,0 +1,14 @@
+[
+  [
+    { "id": "firefox", "label": "Firefox", "spec": "firefox", "warning": null },
+    { "id": "edge", "label": "Microsoft Edge", "spec": "edge", "warning": "chromiumCookies" },
+    {
+      "id": "zen",
+      "label": "Zen",
+      "spec": "firefox:C:\\Users\\Jan\\AppData\\Roaming\\zen\\Profiles\\cd34.Default (release)",
+      "warning": null
+    }
+  ],
+  [{ "id": "librewolf", "label": "LibreWolf", "spec": "", "warning": "noProfile" }],
+  []
+]

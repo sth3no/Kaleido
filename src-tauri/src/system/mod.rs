@@ -1,7 +1,9 @@
 //! How files and links reach the player from outside and from the UI (spec 9.2, 9.3): the
 //! command line, later launches, the open dialog, the clipboard and drag and drop. They all go
-//! through one [`OpenQueue`] and are played by the same `player::load::open_checked`.
+//! through one [`OpenQueue`] and are played by the same `player::load::open_checked`. The browsers
+//! whose cookies yt-dlp can use for links are found by [`browsers`].
 
+pub mod browsers;
 pub mod cli;
 pub mod clipboard;
 pub mod diagnostics;

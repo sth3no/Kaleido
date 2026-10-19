@@ -188,6 +188,11 @@ export interface Appearance {
 export interface Playback {
   /** What a file opened while another plays does. */
   openWhilePlaying: LoadMode;
+  /**
+   * The browser whose cookies yt-dlp takes for links, as `--cookies-from-browser` has it:
+   * `BROWSER` or `BROWSER:PROFILE` (one of `Browser.spec`), `null` for none.
+   */
+  cookiesFromBrowser: string | null;
 }
 
 /** yt-dlp's release channel: its stable releases, or its nightly builds. Deno has only its stable ones. */
@@ -271,6 +276,32 @@ export type Binding = {
   command: string;
   source: BindingSource;
   comment: string | null;
+};
+
+/** Why a `Browser` may not work for cookies. */
+export type BrowserWarning =
+  /**
+   * A Chromium-based browser: on Windows yt-dlp mostly cannot read its cookies (Chrome 127 and
+   * newer encrypt them for the browser alone, and a running browser locks the database), and the
+   * link then fails as a whole. Firefox and its forks work, also while the browser runs.
+   */
+  | 'chromiumCookies'
+  /** A browser yt-dlp does not know by name, and none of its profiles has cookies: `spec` is empty. */
+  | 'noProfile';
+
+/** A browser on this PC whose cookies yt-dlp can use (`system_browsers`). */
+export type Browser = {
+  /** `firefox`, `edge`, `chrome`, `brave`, `opera`, `vivaldi`, `chromium`, `librewolf`, `zen`, `floorp` or `arc`. */
+  id: string;
+  /** The name the user reads: `Firefox`, `Microsoft Edge`, `Google Chrome`, ... */
+  label: string;
+  /**
+   * What `playback.cookiesFromBrowser` takes for it: the id for a browser yt-dlp knows,
+   * `firefox:<profile folder>` for a fork of Firefox, `chromium:<profile folder>` for Arc. Empty
+   * for `noProfile`: there is nothing to save, so never offer to.
+   */
+  spec: string;
+  warning: BrowserWarning | null;
 };
 
 /** One entry of the license list on the About page. */
@@ -623,6 +654,8 @@ export interface CommandTable {
   system_appearance: { args: undefined; result: SystemAppearance };
   /** The system's language as a BCP 47 tag (`cs-CZ`); `en-US` where the system names none. */
   system_locale: { args: undefined; result: string };
+  /** The browsers on this PC that yt-dlp may take cookies from, Firefox first; empty if none. */
+  system_browsers: { args: undefined; result: Browser[] };
   plugins_list: { args: undefined; result: PluginsState };
   plugins_set_enabled: { args: { name: string; enabled: boolean }; result: PluginsState };
   plugins_uninstall: { args: { name: string }; result: PluginsState };
