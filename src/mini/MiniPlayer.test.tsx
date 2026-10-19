@@ -83,7 +83,14 @@ afterEach(() => {
 /** The shell with a video playing, on the settings page (`settings`): the mini player. */
 async function miniPlayer(settings: ReactNode = <p>Options</p>) {
   usePlayerStore.setState({ loaded: true, props: PLAYING });
-  render(<AppShell home={<p>Start</p>} player={<p>Video</p>} settings={settings} />);
+  render(
+    <AppShell
+      home={<p>Start</p>}
+      player={<p>Video</p>}
+      plugins={<p>Add-ons</p>}
+      settings={settings}
+    />,
+  );
   act(() => {
     useUiStore.getState().setPage('settings');
   });

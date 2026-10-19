@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 import App from './App';
 import { initI18n } from './i18n';
+import { usePluginsStore } from './plugins/pluginsStore';
 import { useNoticeStore } from './state/noticeStore';
 import { usePlayerStore } from './state/playerStore';
 import { useUiStore } from './state/uiStore';
@@ -27,6 +28,7 @@ beforeEach(() => {
   usePlayerStore.setState(usePlayerStore.getInitialState(), true);
   useUiStore.setState(useUiStore.getInitialState(), true);
   useNoticeStore.setState(useNoticeStore.getInitialState(), true);
+  usePluginsStore.setState(usePluginsStore.getInitialState(), true);
   // Rust says nothing is open, and the glass is on.
   vi.mocked(invoke).mockReset();
   vi.mocked(invoke).mockImplementation(((command: string) => {
@@ -60,6 +62,27 @@ test('with nothing open the app shows the start page with the sidebar and the wi
   // The settings page is what the shell shows there: its title and the first section.
   expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeTruthy();
   expect(screen.getByRole('heading', { level: 2, name: 'Playback' })).toBeTruthy();
+});
+
+test('My plugins is a page of the app, between the player and the settings', async () => {
+  render(<App />);
+  await waitFor(() => {
+    expect(usePlayerStore.getState().props['idle-active']).toBe(true);
+  });
+  const nav = within(screen.getByRole('navigation', { name: 'Pages' }));
+  expect(nav.getAllByRole('button').map((item) => item.textContent)).toEqual([
+    'Player',
+    'My plugins',
+    'Settings',
+  ]);
+
+  fireEvent.click(nav.getByRole('button', { name: 'My plugins' }));
+
+  expect(useUiStore.getState().page).toBe('plugins');
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('plugins');
+  expect(screen.getByRole('heading', { level: 1, name: 'My plugins' })).toBeTruthy();
+  // The page asked Rust for the plugins.
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === 'plugins_list')).toBe(true);
 });
 
 /** What a drag carries; jsdom has no DataTransfer, and the hook reads these members only. */

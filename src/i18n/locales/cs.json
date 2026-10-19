@@ -5,6 +5,7 @@
     "sidebar": {
       "label": "Stránky",
       "player": "Přehrávač",
+      "plugins": "Moje pluginy",
       "settings": "Nastavení"
     },
     "window": {
@@ -99,6 +100,68 @@
     "playlistHint": "Přesun položky: tažením za úchyt nebo klávesami Alt+↑ / Alt+↓",
     "remove": "Odebrat {{name}} ze seznamu",
     "reorderHint": "Přetažením změníš pořadí, nebo stiskni Alt+↑ či Alt+↓"
+  },
+  "plugins": {
+    "title": "Moje pluginy",
+    "intro": "Pluginy jsou skripty pro mpv, které přehrávači přidávají funkce.",
+    "loading": "Načítání…",
+    "loadFailed": "Pluginy se nepodařilo načíst.",
+    "retry": "Zkusit znovu",
+    "empty": "Zatím tu nejsou žádné pluginy.",
+    "list": "Pluginy",
+    "source": {
+      "bundled": "Essentials",
+      "manual": "Ručně přidaný",
+      "store": "Z obchodu",
+      "url": "Z odkazu"
+    },
+    "row": {
+      "version": "Verze {{version}}",
+      "on": "Zapnuto",
+      "off": "Vypnuto",
+      "incompatible": "Nekompatibilní",
+      "incompatibleText": "Tento plugin kreslí přes video vlastní rozhraní, které se střetává s ovládáním Kaleida. Nemusí fungovat správně.",
+      "duplicate": "Duplicita",
+      "duplicateText": "Jiný zapnutý skript má stejné jméno. mpv jeden z nich očísluje (například thumbfast2) a spustí oba. Jeden z nich vypni.",
+      "copyOf": "Tvoje vlastní kopie essentialu {{essential}}. Kaleido pro ni nenastavuje žádné volby, takže náhledy a další chování závisí na tvém skriptu a nastavení.",
+      "stopsOnApply": "Vypnuto. Běží, dokud změny nepoužiješ.",
+      "errors": "Hlásí chyby: {{errors}}",
+      "uninstall": "Odinstalovat",
+      "uninstallLabel": "Odinstalovat {{name}}"
+    },
+    "confirm": {
+      "question": "Odinstalovat {{name}}? Soubory půjdou do Koše a tvoje nastavení pluginu zůstane.",
+      "essential": "Essential vrátíš tlačítkem Obnovit essentials.",
+      "yes": "Potvrdit",
+      "no": "Zrušit"
+    },
+    "log": {
+      "label": "Chyby pluginu {{name}}",
+      "loading": "Načítání…",
+      "empty": "Do logu se nic nezapsalo.",
+      "failed": "Log se nepodařilo načíst."
+    },
+    "apply": {
+      "label": "Čekající změny",
+      "text": "Změny se projeví po restartu přehrávače, který pokračuje na stejném místě.",
+      "button": "Použít",
+      "applying": "Používám…",
+      "progress": "Restartuji přehrávač…"
+    },
+    "restore": {
+      "button": "Obnovit essentials",
+      "label": "Výsledek obnovení",
+      "hint": "Vrátí odebrané essentials: {{names}}.",
+      "back": "Obnoveno: {{names}}.",
+      "blocked": "Neobnoveno: {{names}}. Brání tomu ručně přidaný skript stejného jména. Odstraň ho nebo přejmenuj a Kaleido essential nainstaluje při dalším spuštění."
+    },
+    "errors": {
+      "busy": "Změny počkají, až Použít skončí.",
+      "notFound": "Tento plugin už neexistuje. Seznam byl načten znovu.",
+      "gone": "Plugin {{name}} už neexistuje. Seznam byl načten znovu.",
+      "unavailable": "Přehrávač neběží nebo se ho nepodařilo restartovat. Změny čekají na další Použít.",
+      "generic": "Změnu se nepodařilo provést."
+    }
   },
   "settings": {
     "title": "Nastavení",
@@ -430,6 +493,13 @@
       "unsupported": "Kaleido tento soubor nepřehraje: formát se nepodařilo rozpoznat nebo není podporovaný, případně je soubor poškozený.",
       "generic": "Soubor se nepodařilo přehrát.",
       "continues": "Přehrávání pokračuje dalším souborem."
+    },
+    "plugin": {
+      "title": "Plugin {{name}} hlásí chyby",
+      "message": "Dál běží. Kaleido sám nic nevypíná.",
+      "disable": "Vypnout",
+      "off": "{{name}} je vypnutý. Změna se projeví po Použít.",
+      "open": "Moje pluginy"
     },
     "pasteEmpty": "Ve schránce není žádný odkaz. Zkopíruj webovou adresu (http:// nebo https://) a stiskni Ctrl+V.",
     "dropLink": "Přetažený odkaz se nepodařilo otevřít. Musí to být jedna úplná webová adresa, která začíná http:// nebo https://.",

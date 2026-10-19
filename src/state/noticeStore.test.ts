@@ -5,8 +5,10 @@ import {
   DETAIL_LINES,
   MAX_NOTICES,
   pushAppNotice,
+  pushPluginNotice,
   useNoticeStore,
   type PlaybackNotice,
+  type PluginNotice,
 } from './noticeStore';
 
 const store = useNoticeStore;
@@ -121,5 +123,84 @@ describe('addLogLine', () => {
     store.getState().addLogLine(before[0]?.id ?? 0, line('x'));
 
     expect(store.getState().notices).toBe(before);
+  });
+});
+
+describe('the cards of plugins that report errors', () => {
+  const pluginCards = () =>
+    store.getState().notices.filter((notice): notice is PluginNotice => notice.kind === 'plugin');
+
+  test('a plugin has one card: a second notice for it adds nothing and gives the one that is there', () => {
+    pushPluginNotice('thumbfast');
+    const [first] = pluginCards();
+    const again = store.getState().push({
+      kind: 'plugin',
+      message: 'errors.plugin.message',
+      name: 'thumbfast',
+      phase: 'ask',
+      problem: null,
+    });
+
+    expect(pluginCards()).toHaveLength(1);
+    expect(again).toBe(first?.id);
+  });
+
+  test('plugins stack, newest on top, and they begin by offering Disable', () => {
+    pushPluginNotice('thumbfast');
+    pushPluginNotice('reload');
+
+    expect(pluginCards().map((notice) => notice.name)).toEqual(['reload', 'thumbfast']);
+    expect(pluginCards().map((notice) => notice.phase)).toEqual(['ask', 'ask']);
+    expect(pluginCards()[0]).toMatchObject({ message: 'errors.plugin.message', problem: null });
+  });
+
+  test('setPluginPhase moves a card on, and the reason belongs to a failed one only', () => {
+    pushPluginNotice('thumbfast');
+    const id = pluginCards()[0]?.id ?? 0;
+
+    store.getState().setPluginPhase(id, 'working');
+    expect(pluginCards()[0]?.phase).toBe('working');
+
+    store.getState().setPluginPhase(id, 'failed', { code: 'busy', message: '' });
+    expect(pluginCards()[0]).toMatchObject({ phase: 'failed', problem: { code: 'busy' } });
+
+    // A reason that comes with another phase is not kept.
+    store.getState().setPluginPhase(id, 'off', { code: 'busy', message: '' });
+    expect(pluginCards()[0]).toMatchObject({ phase: 'off', problem: null });
+  });
+
+  test('setPluginPhase leaves a card that is gone, and the notices of other kinds, alone', () => {
+    playback('a.mkv');
+    pushAppNotice('errors.dropLink');
+    const before = store.getState().notices;
+
+    store.getState().setPluginPhase(9999, 'working');
+    store.getState().setPluginPhase(before[0]?.id ?? 0, 'working');
+    store.getState().setPluginPhase(before[1]?.id ?? 0, 'working');
+
+    expect(store.getState().notices).toBe(before);
+  });
+
+  test('a fourth notice takes the place of the oldest card that is not at work', () => {
+    pushPluginNotice('first');
+    store.getState().setPluginPhase(pluginCards()[0]?.id ?? 0, 'working');
+    pushPluginNotice('second');
+    pushPluginNotice('third');
+
+    pushPluginNotice('fourth');
+
+    expect(pluginCards().map((notice) => notice.name)).toEqual(['fourth', 'third', 'first']);
+  });
+
+  test('when every card is at work the oldest still goes, so that the stack is never taller than the rule', () => {
+    for (const name of ['a', 'b', 'c']) {
+      pushPluginNotice(name);
+      store.getState().setPluginPhase(pluginCards()[0]?.id ?? 0, 'working');
+    }
+
+    pushPluginNotice('d');
+
+    expect(store.getState().notices).toHaveLength(MAX_NOTICES);
+    expect(pluginCards()[0]?.name).toBe('d');
   });
 });

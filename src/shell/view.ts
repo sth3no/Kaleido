@@ -7,7 +7,7 @@ import { selectIdle, type PlayerState } from '../state/playerStore';
 import type { Page } from '../state/uiStore';
 
 /** What the shell shows. */
-export type View = 'home' | 'player' | 'settings';
+export type View = 'home' | 'player' | 'plugins' | 'settings';
 
 /**
  * Whether a file is open: loaded, or loading (mpv said it is not idle). Before mpv has said
@@ -19,8 +19,12 @@ export function selectVideoOpen({ props, loaded }: Pick<PlayerState, 'props' | '
   return loaded || (known && !selectIdle(props));
 }
 
-/** The settings while the user is there; the player while a file is open; else the start screen. */
+/**
+ * The settings or My plugins while the user is there; the player while a file is open; else the
+ * start screen.
+ */
 export function selectView(page: Page, state: Pick<PlayerState, 'props' | 'loaded'>): View {
   if (page === 'settings') return 'settings';
+  if (page === 'plugins') return 'plugins';
   return selectVideoOpen(state) ? 'player' : 'home';
 }

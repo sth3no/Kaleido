@@ -56,7 +56,14 @@ const idle = () => {
 };
 
 const shell = () =>
-  render(<AppShell home={<p>Start</p>} player={<p>Video</p>} settings={<p>Options</p>} />);
+  render(
+    <AppShell
+      home={<p>Start</p>}
+      player={<p>Video</p>}
+      plugins={<p>Add-ons</p>}
+      settings={<p>Options</p>}
+    />,
+  );
 
 /** The sidebar, if it can be seen (and reached) now. */
 const sidebar = () => screen.queryByRole('navigation', { name: 'Pages' });
@@ -148,23 +155,48 @@ test('escape closes the sidebar', () => {
   expect(focused()).toBe(menu);
 });
 
+test('the sidebar lists My plugins between Player and Settings', () => {
+  idle();
+  shell();
+  const items = within(sidebar() as HTMLElement).getAllByRole('button');
+  expect(items.map((item) => item.textContent)).toEqual(['Player', 'My plugins', 'Settings']);
+
+  fireEvent.click(screen.getByRole('button', { name: 'My plugins' }));
+
+  expect(useUiStore.getState().page).toBe('plugins');
+  // A page of its own, docked beside the sidebar like the settings.
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('plugins');
+  expect(screen.getByText('Add-ons')).toBeTruthy();
+  expect(screen.queryByText('Start')).toBeNull();
+  const nav = within(sidebar() as HTMLElement);
+  expect(nav.getByRole('button', { name: 'My plugins' }).getAttribute('aria-current')).toBe('page');
+  expect(nav.getByRole('button', { name: 'Player' }).getAttribute('aria-current')).toBeNull();
+});
+
 test('arrow keys move between the sidebar items and do not reach mpv', () => {
   idle();
   shell();
   const player = screen.getByRole('button', { name: 'Player' });
+  const plugins = screen.getByRole('button', { name: 'My plugins' });
   const settings = screen.getByRole('button', { name: 'Settings' });
   // The current page is the one Tab reaches.
   expect(player.tabIndex).toBe(0);
+  expect(plugins.tabIndex).toBe(-1);
   expect(settings.tabIndex).toBe(-1);
   player.focus();
 
   expect(fireEvent.keyDown(focused(), { key: 'ArrowDown', code: 'ArrowDown' })).toBe(false);
+  expect(focused()).toBe(plugins);
+  fireEvent.keyDown(focused(), { key: 'ArrowDown', code: 'ArrowDown' });
   expect(focused()).toBe(settings);
+  // Past the last, it comes round to the first.
   fireEvent.keyDown(focused(), { key: 'ArrowDown', code: 'ArrowDown' });
   expect(focused()).toBe(player);
   fireEvent.keyDown(focused(), { key: 'End', code: 'End' });
   expect(focused()).toBe(settings);
   fireEvent.keyDown(focused(), { key: 'ArrowUp', code: 'ArrowUp' });
+  expect(focused()).toBe(plugins);
+  fireEvent.keyDown(focused(), { key: 'Home', code: 'Home' });
   expect(focused()).toBe(player);
   expect(forwarded()).toEqual([]);
 

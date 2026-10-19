@@ -5,6 +5,7 @@
     "sidebar": {
       "label": "Pages",
       "player": "Player",
+      "plugins": "My plugins",
       "settings": "Settings"
     },
     "window": {
@@ -99,6 +100,68 @@
     "playlistHint": "Move an entry: drag the grip, or press Alt+↑ / Alt+↓",
     "remove": "Remove {{name}} from the playlist",
     "reorderHint": "Drag to reorder, or press Alt+↑ or Alt+↓"
+  },
+  "plugins": {
+    "title": "My plugins",
+    "intro": "Plugins are mpv scripts that add features to the player.",
+    "loading": "Loading…",
+    "loadFailed": "The plugins could not be read.",
+    "retry": "Try again",
+    "empty": "There are no plugins yet.",
+    "list": "Plugins",
+    "source": {
+      "bundled": "Essentials",
+      "manual": "Added by hand",
+      "store": "From the store",
+      "url": "From a link"
+    },
+    "row": {
+      "version": "Version {{version}}",
+      "on": "On",
+      "off": "Off",
+      "incompatible": "Incompatible",
+      "incompatibleText": "This plugin draws its own interface over the video, which clashes with Kaleido’s controls. It may not work properly.",
+      "duplicate": "Duplicate",
+      "duplicateText": "Another script that is on has the same name. mpv numbers one of them (for example thumbfast2) and runs both. Turn one of them off.",
+      "copyOf": "Your own copy of the essential {{essential}}. Kaleido sets no options for it, so its previews and other behavior depend on your own script and settings.",
+      "stopsOnApply": "Turned off. It keeps running until you apply the changes.",
+      "errors": "Reports errors: {{errors}}",
+      "uninstall": "Uninstall",
+      "uninstallLabel": "Uninstall {{name}}"
+    },
+    "confirm": {
+      "question": "Uninstall {{name}}? Its files go to the Recycle Bin, and your settings for it stay.",
+      "essential": "You can bring an essential back with Restore essentials.",
+      "yes": "Confirm",
+      "no": "Cancel"
+    },
+    "log": {
+      "label": "Errors of {{name}}",
+      "loading": "Loading…",
+      "empty": "Nothing was written to the log.",
+      "failed": "The log could not be read."
+    },
+    "apply": {
+      "label": "Changes waiting",
+      "text": "The changes take effect when the player restarts. It continues from the same place.",
+      "button": "Apply",
+      "applying": "Applying…",
+      "progress": "Restarting the player…"
+    },
+    "restore": {
+      "button": "Restore essentials",
+      "label": "Result of restoring",
+      "hint": "Brings back the essentials you removed: {{names}}.",
+      "back": "Restored: {{names}}.",
+      "blocked": "Not restored: {{names}}. A script of the same name that was added by hand is in the way. Remove or rename it, and Kaleido installs the essential at its next start."
+    },
+    "errors": {
+      "busy": "Changes wait until Apply finishes.",
+      "notFound": "This plugin is gone. The list was read again.",
+      "gone": "The plugin {{name}} is gone. The list was read again.",
+      "unavailable": "The player is not running or could not be restarted. The changes wait for the next Apply.",
+      "generic": "The change could not be made."
+    }
   },
   "settings": {
     "title": "Settings",
@@ -430,6 +493,13 @@
       "unsupported": "Kaleido cannot play this file: its format is not recognized or not supported, or the file is damaged.",
       "generic": "The file could not be played.",
       "continues": "Playback continues with the next file."
+    },
+    "plugin": {
+      "title": "Plugin {{name}} reports errors",
+      "message": "It keeps running. Kaleido turns nothing off by itself.",
+      "disable": "Disable",
+      "off": "{{name}} is turned off. This takes effect after Apply.",
+      "open": "My plugins"
     },
     "pasteEmpty": "There is no link on the clipboard. Copy a web address (http:// or https://), then press Ctrl+V.",
     "dropLink": "The dropped link could not be opened. It has to be one complete web address that starts with http:// or https://.",

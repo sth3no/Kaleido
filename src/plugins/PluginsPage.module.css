@@ -1,0 +1,438 @@
+/*
+ * My plugins (PluginsPage.tsx): a header with the title, and one glass card with the apply bar, the
+ * list of plugins and "Restore essentials". It lives in the page beside the docked sidebar
+ * (AppShell.module.css) on the opaque background, so the glass blurs the page's gradient. It comes
+ * after theme/glass.module.css, so its own rules win over the glass'. The switch is the settings'
+ * (settings/fields/Fields.module.css); everything that opens (the confirmation, the log) is in the
+ * flow of the page, never in a layer of its own (Ruling R46).
+ */
+.page {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-l);
+  /*
+   * The top of a docked page is the window's title bar (AppShell.module.css): its drag strip is
+   * over the page, so nothing of ours goes there.
+   */
+  padding: var(--shell-titlebar-height) var(--k-space-xl) var(--k-space-xl);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--k-font-size-xl);
+  font-weight: 700;
+}
+
+/* The heading takes the focus when Apply is done and the bar it was in goes; the ring is the global :focus-visible. */
+.title:focus {
+  outline: none;
+}
+
+.title:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+}
+
+.intro {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* The card the list is on; it scrolls, the page around it does not. */
+.content {
+  flex: 1;
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--k-space-l) var(--k-space-xl);
+}
+
+/*
+ * The mini player covers the bottom right corner of the window while a video plays (the shell
+ * clips the page around it, AppShell.module.css): the card keeps room at its end, so that the last
+ * rows can be scrolled clear of the video, and the focus is scrolled clear of it too.
+ */
+:global([data-page-layer][data-mini='true']) .content {
+  padding-bottom: calc(var(--k-space-l) + var(--plugins-mini-reserve, 0px));
+  scroll-padding-bottom: var(--plugins-mini-reserve, 0px);
+}
+
+/* --- The apply bar ------------------------------------------------------------------------- */
+
+/* Stays at the top of the card as the list scrolls; empty (and flat) while nothing waits. */
+.applyArea {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.applySlot:not(:empty) {
+  margin-bottom: var(--k-space-m);
+}
+
+.apply {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+  /* Solid enough for the rows to pass under it. */
+  background: color-mix(in srgb, var(--k-glass-tint) 94%, transparent);
+  box-shadow: var(--k-shadow-popover);
+}
+
+.applyText {
+  flex: 1;
+  min-width: 12rem;
+  margin: 0;
+}
+
+.spinner {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+
+/* --- Buttons --------------------------------------------------------------------------------- */
+
+.primary,
+.secondary,
+.danger,
+.quiet {
+  padding: var(--k-space-xs) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: var(--k-color-hover);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color var(--k-motion-fast) ease;
+}
+
+.secondary:hover,
+.danger:hover,
+.quiet:hover {
+  background: var(--k-color-selected);
+}
+
+/* Apply: the one thing to do. */
+.primary {
+  border-color: transparent;
+  background: var(--k-accent-solid);
+  color: var(--k-color-on-accent);
+}
+
+/* The answer that removes something: the danger colour is its edge, the text stays readable. */
+.danger {
+  border-color: var(--k-color-danger);
+}
+
+.quiet {
+  font-weight: 400;
+}
+
+/* Off while something runs: still focusable (not `disabled`), and does nothing. */
+.primary[aria-disabled='true'],
+.secondary[aria-disabled='true'],
+.danger[aria-disabled='true'],
+.quiet[aria-disabled='true'],
+.switch[aria-disabled='true'] {
+  opacity: 0.5;
+}
+
+/* --- The list -------------------------------------------------------------------------------- */
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--k-space-s) var(--k-space-xl);
+  padding: var(--k-space-m) 0;
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-xs);
+  min-width: 0;
+}
+
+.titleLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--k-space-xs) var(--k-space-s);
+}
+
+.name {
+  font-size: var(--k-font-size-l);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.version,
+.hint,
+.note {
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-xs);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--k-space-xs);
+  padding: 1px var(--k-space-s);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-pill);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--k-font-size-xs);
+}
+
+.badge[data-kind='warning'] {
+  border-style: dashed;
+  font-weight: 600;
+}
+
+/* A plugin that reports errors: the danger colour is the edge, the text keeps the glass' colour. */
+.badge[data-kind='error'] {
+  border-color: var(--k-color-danger);
+  font-weight: 600;
+}
+
+.badgeButton:hover {
+  background: var(--k-color-hover);
+}
+
+.chevron {
+  display: grid;
+  transition: rotate var(--k-motion-fast) ease;
+}
+
+.chevron[data-open='true'] {
+  rotate: 180deg;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note {
+  margin: 0;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+}
+
+.switchText {
+  min-width: 4.5em;
+  font-size: var(--k-font-size-s);
+}
+
+/* The confirmation, the log and what Rust refused take the whole width of the row. */
+.confirm,
+.log,
+.problem {
+  grid-column: 1 / -1;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--k-space-s);
+  padding: var(--k-space-s) var(--k-space-m);
+  border: 1px solid var(--k-color-border);
+  border-radius: var(--k-radius-m);
+  background: var(--k-color-hover);
+}
+
+.confirmText {
+  margin: 0;
+}
+
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--k-space-s);
+}
+
+/*
+ * The plugin's log: what it said, as it said it (the details of an error card look the same). It
+ * keeps the glass' text shadow, so that it stays readable (spec 8.9). A scrollable region.
+ */
+.log {
+  box-sizing: border-box;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--k-space-s);
+  border-radius: var(--k-radius-s);
+  background: color-mix(in srgb, var(--k-color-on-glass) 10%, transparent);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--k-font-size-xs);
+  user-select: text;
+}
+
+.line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* What Rust refused: the text keeps the glass' colour (the danger red is thin on a light glass); the bar is red. */
+.problem {
+  margin: 0;
+  padding: var(--k-space-xs) var(--k-space-s);
+  border-inline-start: 3px solid var(--k-color-danger);
+  font-size: var(--k-font-size-s);
+}
+
+.applyArea > .problem {
+  margin-bottom: var(--k-space-m);
+  background: color-mix(in srgb, var(--k-glass-tint) 94%, transparent);
+}
+
+/* --- The rest of the card --------------------------------------------------------------------- */
+
+.empty {
+  margin: 0;
+  font-size: var(--k-font-size-s);
+  color: color-mix(in srgb, currentColor 72%, transparent);
+}
+
+/* The plugins could not be read. */
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--k-space-m);
+  padding: var(--k-space-s) var(--k-space-m);
+  border-inline-start: 3px solid var(--k-color-danger);
+}
+
+.failureText {
+  margin: 0;
+}
+
+.restore {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--k-space-xs);
+}
+
+/* A rule above the button or the report, and none while there is neither. */
+.restore:has(.secondary, .reportLine, .problem) {
+  margin-top: var(--k-space-l);
+  padding-top: var(--k-space-m);
+  border-top: 1px solid var(--k-color-divider);
+}
+
+.hint {
+  margin: 0;
+}
+
+/* The report takes the focus when the button it came from goes; the ring is the global :focus-visible. */
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--k-font-size-s);
+}
+
+.report:focus {
+  outline: none;
+}
+
+.report:focus-visible {
+  outline: var(--k-focus-ring);
+  outline-offset: var(--k-focus-offset);
+}
+
+.reportLine {
+  margin: 0;
+}
+
+/* High contrast: system colours; a switch tells its state by its fill (Fields.module.css). */
+@media (forced-colors: active) {
+  .apply,
+  .confirm {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+
+  .primary,
+  .secondary,
+  .danger,
+  .quiet {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .badge {
+    border-color: CanvasText;
+  }
+
+  .problem,
+  .failure {
+    border-inline-start-color: CanvasText;
+  }
+
+  .log {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}

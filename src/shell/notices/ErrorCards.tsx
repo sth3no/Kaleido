@@ -20,11 +20,14 @@
  *   while the view is `home`; so the two never both react.
  * - `system:error`: something inside Kaleido failed (a panic on the mpv event thread, Ruling R53);
  *   the log says what, the card says that it happened, on every page.
+ * - `plugins:error` (spec 10.4): a plugin logged its first error of this run. Rust says it once for
+ *   a plugin, and the card is a quiet one, with "Disable" and a link to My plugins; nothing is
+ *   turned off by itself.
  * - `pushAppNotice` from elsewhere: a dropped link that Rust refused (`home/useDrop.ts`).
  *
- * Hints (`status` notices) are announced by a live region that is always in the page, not by their
- * cards: a region that arrives together with its text is announced unreliably. A failure
- * is `role="alert"` on its card (`ErrorCard.tsx`).
+ * Hints (`status` notices) and the cards of plugins are announced by a live region that is always
+ * in the page, not by their cards: a region that arrives together with its text is announced
+ * unreliably. A failure is `role="alert"` on its card (`ErrorCard.tsx`).
  *
  * Glass: all the cards are one glass sheet and one region of the shader, not one each. The shader
  * takes at most `MAX_REGIONS` (6) regions, in the order they registered, and the title island, the
@@ -39,14 +42,16 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { glassRegions, useGlassRegion } from '../../glass/useGlassRegion';
-import { onPasteEmpty, onSystemError } from '../../ipc/events';
+import { onPasteEmpty, onPluginsError, onSystemError } from '../../ipc/events';
 import { listenTo } from '../../ipc/listen';
 import { nameOfFile } from '../../player/entryName';
 import {
   DETAIL_LINES,
   pushAppNotice,
+  pushPluginNotice,
   useNoticeStore,
   type AppNotice,
+  type PluginNotice,
 } from '../../state/noticeStore';
 import { usePlayerStore } from '../../state/playerStore';
 import { useUiStore } from '../../state/uiStore';
@@ -111,6 +116,19 @@ function useNoticeFeed(): void {
       ),
     [],
   );
+
+  // A plugin logged its first error of this run (spec 10.4): one quiet card, with "Disable".
+  useEffect(
+    () =>
+      listenTo(
+        onPluginsError,
+        ({ name }) => {
+          pushPluginNotice(name);
+        },
+        'plugins:error',
+      ),
+    [],
+  );
 }
 
 export default function ErrorCards() {
@@ -122,16 +140,30 @@ export default function ErrorCards() {
   const stack = useRef<HTMLUListElement>(null);
   useGlassRegion(stack, undefined, loaded && page === 'player' && notices.length > 0);
 
-  // The newest hint that is up. Its element is new for each notice (`key`), so that the same hint
-  // pressed twice is announced twice.
+  // The newest hint or plugin card that is up. Its element is new for each notice (`key`), so that
+  // the same hint pressed twice is announced twice; a plugin's card is announced again when it
+  // says that the plugin is off.
   const hint = notices.find(
-    (notice): notice is AppNotice => notice.kind === 'app' && notice.tone === 'status',
+    (notice): notice is AppNotice | PluginNotice =>
+      (notice.kind === 'app' && notice.tone === 'status') || notice.kind === 'plugin',
   );
+  const hintText =
+    hint === undefined
+      ? ''
+      : hint.kind === 'app'
+        ? t(hint.message)
+        : hint.phase === 'off'
+          ? t('errors.plugin.off', { name: hint.name })
+          : t('errors.plugin.title', { name: hint.name });
 
   return (
     <>
       <div className={styles.announce} role="status" aria-live="polite" aria-atomic>
-        {hint && <span key={hint.id}>{t(hint.message)}</span>}
+        {hint && (
+          <span key={hint.kind === 'plugin' && hint.phase === 'off' ? `${hint.id}-off` : hint.id}>
+            {hintText}
+          </span>
+        )}
       </div>
       {notices.length > 0 && (
         <ul

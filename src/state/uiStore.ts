@@ -8,7 +8,7 @@ import { create } from 'zustand';
 
 import type { GlassState } from '../ipc/types';
 
-export type Page = 'player' | 'settings';
+export type Page = 'player' | 'plugins' | 'settings';
 export type Panel = 'quick-settings' | 'playlist';
 export type QuickTab = 'subtitles' | 'audio';
 export type FocusRequest = 'play';

@@ -4,15 +4,17 @@
  * 1. `VideoLayer`: transparent, where mpv's window is; it passes input to mpv. While mpv's window
  *    is the mini player (or on its way there) the pointer stays in the UI (Ruling R45), and so it
  *    does on a page without a video, where mpv's window is hidden (Ruling R52).
- * 2. The page layer, with the page in it: the start screen (`home`), the player (`player`) or the
- *    settings (`settings`), as the tasks that build them pass them in. Over the video the page
- *    lets the pointer through to the video: the player page gives its controls
- *    `pointer-events: auto`. While the mini player is up, and while the video moves there and
- *    back (`surface/useSurfaceLayout.ts`), the page layer owns the hole (Ruling R46): it paints the
- *    page's background itself and is clipped around the video (`--mini-hole` on the shell), so a
- *    page may paint whatever it likes (its own glass has a background to blur), and nothing of it
- *    (popovers neither) draws over the video. Above it the mini player's frame and controls
- *    (`MiniPlayer`), and the cover of reduced motion (`MiniCover`).
+ * 2. The page layer, with the page in it: the start screen (`home`), the player (`player`), My
+ *    plugins (`plugins`) or the settings (`settings`), as the tasks that build them pass them in.
+ *    Over the video the page lets the pointer through to the video: the player page gives its
+ *    controls `pointer-events: auto`. My plugins and the settings are pages with no video of
+ *    their own: while a file is open it plays in the mini player there. While the mini player is
+ *    up, and while the video moves there and back (`surface/useSurfaceLayout.ts`), the page layer
+ *    owns the hole (Ruling R46): it paints the page's background itself and is clipped around the
+ *    video (`--mini-hole` on the shell), so a page may paint whatever it likes (its own glass has a
+ *    background to blur), and nothing of it (popovers neither) draws over the video. Above it the
+ *    mini player's frame and controls (`MiniPlayer`), and the cover of reduced motion
+ *    (`MiniCover`).
  * 3. On a page (no video): a strip along the top that moves the window, as a title bar would.
  *    The top `--shell-titlebar-height` of a docked page is that strip's: no controls there.
  * 4. The islands: the title capsule (over the video only) and the window buttons. They fade with
@@ -21,10 +23,11 @@
  * 5. The sidebar, docked beside the page or over the video.
  * 6. The notices (`notices`): the error cards, over everything.
  *
- * Which page: the settings while the user is there; the player while a file is loaded or loading
- * (mpv says it is not idle); else the start screen. It also starts the bridge to Rust, once for the
- * app, and makes the page transparent while a video is shown (spec 5.1: opaque until then): the
- * loaded player, and the mini player, whose page layer paints the page around the video.
+ * Which page: My plugins or the settings while the user is there; the player while a file is
+ * loaded or loading (mpv says it is not idle); else the start screen. It also starts the bridge to
+ * Rust, once for the app, and makes the page transparent while a video is shown (spec 5.1: opaque
+ * until then): the loaded player, and the mini player, whose page layer paints the page around the
+ * video.
  */
 
 import {
@@ -59,6 +62,8 @@ export interface AppShellProps {
   home: ReactNode;
   /** The player page with its controls (Task 18). */
   player: ReactNode;
+  /** My plugins (M2, Task 13). */
+  plugins: ReactNode;
   /** The settings (Task 22). */
   settings: ReactNode;
   /**
@@ -84,7 +89,7 @@ function useVideoBackdrop(on: boolean): void {
   }, [on]);
 }
 
-export default function AppShell({ home, player, settings, notices }: AppShellProps) {
+export default function AppShell({ home, player, plugins, settings, notices }: AppShellProps) {
   usePlayerBridge();
   const page = useUiStore((state) => state.page);
   const view = usePlayerStore((state) => selectView(page, state));
@@ -134,7 +139,8 @@ export default function AppShell({ home, player, settings, notices }: AppShellPr
   }, []);
 
   const mode: SidebarMode = overVideo ? 'overlay' : 'docked';
-  const content = view === 'settings' ? settings : overVideo ? player : home;
+  const content =
+    view === 'settings' ? settings : view === 'plugins' ? plugins : overVideo ? player : home;
   const dragStrip = SNAP_LAYOUTS ? `${styles.dragStrip} ${styles.caption}` : styles.dragStrip;
 
   return (

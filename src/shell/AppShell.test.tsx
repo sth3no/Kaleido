@@ -46,12 +46,25 @@ afterEach(() => {
 });
 
 const shell = () =>
-  render(<AppShell home={<p>Start</p>} player={<p>Video</p>} settings={<p>Options</p>} />);
+  render(
+    <AppShell
+      home={<p>Start</p>}
+      player={<p>Video</p>}
+      plugins={<p>Add-ons</p>}
+      settings={<p>Options</p>}
+    />,
+  );
 
 describe('selectView', () => {
   test('the settings while the user is there, whatever plays', () => {
     expect(selectView('settings', { props: PLAYING, loaded: true })).toBe('settings');
     expect(selectView('settings', { props: {}, loaded: false })).toBe('settings');
+  });
+
+  test('My plugins while the user is there, whatever plays', () => {
+    expect(selectView('plugins', { props: PLAYING, loaded: true })).toBe('plugins');
+    expect(selectView('plugins', { props: {}, loaded: false })).toBe('plugins');
+    expect(selectView('plugins', { props: { 'idle-active': false }, loaded: false })).toBe('plugins');
   });
 
   test('the player while a file is loaded or loading', () => {
@@ -159,6 +172,25 @@ test('mpv’s window is hidden with no file, whole while one loads, and in the c
   await waitFor(() => {
     expect(last()).toBe('hidden');
   });
+});
+
+test('My plugins is a page like the settings: docked, and the video plays in the mini player', async () => {
+  usePlayerStore.setState({ loaded: true, props: PLAYING });
+  shell();
+  act(() => {
+    useUiStore.getState().setPage('plugins');
+  });
+
+  expect(screen.getByRole('main').getAttribute('data-view')).toBe('plugins');
+  expect(screen.getByText('Add-ons')).toBeTruthy();
+  expect(screen.queryByText('Video')).toBeNull();
+  // No video of its own: no title island with its ☰, the sidebar is docked.
+  expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+  expect(screen.getByRole('navigation', { name: 'Pages' }).getAttribute('data-mode')).toBe('docked');
+  await waitFor(() => {
+    expect(layoutKinds().at(-1)).toBe('mini');
+  });
+  expect(screen.getByRole('main').closest('[data-page-layer]')?.getAttribute('data-mini')).toBe('true');
 });
 
 test('a file of the first launch’s command line: hidden until the UI is ready, then the whole window as it loads (Ruling R56)', async () => {
@@ -270,6 +302,7 @@ test('the notices are a layer of their own: on every view, and not faded with th
     <AppShell
       home={<p>Start</p>}
       player={<p>Video</p>}
+      plugins={<p>Add-ons</p>}
       settings={<p>Options</p>}
       notices={<p>Card</p>}
     />,

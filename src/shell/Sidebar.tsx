@@ -1,7 +1,9 @@
 /**
- * The sidebar (spec 8.3): the pages of M1, Player and Settings (plan decision 3).
+ * The sidebar (spec 8.3): Player, My plugins and Settings (plan decision 16: the Store, in M3,
+ * comes before My plugins).
  *
- * - Without video (the start screen, the settings) it is docked: always shown beside the page.
+ * - Without video (the start screen, My plugins, the settings) it is docked: always shown beside
+ *   the page.
  * - Over the video it is hidden until ☰ or the pointer at the window's left edge (`EDGE_PX`)
  *   opens it. Esc closes it (and does not go on to mpv, where it would leave fullscreen), as does
  *   a click beside it (which does not reach the video either) or choosing a page. Opened at the
@@ -18,7 +20,7 @@ import { blurAfterPointer } from '../input/forward';
 import { useUiStore, type Page } from '../state/uiStore';
 import glass from '../theme/glass.module.css';
 import { readZoomFrame, toWindowBox } from '../theme/zoom';
-import Icon, { PLAYER, SETTINGS } from './Icon';
+import Icon, { PLAYER, PLUGINS, SETTINGS } from './Icon';
 import styles from './Sidebar.module.css';
 
 /** Docked beside a page, or over the video. */
@@ -38,6 +40,7 @@ const PEEK_MARGIN_PX = 24;
 
 const ITEMS: readonly { page: Page; label: string; icon: string }[] = [
   { page: 'player', label: 'shell.sidebar.player', icon: PLAYER },
+  { page: 'plugins', label: 'shell.sidebar.plugins', icon: PLUGINS },
   { page: 'settings', label: 'shell.sidebar.settings', icon: SETTINGS },
 ];
 

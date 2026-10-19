@@ -64,6 +64,7 @@
 
 /* Beside the docked sidebar. */
 .page[data-view='home'],
+.page[data-view='plugins'],
 .page[data-view='settings'] {
   left: var(--shell-page-left);
 }

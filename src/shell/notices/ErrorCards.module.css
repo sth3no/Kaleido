@@ -154,6 +154,11 @@
   background: var(--k-color-selected);
 }
 
+/* An action that runs (Disable on a plugin's card): it keeps the focus, and does nothing twice. */
+.action[aria-disabled='true'] {
+  opacity: 0.5;
+}
+
 .chevron {
   display: grid;
   transition: rotate var(--k-motion-fast) ease;

@@ -1,16 +1,19 @@
 /**
- * The notices the error cards show (spec 10.1, 10.2; Ruling R40): a file that cannot be played
- * (`shell/notices/ErrorCards.tsx` makes those from `end-file`) and the two notices of the app
- * itself, a Ctrl+V that found no link and a dropped link that Rust refused. At most `MAX_NOTICES`
- * are kept, the newest first; the oldest goes when a new one needs its place. A notice goes by
- * itself after `NOTICE_MS` or when it is closed (`shell/notices/ErrorCard.tsx`).
+ * The notices the error cards show (spec 10.1, 10.2, 10.4; Ruling R40): a file that cannot be
+ * played (`shell/notices/ErrorCards.tsx` makes those from `end-file`), a plugin that reports errors
+ * (from `plugins:error`) and the two notices of the app itself, a Ctrl+V that found no link and a
+ * dropped link that Rust refused. At most `MAX_NOTICES` are kept, the newest first; the oldest goes
+ * when a new one needs its place, but not a plugin's card whose action is running. A notice goes by
+ * itself after `NOTICE_MS` (not while its action runs) or when it is closed
+ * (`shell/notices/ErrorCard.tsx`).
  *
- * Other code adds one with `pushAppNotice`; the card stack is the only reader.
+ * Other code adds one with `pushAppNotice` or `pushPluginNotice`; the card stack is the only reader.
  */
 
 import { create } from 'zustand';
 
 import type { LogLine } from '../ipc/types';
+import type { PluginProblem } from '../plugins/problem';
 
 /** Cards on top of one another. */
 export const MAX_NOTICES = 3;
@@ -48,6 +51,27 @@ export interface PlaybackNotice extends NoticeBase {
   lines: readonly LogLine[];
 }
 
+/**
+ * Where the card of a plugin that reports errors stands (spec 10.4). Nothing is turned off by
+ * itself: the card offers "Disable", and it is the user's word.
+ *
+ * - `ask`: "Disable" is offered.
+ * - `working`: "Disable" runs. The card stays until it is done.
+ * - `off`: the plugin is off. A plugin that runs keeps running until Apply, which the card says.
+ * - `failed`: it could not be turned off (`problem` says why); "Disable" is offered again.
+ */
+export type PluginPhase = 'ask' | 'working' | 'off' | 'failed';
+
+/** A plugin that logged errors (its first of this run, `plugins:error`). */
+export interface PluginNotice extends NoticeBase {
+  kind: 'plugin';
+  /** `PluginInfo.name`: what the plugin commands take. */
+  name: string;
+  phase: PluginPhase;
+  /** Why it could not be turned off; set exactly in `failed`. */
+  problem: PluginProblem | null;
+}
+
 /** Something the app itself has to say. */
 export interface AppNotice extends NoticeBase {
   kind: 'app';
@@ -58,7 +82,7 @@ export interface AppNotice extends NoticeBase {
   tone: 'alert' | 'status';
 }
 
-export type Notice = PlaybackNotice | AppNotice;
+export type Notice = PlaybackNotice | PluginNotice | AppNotice;
 
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
 
@@ -68,18 +92,45 @@ export interface NoticeState {
   /**
    * Adds a notice on top and returns its id. An app notice that is already shown (the same text)
    * is replaced rather than stacked, so that a key pressed three times is one card with a new timer.
+   * A plugin has one card at a time: a second notice for it adds nothing and gives the id of the
+   * card that is there.
    */
   push: (notice: WithoutId<Notice>) => number;
   dismiss: (id: number) => void;
+  /** Moves the card of a plugin on (`problem` with `failed`); a card that is gone is left alone. */
+  setPluginPhase: (id: number, phase: PluginPhase, problem?: PluginProblem | null) => void;
   /** Adds a line to the details of a playback notice that is still there; the newest `DETAIL_LINES` stay. */
   addLogLine: (id: number, line: LogLine) => void;
 }
 
 let lastId = 0;
 
-export const useNoticeStore = create<NoticeState>()((set) => ({
+/** A plugin's card whose action runs: it is not pushed out and does not go by itself. */
+export const isWorking = (notice: Notice): boolean =>
+  notice.kind === 'plugin' && notice.phase === 'working';
+
+/**
+ * The newest `MAX_NOTICES`: the oldest go, apart from a card whose action runs, which stays while
+ * any other can go instead (when every card is at work, the oldest goes all the same). The one on
+ * top is the notice that was just added, and it stays.
+ */
+function trimmed(notices: Notice[]): Notice[] {
+  const kept = [...notices];
+  while (kept.length > MAX_NOTICES) {
+    let drop = kept.length - 1;
+    while (drop > 0 && isWorking(kept[drop])) drop -= 1;
+    kept.splice(drop > 0 ? drop : kept.length - 1, 1);
+  }
+  return kept;
+}
+
+export const useNoticeStore = create<NoticeState>()((set, get) => ({
   notices: [],
   push: (notice) => {
+    if (notice.kind === 'plugin') {
+      const there = get().notices.find((other) => other.kind === 'plugin' && other.name === notice.name);
+      if (there) return there.id;
+    }
     lastId += 1;
     const id = lastId;
     set((state) => {
@@ -87,9 +138,20 @@ export const useNoticeStore = create<NoticeState>()((set) => ({
         notice.kind === 'app'
           ? state.notices.filter((other) => !(other.kind === 'app' && other.message === notice.message))
           : state.notices;
-      return { notices: [{ ...notice, id }, ...kept].slice(0, MAX_NOTICES) };
+      return { notices: trimmed([{ ...notice, id }, ...kept]) };
     });
     return id;
+  },
+  setPluginPhase: (id, phase, problem = null) => {
+    set((state) => {
+      const target = state.notices.find((notice) => notice.id === id);
+      if (target?.kind !== 'plugin') return state;
+      return {
+        notices: state.notices.map((notice) =>
+          notice === target ? { ...target, phase, problem: phase === 'failed' ? problem : null } : notice,
+        ),
+      };
+    });
   },
   dismiss: (id) => {
     set((state) =>
@@ -109,6 +171,21 @@ export const useNoticeStore = create<NoticeState>()((set) => ({
     });
   },
 }));
+
+/**
+ * Puts the card of a plugin that reports errors on the stack (spec 10.4): the plugin keeps
+ * running, and the card offers to disable it. Called once for a plugin in a run of the app, when
+ * Rust says `plugins:error`.
+ */
+export function pushPluginNotice(name: string): void {
+  useNoticeStore.getState().push({
+    kind: 'plugin',
+    message: 'errors.plugin.message',
+    name,
+    phase: 'ask',
+    problem: null,
+  });
+}
 
 /** Puts a notice of the app on the card stack: `message` is a key of the locale files. */
 export function pushAppNotice(message: string, tone: AppNotice['tone'] = 'alert'): void {
