@@ -46,6 +46,22 @@ async function settle() {
   });
 }
 
+/** An `onChange` whose answers the test gives, one by one, in the order it was called. */
+function slowAnswers(onChange: ReturnType<typeof renderEditor>['onChange']) {
+  const answers: ((problem: SettingProblem | null) => void)[] = [];
+  onChange.mockImplementation(
+    () =>
+      new Promise<SettingProblem | null>((resolve) => {
+        answers.push(resolve);
+      }),
+  );
+  return (index: number, problem: SettingProblem | null = null) => {
+    act(() => {
+      answers[index]?.(problem);
+    });
+  };
+}
+
 const valueOf = (key: string) => screen.getByRole('textbox', { name: key }) as HTMLInputElement;
 const removeOf = (key: string) =>
   screen.getByRole('button', { name: `Remove ${key}` }) as HTMLButtonElement;
@@ -162,6 +178,45 @@ describe('editing a value', () => {
       ['max_height', ''],
       ['fps-limit', ' x y '],
     ]);
+  });
+
+  test('a value that was sent stays in its field while Rust answers, then the stored one is shown', async () => {
+    const { onChange } = renderEditor();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.change(valueOf('max_height'), { target: { value: '300' } });
+    fireEvent.keyDown(valueOf('max_height'), { key: 'Enter' });
+
+    // Not the old value while Rust writes the file.
+    expect(valueOf('max_height').value).toBe('300');
+    await settle();
+    expect(valueOf('max_height').value).toBe('300');
+
+    // Rust refused it: the stored value is back, with the reason under the row.
+    answer(0, { text: 'The plugin cannot take this value.', detail: 'a value without line breaks' });
+    await settle();
+    expect(valueOf('max_height').value).toBe('200');
+    expect(within(row('max_height')).getByRole('alert').textContent).toContain('without line breaks');
+  });
+
+  test('a quick second change is shown, and an older answer does not take it away', async () => {
+    const { onChange } = renderEditor();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.change(valueOf('max_height'), { target: { value: '300' } });
+    fireEvent.blur(valueOf('max_height'));
+    fireEvent.change(valueOf('max_height'), { target: { value: '400' } });
+    fireEvent.blur(valueOf('max_height'));
+    expect(onChange.mock.calls).toEqual([
+      ['max_height', '300'],
+      ['max_height', '400'],
+    ]);
+
+    answer(0, { text: 'The plugin cannot take this value.' });
+    await settle();
+    // The older one was refused, the newer one still runs: its value stays, and nothing is said yet.
+    expect(valueOf('max_height').value).toBe('400');
+    expect(within(row('max_height')).queryByRole('alert')).toBeNull();
   });
 });
 
@@ -325,6 +380,69 @@ describe('Add option', () => {
     );
     expect(newKey().value).toBe('volume');
     expect(newValue().value).toBe('80');
+  });
+
+  test('Esc drops what is typed in the row first; with nothing typed it is the panel’s', () => {
+    const { onChange } = renderEditor();
+    newKey().focus();
+    fireEvent.change(newKey(), { target: { value: 'volume' } });
+    fireEvent.change(newValue(), { target: { value: '80' } });
+
+    // Handled by the row, so that the panel stays open and mpv does not get the Esc.
+    expect(fireEvent.keyDown(newKey(), { key: 'Escape' })).toBe(false);
+    expect(newKey().value).toBe('');
+    expect(newValue().value).toBe('');
+
+    // The same from the value, and for a message with nothing typed.
+    fireEvent.change(newValue(), { target: { value: 'x' } });
+    expect(fireEvent.keyDown(newValue(), { key: 'Escape' })).toBe(false);
+    expect(newValue().value).toBe('');
+    fireEvent.click(addButton());
+    expect(within(addGroup()).getByRole('alert')).toBeTruthy();
+    expect(fireEvent.keyDown(newKey(), { key: 'Escape' })).toBe(false);
+    expect(within(addGroup()).queryByRole('alert')).toBeNull();
+
+    // Nothing to drop: left alone, for the panel to close.
+    expect(fireEvent.keyDown(newKey(), { key: 'Escape' })).toBe(true);
+    expect(fireEvent.keyDown(newValue(), { key: 'Escape' })).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('what was typed while Rust answered is not cleared by the answer', async () => {
+    const { onChange } = renderEditor();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.change(newKey(), { target: { value: 'volume' } });
+    fireEvent.change(newValue(), { target: { value: '80' } });
+    fireEvent.click(addButton());
+    // The user goes on while the call runs.
+    fireEvent.change(newKey(), { target: { value: 'volume2' } });
+    answer(0);
+    await settle();
+
+    expect(onChange.mock.calls).toEqual([['volume', '80']]);
+    expect(newKey().value).toBe('volume2');
+    expect(newValue().value).toBe('80');
+  });
+
+  test('fields that still hold what was sent are cleared by the answer, and a refusal is said', async () => {
+    const { onChange } = renderEditor();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.change(newKey(), { target: { value: 'volume' } });
+    fireEvent.change(newValue(), { target: { value: '80' } });
+    fireEvent.click(addButton());
+    answer(0);
+    await settle();
+    expect(newKey().value).toBe('');
+    expect(newValue().value).toBe('');
+
+    fireEvent.change(newKey(), { target: { value: 'gain' } });
+    fireEvent.click(addButton());
+    answer(1, { text: 'The plugin cannot take this value.' });
+    await settle();
+    expect(newKey().value).toBe('gain');
+    expect(within(addGroup()).getByRole('alert')).toBeTruthy();
   });
 });
 

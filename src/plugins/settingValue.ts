@@ -10,12 +10,15 @@
  * - A key of the key = value editor is `[A-Za-z0-9_-]+`.
  *
  * A number is checked the way Rust reads it (`i64` and `f64` parsing: an optional sign, digits, for
- * a float a point and an exponent; no spaces, no hex, no `inf`), not the way `Number()` does.
+ * a float a point and an exponent; no spaces, no hex, no `inf`), not the way `Number()` does. A
+ * number field also takes a decimal comma, which is a point in the file (`numberText`); a space or
+ * a second separator is no part of a number. The sentence that says what a field takes writes the
+ * bounds as plain numbers (no grouping, every digit of the bound) in the language's decimal mark, so
+ * what it says is what the field takes.
  */
 
-import type { TFunction } from 'i18next';
+import i18next, { type TFunction } from 'i18next';
 
-import { formatNumber } from '../i18n/format';
 import type { SettingSpec } from '../ipc/types';
 import { isColor } from '../settings/values';
 
@@ -38,6 +41,16 @@ export const isValidKey = (key: string): boolean => /^[A-Za-z0-9_-]+$/.test(key)
 
 /** Whether `text` is more than one line. */
 export const hasLineBreak = (text: string): boolean => /[\r\n]/.test(text);
+
+/** A number as it is typed, and as it is saved: spaces round it go, a decimal comma is a point. */
+export const numberText = (text: string): string => text.trim().replace(',', '.');
+
+/** A bound as the field takes it: plain digits, no grouping, the decimal mark of the language. */
+function plain(value: number): string {
+  const text = String(value);
+  const czech = i18next.isInitialized && i18next.language.toLowerCase().startsWith('cs');
+  return czech ? text.replace('.', ',') : text;
+}
 
 const WHOLE = /^[+-]?\d+$/;
 const DECIMAL = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
@@ -76,8 +89,8 @@ export function wantsText(spec: SettingSpec, t: TFunction): string {
     case 'int':
     case 'float': {
       const family = spec.type === 'int' ? 'whole' : 'number';
-      const min = spec.min === undefined ? undefined : formatNumber(spec.min);
-      const max = spec.max === undefined ? undefined : formatNumber(spec.max);
+      const min = spec.min === undefined ? undefined : plain(spec.min);
+      const max = spec.max === undefined ? undefined : plain(spec.max);
       if (min !== undefined && max !== undefined) {
         return t(`plugins.settings.wants.${family}Between`, { min, max });
       }

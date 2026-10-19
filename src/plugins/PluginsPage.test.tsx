@@ -798,6 +798,24 @@ describe('the settings of a plugin', () => {
     expect(document.activeElement).toBe(switchOf('uosc'));
   });
 
+  test('Esc in the new-option row drops the typing first, and the next Esc closes the panel', async () => {
+    await open();
+    fireEvent.click(settingsOf('uosc'), { detail: 0 });
+    await settle();
+    const name = within(row('uosc')).getByRole('textbox', { name: 'Option name' }) as HTMLInputElement;
+    name.focus();
+    fireEvent.change(name, { target: { value: 'volume' } });
+
+    expect(fireEvent.keyDown(name, { key: 'Escape' })).toBe(false);
+    expect(name.value).toBe('');
+    expect(within(row('uosc')).getByRole('group', { name: 'Settings of uosc' })).toBeTruthy();
+
+    // Nothing left to drop: the panel's.
+    expect(fireEvent.keyDown(name, { key: 'Escape' })).toBe(false);
+    expect(within(row('uosc')).queryByRole('group')).toBeNull();
+    expect(document.activeElement).toBe(settingsOf('uosc'));
+  });
+
   test('a change reaches Rust, and the apply bar is what Rust says', async () => {
     rust({
       plugins_set_setting: () => ({

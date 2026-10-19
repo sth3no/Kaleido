@@ -10,11 +10,15 @@
  * - A setting the file does not set shows the schema's default; "Default" takes the line out of the
  *   file (`null`, the script's default) and shows only while the file sets the key. After the
  *   keyboard the focus goes to the field, which stays when the button goes.
- * - A float is saved as typed (Rust writes it as it is) and a slider's number as `String(number)`.
- *   A cleared number or colour field is the same as "Default". A cleared string is an empty value.
+ * - A float is saved as typed (Rust writes it as it is) and a slider's number as `String(number)`;
+ *   a number field takes a decimal comma and saves a point (`numberText`). A cleared number or
+ *   colour field is the same as "Default". A cleared string is an empty value.
  * - A text that cannot be right (outside the bounds, no colour) is not sent: it stays in the field
- *   and the row says what the field takes. What Rust refuses (`onChange` resolves with the reason)
- *   is said under the field and the stored value is back in it.
+ *   and the row says what the field takes (the bounds written as the field takes them).
+ * - A value that was sent shows in its field while Rust answers (`useSaving`): a text field does not
+ *   flash back to the old value, a slider's thumb stays where it was let go, and a second click on a
+ *   switch toggles from what the first did. Then the field shows what Rust stores. What Rust refuses
+ *   (`onChange` resolves with the reason) is said under the field and the stored value is back in it.
  *
  * `onChange` saves one key (`PluginSettings` owns the calls to Rust).
  */
@@ -36,11 +40,13 @@ import {
   accepts,
   isOn,
   numberOf,
+  numberText,
   stepOf,
   wantsText,
   type SaveSetting,
   type SettingProblem,
 } from './settingValue';
+import { useSaving } from './useSaving';
 
 export interface SchemaFormProps {
   schema: readonly SettingSpec[];
@@ -50,8 +56,6 @@ export interface SchemaFormProps {
   /** Nothing changes now (Apply runs). */
   disabled?: boolean;
 }
-
-const trimmed = (text: string): string => text.trim();
 
 export default function SchemaForm({ schema, entries, onChange, disabled }: SchemaFormProps) {
   const stored = useMemo(() => new Map(entries.map((entry) => [entry.key, entry.value])), [entries]);
@@ -88,8 +92,9 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
   const errorId = `${ids}-error`;
   /** The field holds a text it will not send. */
   const [wrong, setWrong] = useState(false);
-  /** Why Rust did not keep the last value. */
-  const [refused, setRefused] = useState<SettingProblem | null>(null);
+  const saving = useSaving();
+  // While a save runs the field shows the value it sent (a key being taken out shows the default).
+  const current = saving.pending === null ? stored : (saving.pending.value ?? undefined);
 
   const label = localized(spec.label, i18n.language);
   const description =
@@ -108,17 +113,15 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
       return;
     }
     setWrong(false);
-    setRefused(null);
-    const problem = await onChange(spec.key, value);
-    setRefused(problem);
+    await saving.save(value, () => onChange(spec.key, value));
   };
 
   const edited = () => {
     setWrong(false);
-    setRefused(null);
+    saving.forgive();
   };
 
-  const message: SettingProblem | null = wrong ? { text: wantsText(spec, t) } : refused;
+  const message: SettingProblem | null = wrong ? { text: wantsText(spec, t) } : saving.refused;
   const invalid = message !== null;
   const common = {
     id: fieldId,
@@ -137,7 +140,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
         return (
           <Toggle
             {...common}
-            value={isOn(stored, spec.default)}
+            value={isOn(current, spec.default)}
             onChange={(on) => {
               void commit(on ? 'yes' : 'no');
             }}
@@ -147,7 +150,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
         return (
           <Dropdown
             {...common}
-            value={stored ?? spec.default}
+            value={current ?? spec.default}
             options={spec.values.map((value) => ({ value, label: value }))}
             onChange={(value) => {
               void commit(value);
@@ -158,7 +161,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
         return (
           <ColorField
             {...common}
-            value={stored ?? spec.default}
+            value={current ?? spec.default}
             onChange={(text) => {
               void commit(text);
             }}
@@ -173,7 +176,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
           return (
             <Slider
               {...common}
-              value={numberOf(stored, spec.default)}
+              value={numberOf(current, spec.default)}
               min={spec.min}
               max={spec.max}
               step={stepOf(spec.type, spec.min, spec.max)}
@@ -186,8 +189,8 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
         return (
           <DraftInput
             {...common}
-            value={stored ?? String(spec.default)}
-            clean={trimmed}
+            value={current ?? String(spec.default)}
+            clean={numberText}
             check={(text) => accepts(spec, text)}
             onChange={(text) => {
               void commit(text);
@@ -200,7 +203,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
         return (
           <DraftInput
             {...common}
-            value={stored ?? spec.default}
+            value={current ?? spec.default}
             onChange={(text) => {
               void commit(text);
             }}
@@ -234,7 +237,7 @@ function SchemaField({ spec, stored, onChange, disabled }: SchemaFieldProps) {
       <div className={styles.control}>
         <div className={styles.controlLine}>
           {control}
-          {stored !== undefined && (
+          {current !== undefined && (
             <button
               type="button"
               className={styles.reset}

@@ -9,11 +9,14 @@
  * - "Add option" is a row of its own, always there: a name and a value. The name is checked here
  *   first (`[A-Za-z0-9_-]+`, not one Kaleido sets itself, not one the file has already; Rust checks
  *   it again) and a bad one is never sent. Enter in the name goes on to the value, Enter in the value
- *   adds. When it is added, the row is empty again.
+ *   adds. When it is added, the row is empty again, unless the user has typed on meanwhile. Esc in
+ *   the row drops what is typed in it (as it does in a value's field); with nothing typed it is the
+ *   panel's, which it closes.
  * - A key Rust lists that Kaleido would not write (a hand-edited file) is shown as it is, read only,
  *   without "Remove", with a note: the file is the place to change it.
- * - What Rust refuses (`onChange` resolves with the reason) is said under the row, and the stored
- *   value is back in the field. Nothing is optimistic: the rows are the file as Rust last said it.
+ * - A value that was saved shows in its field while Rust answers (`useSaving`), then what Rust
+ *   stores. What Rust refuses (`onChange` resolves with the reason) is said under the row, and the
+ *   stored value is back in the field.
  *
  * `onChange` saves one key (`PluginSettings` owns the calls to Rust). In the flow of the page, no layer.
  */
@@ -29,6 +32,7 @@ import styles from './PluginSettings.module.css';
 import pluginStyles from './PluginsPage.module.css';
 import SettingMessage from './SettingMessage';
 import { hasLineBreak, isValidKey, type SaveSetting, type SettingProblem } from './settingValue';
+import { useSaving } from './useSaving';
 
 export interface KeyValueEditorProps {
   entries: readonly OptEntry[];
@@ -106,13 +110,8 @@ function OptionRow({ entry, onChange, onRemove, register, disabled }: OptionRowP
   const ids = useId();
   const keyId = `${ids}-key`;
   const errorId = `${ids}-error`;
-  const [refused, setRefused] = useState<SettingProblem | null>(null);
-
-  const run = async (change: () => Promise<SettingProblem | null>): Promise<void> => {
-    setRefused(null);
-    const problem = await change();
-    setRefused(problem);
-  };
+  const saving = useSaving();
+  const refused = saving.refused;
 
   return (
     <li className={styles.option} data-option={entry.key}>
@@ -123,17 +122,15 @@ function OptionRow({ entry, onChange, onRemove, register, disabled }: OptionRowP
         <>
           <DraftInput
             labelId={keyId}
-            value={entry.value}
+            value={saving.pending === null ? entry.value : (saving.pending.value ?? entry.value)}
             describedBy={refused === null ? undefined : errorId}
             invalid={refused !== null}
             disabled={disabled}
             inputRef={register}
             onChange={(text) => {
-              void run(() => onChange(entry.key, text));
+              void saving.save(text, () => onChange(entry.key, text));
             }}
-            onEdit={() => {
-              setRefused(null);
-            }}
+            onEdit={saving.forgive}
           />
           <button
             type="button"
@@ -141,7 +138,7 @@ function OptionRow({ entry, onChange, onRemove, register, disabled }: OptionRowP
             aria-label={t('plugins.settings.removeLabel', { key: entry.key })}
             disabled={disabled}
             onClick={(e) => {
-              void run(() => onRemove(entry.key, e.detail === 0));
+              void saving.save(null, () => onRemove(entry.key, e.detail === 0));
             }}
             {...blurAfterPointer}
           >
@@ -176,6 +173,14 @@ function AddOption({ entries, managed, onChange, keyRef, disabled }: AddOptionPr
   const [value, setValue] = useState('');
   const [message, setMessage] = useState<SettingProblem | null>(null);
   const valueField = useRef<HTMLInputElement>(null);
+  /** What the two fields hold now: the answer to an add looks at it, after the user may have typed on. */
+  const typed = useRef({ key: '', value: '' });
+
+  const hold = (next: { key: string; value: string }) => {
+    typed.current = next;
+    setKey(next.key);
+    setValue(next.value);
+  };
 
   /** Why the name will not do, in words; `null` when it will. The caller drops the spaces round it (a key has none). */
   const keyFault = (name: string): string | null => {
@@ -192,15 +197,28 @@ function AddOption({ entries, managed, onChange, keyRef, disabled }: AddOptionPr
     setMessage(fault === null ? null : { text: fault });
     if (fault !== null) return;
     const problem = await onChange(name, value);
+    // The user typed on, or dropped it with Esc, while Rust answered: that is not what was added.
+    if (typed.current.key.trim() !== name || typed.current.value !== value) return;
     setMessage(problem);
     if (problem !== null) return;
-    setKey('');
-    setValue('');
+    hold({ key: '', value: '' });
     if (byKeyboard) keyRef.current?.focus();
+  };
+
+  /** Esc drops what is typed in the row (the message with it); with nothing in it, it is the panel's. */
+  const dropTyping = (e: KeyboardEvent<HTMLInputElement>): boolean => {
+    if (e.key !== 'Escape') return false;
+    if (typed.current.key === '' && typed.current.value === '' && message === null) return true;
+    // Handled here: the panel stays, and mpv does not get the Esc.
+    e.preventDefault();
+    hold({ key: '', value: '' });
+    setMessage(null);
+    return true;
   };
 
   /** Enter in the name goes on to the value, if the name will do. */
   const onKeyKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (dropTyping(e)) return;
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     e.preventDefault();
     const fault = keyFault(key.trim());
@@ -209,6 +227,7 @@ function AddOption({ entries, managed, onChange, keyRef, disabled }: AddOptionPr
   };
 
   const onValueKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (dropTyping(e)) return;
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
     e.preventDefault();
     void add(true);
@@ -229,7 +248,7 @@ function AddOption({ entries, managed, onChange, keyRef, disabled }: AddOptionPr
         spellCheck={false}
         disabled={disabled}
         onChange={(e) => {
-          setKey(e.target.value);
+          hold({ key: e.target.value, value });
           setMessage(null);
         }}
         onKeyDown={onKeyKeyDown}
@@ -245,7 +264,7 @@ function AddOption({ entries, managed, onChange, keyRef, disabled }: AddOptionPr
         spellCheck={false}
         disabled={disabled}
         onChange={(e) => {
-          setValue(e.target.value);
+          hold({ key, value: e.target.value });
           setMessage(null);
         }}
         onKeyDown={onValueKeyDown}

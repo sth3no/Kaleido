@@ -5,10 +5,11 @@
  * `role="group"` named by the plugin, so the row's arrow keys leave it alone (`PluginRow`).
  *
  * - The settings are read from Rust when the panel opens (`plugins_settings`), so the file is read
- *   as it is now, and a failed read says so and can be tried again.
+ *   as it is now, and a failed read says so and can be tried again (the focus goes to the panel, as
+ *   the button that had it goes).
  * - Every change is one call (`plugins_set_setting`), one after the other, and Rust's answer is the
- *   settings as they are then: the forms show that and nothing else, so a value Rust refused is
- *   back in its field. A refusal is said at the field: `Invalid` as "the plugin cannot take this
+ *   settings as they are then: the forms show the value they sent while the call runs (`useSaving`),
+ *   then that answer, so a value Rust refused is back in its field. A refusal is said at the field: `Invalid` as "the plugin cannot take this
  *   value" with Rust's English reason after it, any other as the sentence the page uses for it
  *   (`problemText`). A plugin that is gone is read about again by the page.
  * - Rust keeps the keys it sets itself (`managed`) out of `entries` and the schema has none; they
@@ -148,6 +149,8 @@ export default function PluginSettings({ id, name, locked = false, ref }: Plugin
             onClick={() => {
               setLoaded({ status: 'loading' });
               setAttempt((count) => count + 1);
+              // The button goes with the failure, and the focus with it: it stays in the panel.
+              document.getElementById(id)?.focus();
             }}
           >
             {t('plugins.retry')}

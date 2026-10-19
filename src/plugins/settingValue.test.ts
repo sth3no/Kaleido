@@ -9,6 +9,7 @@ import {
   isOn,
   isValidKey,
   numberOf,
+  numberText,
   stepOf,
   wantsText,
 } from './settingValue';
@@ -25,6 +26,9 @@ const FLOAT_ANY: SettingSpec = { key: 'f', type: 'float', default: 0.5, label };
 const TEXT: SettingSpec = { key: 's', type: 'string', default: 'x', label };
 const ENUM: SettingSpec = { key: 'e', type: 'enum', default: 'fast', values: ['fast', 'slow'], label };
 const COLOR: SettingSpec = { key: 'c', type: 'color', default: '#FFFFFF', label };
+const BIG: SettingSpec = { key: 'i', type: 'int', default: 5000, min: 0, max: 10000, label };
+const FRACTION: SettingSpec = { key: 'f', type: 'float', default: 0.5, min: 0.125, max: 2000.5, label };
+const BELOW: SettingSpec = { key: 'f', type: 'float', default: 0, max: -0.5, label };
 
 beforeAll(() => {
   initI18n('en');
@@ -120,6 +124,47 @@ describe('wantsText', () => {
     setLanguage('cs');
     expect(wantsText(FLOAT, i18next.t)).toBe('Zadej číslo od 0 do 1,5.');
     expect(wantsText(INT, i18next.t)).toBe('Zadej celé číslo od 50 do 600.');
+  });
+
+  test('writes the bounds as plain numbers, every digit, with no grouping', () => {
+    expect(wantsText(BIG, i18next.t)).toBe('Use a whole number from 0 to 10000.');
+    expect(wantsText(FRACTION, i18next.t)).toBe('Use a number from 0.125 to 2000.5.');
+    expect(wantsText(BELOW, i18next.t)).toBe('Use a number, -0.5 or less.');
+    setLanguage('cs');
+    expect(wantsText(BIG, i18next.t)).toBe('Zadej celé číslo od 0 do 10000.');
+    expect(wantsText(FRACTION, i18next.t)).toBe('Zadej číslo od 0,125 do 2000,5.');
+    expect(wantsText(BELOW, i18next.t)).toBe('Zadej číslo, nejvýše -0,5.');
+  });
+
+  test('what the sentence says is what the field takes, in both languages', () => {
+    // The field reads a comma as the point, so the Czech bounds can be typed as they are written.
+    expect(accepts(FRACTION, numberText('0,125'))).toBe(true);
+    expect(accepts(FRACTION, numberText('2000,5'))).toBe(true);
+    expect(accepts(FRACTION, numberText('0.125'))).toBe(true);
+    expect(accepts(BIG, numberText('10000'))).toBe(true);
+    expect(accepts(BELOW, numberText('-0,5'))).toBe(true);
+  });
+});
+
+describe('numberText', () => {
+  test('a decimal comma is a point, and spaces round the number go', () => {
+    expect(numberText('0,5')).toBe('0.5');
+    expect(numberText(' 1,5 ')).toBe('1.5');
+    expect(numberText(',5')).toBe('.5');
+    expect(numberText('2.5')).toBe('2.5');
+    expect(numberText('7')).toBe('7');
+  });
+
+  test('a space or a second separator is no part of a number', () => {
+    for (const typed of ['1 000', '1 000,5', '1,000,5', '1.000,5', '1,5,', '1,,5']) {
+      expect(accepts(FLOAT, numberText(typed)), typed).toBe(false);
+      expect(accepts(FLOAT_ANY, numberText(typed)), typed).toBe(false);
+    }
+    // A whole number has no decimal comma at all.
+    expect(accepts(INT, numberText('70,5'))).toBe(false);
+    expect(accepts(INT, numberText('1,000'))).toBe(false);
+    // One comma between digits is the decimal mark, as in Czech: 1,000 is one.
+    expect(accepts(FLOAT_ANY, numberText('1,000'))).toBe(true);
   });
 });
 

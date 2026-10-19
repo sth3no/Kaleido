@@ -34,6 +34,7 @@ const SCHEMA: SettingSpec[] = [
     label: { en: 'Mode', cs: 'Režim' },
   },
   { key: 'tint', type: 'color', default: '#FFFFFF', label: { en: 'Tint' } },
+  { key: 'ratio', type: 'float', default: 1.5, min: 0.5, label: { en: 'Ratio' } },
 ];
 
 const entry = (key: string, value: string): OptEntry => ({ key, value });
@@ -89,7 +90,16 @@ describe('the fields', () => {
     const keys = Array.from(document.querySelectorAll('[data-setting]')).map((row) =>
       row.getAttribute('data-setting'),
     );
-    expect(keys).toEqual(['enabled', 'max_height', 'scale', 'timeout', 'prefix', 'mode', 'tint']);
+    expect(keys).toEqual([
+      'enabled',
+      'max_height',
+      'scale',
+      'timeout',
+      'prefix',
+      'mode',
+      'tint',
+      'ratio',
+    ]);
     // bool: a switch. A number with both bounds: a slider, whole or not. One bound: a text field.
     expect(flag('Show previews')).toBeTruthy();
     expect(slider('Maximum height').min).toBe('50');
@@ -358,6 +368,185 @@ describe('what Rust refuses', () => {
     show([entry('enabled', 'no')]);
     expect(within(field('enabled')).queryByRole('alert')).toBeNull();
     expect(flag('Show previews').getAttribute('aria-checked')).toBe('false');
+  });
+});
+
+/** An `onChange` whose answers the test gives, one by one, in the order it was called. */
+function slowAnswers(onChange: ReturnType<typeof renderForm>['onChange']) {
+  const answers: ((problem: SettingProblem | null) => void)[] = [];
+  onChange.mockImplementation(
+    () =>
+      new Promise<SettingProblem | null>((resolve) => {
+        answers.push(resolve);
+      }),
+  );
+  return (index: number, problem: SettingProblem | null = null) => {
+    act(() => {
+      answers[index]?.(problem);
+    });
+  };
+}
+
+describe('a value that was sent', () => {
+  const REFUSED: SettingProblem = {
+    text: 'The plugin cannot take this value.',
+    detail: 'must be at most 600',
+  };
+
+  test('stays in its text field while Rust answers, then Rust’s answer is shown', async () => {
+    const { onChange, show } = renderForm([entry('prefix', 'my')]);
+    const answer = slowAnswers(onChange);
+
+    fireEvent.change(text('Prefix'), { target: { value: 'typed' } });
+    fireEvent.keyDown(text('Prefix'), { key: 'Enter' });
+
+    // Not the old value: nothing flashes back while Rust writes the file.
+    expect(text('Prefix').value).toBe('typed');
+    await settle();
+    expect(text('Prefix').value).toBe('typed');
+
+    // Rust took it, and its answer is the file with the line.
+    answer(0);
+    show([entry('prefix', 'typed')]);
+    await settle();
+    expect(text('Prefix').value).toBe('typed');
+    expect(within(field('prefix')).queryByRole('alert')).toBeNull();
+
+    // A value that Rust refuses: shown while it runs, then the stored value is back, with the reason.
+    fireEvent.change(text('Prefix'), { target: { value: 'again' } });
+    fireEvent.blur(text('Prefix'));
+    expect(text('Prefix').value).toBe('again');
+    answer(1, REFUSED);
+    await settle();
+    expect(text('Prefix').value).toBe('typed');
+    expect(within(field('prefix')).getByRole('alert').textContent).toContain('cannot take this value');
+  });
+
+  test('keeps a slider where it was let go, and puts it back when Rust refuses', async () => {
+    const { onChange } = renderForm();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.pointerDown(slider('Maximum height'));
+    fireEvent.change(slider('Maximum height'), { target: { value: '350' } });
+    fireEvent.pointerUp(slider('Maximum height'));
+
+    // Saved once, where the pointer was let go; the thumb does not snap back to 200.
+    expect(onChange.mock.calls).toEqual([['max_height', '350']]);
+    expect(slider('Maximum height').value).toBe('350');
+    expect(slider('Maximum height').getAttribute('aria-valuetext')).toBe('350');
+    await settle();
+    expect(slider('Maximum height').value).toBe('350');
+
+    answer(0, REFUSED);
+    await settle();
+    expect(slider('Maximum height').value).toBe('200');
+    expect(within(field('max_height')).getByRole('alert')).toBeTruthy();
+  });
+
+  test('is what a switch toggles from, so a quick second click is not lost', async () => {
+    const { onChange } = renderForm();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.click(flag('Show previews'));
+    expect(flag('Show previews').getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(flag('Show previews'));
+    expect(flag('Show previews').getAttribute('aria-checked')).toBe('true');
+    // Two changes, each from what the switch showed: off, then on again (not off twice).
+    expect(onChange.mock.calls).toEqual([
+      ['enabled', 'no'],
+      ['enabled', 'yes'],
+    ]);
+
+    // The older answer ends first and takes nothing from the newer value.
+    answer(0);
+    await settle();
+    expect(flag('Show previews').getAttribute('aria-checked')).toBe('true');
+    answer(1);
+    await settle();
+    expect(flag('Show previews').getAttribute('aria-checked')).toBe('true');
+  });
+
+  test('a refusal of an older save is not said while a newer one runs', async () => {
+    const { onChange } = renderForm();
+    const answer = slowAnswers(onChange);
+
+    fireEvent.click(flag('Show previews'));
+    fireEvent.click(flag('Show previews'));
+    answer(0, REFUSED);
+    await settle();
+
+    expect(within(field('enabled')).queryByRole('alert')).toBeNull();
+    answer(1, REFUSED);
+    await settle();
+    expect(within(field('enabled')).getByRole('alert')).toBeTruthy();
+  });
+
+  test('Default shows the schema’s default at once, and the stored value if Rust refuses', async () => {
+    const { onChange } = renderForm([entry('prefix', 'my')]);
+    const answer = slowAnswers(onChange);
+
+    fireEvent.click(reset('Prefix'));
+
+    expect(text('Prefix').value).toBe('thumb');
+    expect(resets()).toHaveLength(0);
+    answer(0, REFUSED);
+    await settle();
+    // Rust refused: the file still has the line.
+    expect(text('Prefix').value).toBe('my');
+    expect(resets()).toHaveLength(1);
+  });
+});
+
+describe('a number field', () => {
+  test('takes a decimal comma and saves a point; a space or a second separator is refused', async () => {
+    const { onChange } = renderForm();
+
+    fireEvent.change(text('Ratio'), { target: { value: '0,75' } });
+    fireEvent.blur(text('Ratio'));
+    await settle();
+    expect(onChange.mock.calls).toEqual([['ratio', '0.75']]);
+
+    for (const typed of ['1 000', '1,000,5', '1.000,5', '0,25']) {
+      fireEvent.change(text('Ratio'), { target: { value: typed } });
+      fireEvent.blur(text('Ratio'));
+      expect(within(field('ratio')).getByRole('alert').textContent, typed).toBe(
+        'Use a number, 0.5 or more.',
+      );
+      expect(text('Ratio').value, typed).toBe(typed);
+    }
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test('can be typed as the sentence under it writes the bound, in both languages', async () => {
+    const { onChange } = renderForm();
+    act(() => {
+      setLanguage('cs');
+    });
+
+    fireEvent.change(text('Ratio'), { target: { value: '0,2' } });
+    fireEvent.blur(text('Ratio'));
+    const message = within(field('ratio')).getByRole('alert').textContent ?? '';
+    expect(message).toBe('Zadej číslo, nejméně 0,5.');
+
+    // The number in the sentence, as written, is accepted.
+    const bound = /nejméně (\S+)\./.exec(message)?.[1] ?? '';
+    fireEvent.change(text('Ratio'), { target: { value: bound } });
+    fireEvent.blur(text('Ratio'));
+    await settle();
+    expect(onChange.mock.calls).toEqual([['ratio', '0.5']]);
+
+    act(() => {
+      setLanguage('en');
+    });
+    fireEvent.change(text('Ratio'), { target: { value: '0.1' } });
+    fireEvent.blur(text('Ratio'));
+    const english = within(field('ratio')).getByRole('alert').textContent ?? '';
+    expect(english).toBe('Use a number, 0.5 or more.');
+    const written = /number, (\S+) or more/.exec(english)?.[1] ?? '';
+    fireEvent.change(text('Ratio'), { target: { value: written } });
+    fireEvent.blur(text('Ratio'));
+    await settle();
+    expect(onChange).toHaveBeenCalledTimes(2);
   });
 });
 

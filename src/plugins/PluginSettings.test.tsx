@@ -158,7 +158,12 @@ describe('opening', () => {
     expect(document.querySelector('[data-setting]')).toBeNull();
 
     rust();
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Try again' }));
+    const retry = within(panel()).getByRole('button', { name: 'Try again' });
+    retry.focus();
+    fireEvent.click(retry);
+    // The button goes with the failure; the focus stays in the panel instead of falling to the page.
+    expect(retry.isConnected).toBe(false);
+    expect(document.activeElement).toBe(panel());
     await settle();
 
     expect(sent('plugins_settings')).toHaveLength(2);
@@ -306,6 +311,30 @@ describe('changing', () => {
 
     expect(slider('Maximum height').value).toBe('300');
     expect(text('Prefix').value).toBe('b');
+  });
+
+  test('the value sent stays in its field while Rust writes the file', async () => {
+    let answer: (value: PluginSettingsData) => void = () => undefined;
+    rust({
+      plugins_set_setting: () =>
+        new Promise<PluginSettingsData>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    await open();
+
+    fireEvent.change(text('Prefix'), { target: { value: 'my' } });
+    fireEvent.keyDown(text('Prefix'), { key: 'Enter' });
+    await settle();
+    // Not the default flashing back.
+    expect(text('Prefix').value).toBe('my');
+
+    act(() => {
+      answer(settings({ entries: [{ key: 'prefix', value: 'my' }] }));
+    });
+    await settle();
+    expect(text('Prefix').value).toBe('my');
+    expect(resetOf('Prefix')).toBeTruthy();
   });
 
   test('a value that cannot be right never reaches Rust', async () => {
