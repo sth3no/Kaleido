@@ -1,7 +1,8 @@
 /**
  * The smoke test of the built app (plan Task 24): `Kaleido.exe <clip>` plays the clip, the
- * controls reach mpv and come back with its state, the Settings page brings the mini player, and
- * closing the window ends the app. Runs against a real libmpv and WebView2 (e2e/wdio.conf.ts).
+ * controls reach mpv and come back with its state, the Settings page brings the mini player, My
+ * plugins lists the essential thumbfast as turned on (M2, plan Task 18), and closing the window
+ * ends the app. Runs against a real libmpv and WebView2 (e2e/wdio.conf.ts).
  *
  * The app speaks the system's language: a control is found by its label in either language.
  */
@@ -140,6 +141,36 @@ describe('Kaleido started with a clip', () => {
     });
     // Docked, it has its own controls: play/pause, back to the player, stop.
     await expect(mini.$$('button')).toBeElementsArrayOfSize(3);
+  });
+
+  it('My plugins lists thumbfast as an Essential, turned on', async () => {
+    // Settings is the page now, so the sidebar is docked beside it: there is no ☰ to press first.
+    const names = texts('shell.sidebar.plugins')
+      .map((text) => `normalize-space(.)="${text}"`)
+      .join(' or ');
+    const plugins = $(`//nav//button[${names}]`);
+    await plugins.waitForClickable({ timeout: 3_000 });
+    await plugins.click();
+
+    // Rust reads the list when the page opens. Before its first start of the player's core it copied
+    // the essentials the build bundles (`scripts/fetch-essentials.ps1` before `npm run e2e:build`)
+    // into the config folder, so thumbfast is there, as an essential, and on. Like the rest of this
+    // run it reads the user's own %APPDATA%\Kaleido: a thumbfast that was uninstalled or turned off
+    // in My plugins, or a thumbfast.lua of the user's own in its place, shows here as something else.
+    const list = $(
+      texts('plugins.list')
+        .map((text) => `ul[aria-label="${text}"]`)
+        .join(', '),
+    );
+    const row = list.$('li[data-plugin="thumbfast"]');
+    await row.waitForExist({ timeout: 5_000, timeoutMsg: 'My plugins does not list thumbfast' });
+
+    // The badge of its source, which is "Essentials" in both languages (`plugins.source.bundled`).
+    const source = row.$('[data-kind="source"]');
+    expect(texts('plugins.source.bundled')).toContain(await source.getProperty('textContent'));
+    // The switch is named by the plugin and says whether it is on.
+    const on = row.$('button[role="switch"]');
+    expect(await on.getAttribute('aria-checked')).toBe('true');
   });
 
   it('closing the window ends the app within 2 s', async () => {

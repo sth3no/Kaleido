@@ -34,7 +34,8 @@ Automaticky běží (ručně neopakovat; jak je spustit, říká [README.md](../
 - Média: `%USERPROFILE%\Videos\kaleido-m0\` z M0 (SDR 1080p, letterbox 2.39:1, 4K 60 fps,
   syntetické HDR10, kopie s českým názvem), skutečné HDR10 video, video s titulky a kapitolami
   (mkv), video 4:3 a na výšku, složka s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube
-  (hraje jen s `yt-dlp` v `PATH`).
+  (v M1 hraje jen s `yt-dlp` v `PATH`; od M2 si yt-dlp stahuje Kaleido sám, viz
+  [docs/m2/checklist.md](../m2/checklist.md)).
 
 ## Před vydáním M1
 
@@ -318,7 +319,8 @@ Nastavení → Vzhled → Měřítko rozhraní.
 ### Úvodní obrazovka, vložení a přetažení (Task 17)
 
 Potřeba: krátké video, video s diakritikou a mezerami v cestě (`žluťoučký kůň (2026).mkv`), složka
-s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten hraje jen s `yt-dlp` v `PATH`).
+s několika videi, přímý odkaz na `.mp4` a odkaz na YouTube (ten v M1 hraje jen s `yt-dlp` v `PATH`;
+od M2 si yt-dlp stahuje Kaleido sám, viz [docs/m2/checklist.md](../m2/checklist.md)).
 `npm run tauri dev`, F12 (konzole WebView2) otevřená.
 
 - [ ] **Soubor z Průzkumníku:** přetáhnout video na úvodní obrazovku. Při tažení nad oknem se
