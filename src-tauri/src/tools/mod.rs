@@ -13,6 +13,9 @@
 //! 4. otherwise downloads the asset, verifies it against that checksum, puts the tool in place
 //!    beside the one that may run ([`replace`]), reads its version ([`Inspect`]) and records it;
 //! 5. on any error leaves the tool on the disk as it was and backs off ([`schedule`], spec 10.7).
+//!    A tool whose file is gone right after, or that says no version, is such an error too
+//!    ([`ToolError::Gone`], [`ToolError::Silent`]; controller Ruling R10): a virus scanner that
+//!    takes `yt-dlp.exe` away is not answered with a download at every round.
 //!
 //! Nothing is ever put in place unverified: a download must have the checksum the release lists
 //! for it, and a bundled copy the one the installer's `tools.json` beside it names (the installer
@@ -218,6 +221,12 @@ pub enum ToolError {
     Archive(String),
     /// The tool could not be put in place, or the check stopped unexpectedly.
     Io(String),
+    /// The tool was put in place (or was there) and its file is gone right after: a virus
+    /// scanner that quarantines it, as some do with PyInstaller programs like `yt-dlp.exe`.
+    Gone(ToolId),
+    /// The tool is in place but its `--version` says nothing: it does not run (a virus scanner
+    /// that blocks it, a broken file).
+    Silent(ToolId),
 }
 
 impl fmt::Display for ToolError {
@@ -231,6 +240,17 @@ impl fmt::Display for ToolError {
             ),
             ToolError::Archive(message) => write!(f, "Deno's zip: {message}"),
             ToolError::Io(message) => f.write_str(message),
+            ToolError::Gone(tool) => write!(
+                f,
+                "{} disappeared after it was put in place (an antivirus may have quarantined it)",
+                tool.exe_name()
+            ),
+            ToolError::Silent(tool) => write!(
+                f,
+                "{} is in place but does not run: it did not say its version (an antivirus may \
+                 block it)",
+                tool.exe_name()
+            ),
         }
     }
 }
@@ -292,6 +312,8 @@ struct State {
     errors: BTreeMap<ToolId, String>,
     /// The runs so far: the last one's number.
     runs: u64,
+    /// How often each tool was put in place in this run ([`Tools::installs`]).
+    installs: BTreeMap<ToolId, u64>,
     /// The checks that wait for another one to end.
     #[cfg(test)]
     waiting: usize,
@@ -345,21 +367,64 @@ impl Tools {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Where the tool is: only one that a check put in place (verified) and that is still there.
+    /// Where the tool is: only one that a check put in place (verified) and that is still there,
+    /// and for Deno only one yt-dlp can use, 2.3.0 or newer ([`run::deno_supported`], plan
+    /// decision 20). An older Deno, or one whose version cannot be read, is as good as missing,
+    /// and its state says why ([`ToolState::Failed`]).
     pub fn path(&self, tool: ToolId) -> Option<PathBuf> {
-        let state = self.lock();
-        self.installed(tool, state.file.tools.get(&tool))
-            .then(|| self.exe(tool))
-    }
-
-    /// The tool as Kaleido runs it or hands it to yt-dlp: [`path`](Tools::path), and for Deno
-    /// only one yt-dlp can use, 2.3.0 or newer ([`run::deno_supported`], plan decision 20). An
-    /// older Deno, or one whose version cannot be read, is as good as missing here, and its state
-    /// says why ([`ToolState::Failed`]).
-    pub fn runnable(&self, tool: ToolId) -> Option<PathBuf> {
         let state = self.lock();
         let record = state.file.tools.get(&tool);
         (self.installed(tool, record) && unusable(tool, record).is_none()).then(|| self.exe(tool))
+    }
+
+    /// How often `tool` was put in place in this run of Kaleido: the service tells mpv's
+    /// `ytdl_hook` to look for a yt-dlp put in place anew ([`mpv::hook_commands_for_core`]).
+    pub fn installs(&self, tool: ToolId) -> u64 {
+        self.lock().installs.get(&tool).copied().unwrap_or(0)
+    }
+
+    /// Asks a tool that is in place but whose version is not known (its `--version` did not
+    /// answer, [`ToolError::Silent`]) again, without the network: the scheduler does at every
+    /// round. Once it answers, its failure is over. Whether the version is known now. Runs the
+    /// tool: not for the main thread.
+    pub fn inspect_again(&self, tool: ToolId) -> bool {
+        let sha256 = {
+            let state = self.lock();
+            let record = state.file.tools.get(&tool);
+            if state.running.contains_key(&tool)
+                || !self.installed(tool, record)
+                || record.is_some_and(|record| record.version.is_some())
+            {
+                return false;
+            }
+            record.map(|record| record.sha256.clone())
+        };
+        let Some(version) = self.inspect.version(tool, &self.exe(tool)) else {
+            return false;
+        };
+        let status = {
+            let mut state = self.lock();
+            // A check that ran meanwhile read the version itself, of what it put in place.
+            if state.running.contains_key(&tool) {
+                return false;
+            }
+            let Some(record) = state.file.tools.get_mut(&tool).filter(|record| {
+                Some(&record.sha256) == sha256.as_ref() && record.version.is_none()
+            }) else {
+                return false;
+            };
+            record.version = Some(version);
+            record.failures = 0;
+            record.next_try = None;
+            state.errors.remove(&tool);
+            if let Err(error) = state.file.save(self.dir.join(store::FILE)) {
+                tracing::error!("cannot save the tools' tools.json: {error}");
+            }
+            self.status_in(&state, tool)
+        };
+        tracing::info!("{tool} says its version now");
+        self.tell(&status);
+        true
     }
 
     /// The tool's state now.
@@ -471,8 +536,35 @@ impl Tools {
             record = Some(taken);
         }
         match self.update(tool, channel, &source, record.as_ref()) {
-            Ok(updated) => (updated, Ok(())),
+            Ok(updated) => match self.unusable_after(tool, &updated) {
+                None => (updated, Ok(())),
+                // In place, but gone or silent: a failure like any other, which backs off (1 min,
+                // 5 min, 30 min, 2 h), so that a file a virus scanner takes away is not downloaded
+                // again at every round. The record keeps what was put in place, and the last check
+                // that went through.
+                Some(error) => {
+                    let mut after = updated;
+                    let (failures, next) =
+                        schedule::after_failure(record.as_ref(), OffsetDateTime::now_utc());
+                    after.failures = failures;
+                    after.next_try = Some(stamp(next));
+                    after.checked_at = record.and_then(|record| record.checked_at);
+                    (after, Err(error))
+                }
+            },
             Err(error) => (failed(record, OffsetDateTime::now_utc()), Err(error)),
+        }
+    }
+
+    /// Why the tool of `record`, which a check has just put in place or found there, cannot be
+    /// used: its file is gone, or it did not say its version.
+    fn unusable_after(&self, tool: ToolId, record: &ToolRecord) -> Option<ToolError> {
+        if !self.exe(tool).is_file() {
+            Some(ToolError::Gone(tool))
+        } else if record.version.is_none() {
+            Some(ToolError::Silent(tool))
+        } else {
+            None
         }
     }
 
@@ -591,7 +683,9 @@ impl Tools {
             .and_then(|()| replace::replace_binary(&self.dir, tool.exe_name(), exe))
             .map_err(|error| {
                 ToolError::Io(format!("cannot put {} in place: {error}", tool.exe_name()))
-            })
+            })?;
+        *self.lock().installs.entry(tool).or_default() += 1;
+        Ok(())
     }
 
     fn set_phase(&self, tool: ToolId, phase: ToolState) {
@@ -629,10 +723,11 @@ impl Tools {
     }
 
     /// [`next_due`](Tools::next_due) for `record`:
-    /// - a tool that is there: by the schedule ([`schedule::next_due`]); a yt-dlp from another
-    ///   channel than `channel` (the user switched) is due at once, unless a failed check still
-    ///   backs off, so that a failing switch is not tried again and again;
-    /// - a tool that is not there: at once, unless its last attempt still backs off.
+    /// - a tool that is there and says its version: by the schedule ([`schedule::next_due`]); a
+    ///   yt-dlp from another channel than `channel` (the user switched) is due at once, unless a
+    ///   failed check still backs off, so that a failing switch is not tried again and again;
+    /// - a tool that is not there, or does not say its version: at once, unless its last attempt
+    ///   still backs off.
     fn next_due_of(
         &self,
         tool: ToolId,
@@ -642,7 +737,8 @@ impl Tools {
     ) -> Option<OffsetDateTime> {
         let switched =
             tool == ToolId::YtDlp && record.is_some_and(|record| record.channel != Some(channel));
-        if self.installed(tool, record) && !switched {
+        let speaks = record.is_some_and(|record| record.version.is_some());
+        if self.installed(tool, record) && speaks && !switched {
             schedule::next_due(record, now, tool.interval())
         } else {
             schedule::retry_at(record, now)
@@ -784,10 +880,18 @@ struct Shared {
     tools: Tools,
     host: Arc<dyn Host>,
     paths: AppPaths,
-    /// The tools' options the running core has: those of its start, and every change since.
-    sent: Mutex<Vec<Vec<String>>>,
+    sent: Mutex<Sent>,
     wake: Mutex<Wake>,
     woken: Condvar,
+}
+
+/// What the running core has of the tools.
+#[derive(Default)]
+struct Sent {
+    /// The tools' options: those of its start, and every change since.
+    commands: Vec<Vec<String>>,
+    /// yt-dlp's [`Tools::installs`] when the core last heard of it.
+    installs: u64,
 }
 
 #[derive(Default)]
@@ -809,7 +913,7 @@ impl Service {
                 tools,
                 host,
                 paths: paths.clone(),
-                sent: Mutex::new(Vec::new()),
+                sent: Mutex::new(Sent::default()),
                 wake: Mutex::new(Wake::default()),
                 woken: Condvar::new(),
             }),
@@ -866,8 +970,13 @@ impl Service {
     /// and in the `prepare` of a restart. From then on that core gets what changes.
     pub fn options_for_new_core(&self) -> Vec<Vec<String>> {
         let mut sent = lock(&self.shared.sent);
-        *sent = self.shared.options();
-        sent.clone()
+        let mut commands = mpv::hook_commands(&self.shared.paths);
+        commands.extend(self.shared.raw_options());
+        *sent = Sent {
+            commands: commands.clone(),
+            installs: self.shared.tools.installs(ToolId::YtDlp),
+        };
+        commands
     }
 }
 
@@ -891,29 +1000,51 @@ impl Drop for Service {
 }
 
 impl Shared {
-    /// The scheduler's thread (see [`Service`]).
+    /// The scheduler's thread (see [`Service`]): round after round. A round that panics (the
+    /// panic hook has logged it) is one round; the scheduler goes on after the shortest wait.
     fn schedule(&self) {
         loop {
-            let channel = self.host.channel();
-            for tool in ToolId::ALL {
-                if lock(&self.wake).stop {
-                    return;
-                }
-                if self
-                    .tools
-                    .next_due(tool, channel, OffsetDateTime::now_utc())
-                    .is_none()
-                {
-                    self.check(tool, channel, false);
-                }
-            }
-            let now = OffsetDateTime::now_utc();
-            let channel = self.host.channel();
-            let next = ToolId::ALL.map(|tool| self.tools.next_due(tool, channel, now));
-            if !self.sleep(scheduler_wait(&next, now)) {
+            let wait =
+                panic::catch_unwind(AssertUnwindSafe(|| self.round())).unwrap_or_else(|_| {
+                    tracing::error!("a round of the tools' scheduler panicked; the next one comes");
+                    Some(SCHEDULER_MIN_WAIT)
+                });
+            let Some(wait) = wait else {
+                return;
+            };
+            if !self.sleep(wait) {
                 return;
             }
         }
+    }
+
+    /// One round: a tool whose version is not known is asked again (without the network), what
+    /// is due is checked, and the sleep until the next round comes back; `None` when the service
+    /// is dropped.
+    fn round(&self) -> Option<std::time::Duration> {
+        for tool in ToolId::ALL {
+            if self.tools.inspect_again(tool) {
+                // A Deno that says its version now is one yt-dlp may get.
+                self.refresh_core();
+            }
+        }
+        let channel = self.host.channel();
+        for tool in ToolId::ALL {
+            if lock(&self.wake).stop {
+                return None;
+            }
+            if self
+                .tools
+                .next_due(tool, channel, OffsetDateTime::now_utc())
+                .is_none()
+            {
+                self.check(tool, channel, false);
+            }
+        }
+        let now = OffsetDateTime::now_utc();
+        let channel = self.host.channel();
+        let next = ToolId::ALL.map(|tool| self.tools.next_due(tool, channel, now));
+        Some(scheduler_wait(&next, now))
     }
 
     /// [`Tools::check`], then the running core hears what changed of the tools' options. The
@@ -924,29 +1055,31 @@ impl Shared {
         result.unwrap_or_else(|_| self.tools.status(tool))
     }
 
-    /// The tools' options as they are now: the managed yt-dlp, and Deno when yt-dlp can use it.
-    fn options(&self) -> Vec<Vec<String>> {
-        let mut commands = mpv::hook_commands(&self.paths);
+    /// Kaleido's `ytdl-raw-options` as they are now: Deno when yt-dlp can use it.
+    fn raw_options(&self) -> Vec<Vec<String>> {
         // The cookies of a browser join them with their setting (Task 11).
-        commands.extend(mpv::raw_options(
-            self.tools.runnable(ToolId::Deno).as_deref(),
-            None,
-        ));
-        commands
+        mpv::raw_options(self.tools.path(ToolId::Deno).as_deref(), None)
     }
 
-    /// Sends the running core the options that changed since it got them last.
+    /// Sends the running core the options that changed since it got them last, and makes its
+    /// `ytdl_hook` look again for a yt-dlp put in place since ([`mpv::hook_commands_for_core`]).
     fn refresh_core(&self) {
         // Held while sending, so that two checks that end at once reach the core in the order
-        // they were recorded in.
+        // they were recorded in, and an install makes the hook look again once.
         let mut sent = lock(&self.sent);
-        let options = self.options();
+        let installs = self.tools.installs(ToolId::YtDlp);
+        let mut options =
+            mpv::hook_commands_for_core(&self.paths, &sent.commands, installs != sent.installs);
+        options.extend(self.raw_options());
         let changed: Vec<Vec<String>> = options
             .iter()
-            .filter(|command| !sent.contains(command))
+            .filter(|command| !sent.commands.contains(command))
             .cloned()
             .collect();
-        *sent = options;
+        *sent = Sent {
+            commands: options,
+            installs,
+        };
         if !changed.is_empty() {
             self.host.send(changed);
         }
@@ -1047,10 +1180,13 @@ mod tests {
     }
 
     /// Says the version it is told for each tool, and remembers which files it was asked about.
+    /// For the tools it is told to, it then deletes the file, as a virus scanner that quarantines
+    /// what it saw run.
     #[derive(Default)]
     struct FakeInspect {
         versions: Mutex<BTreeMap<ToolId, String>>,
         asked: Mutex<Vec<(ToolId, PathBuf, Vec<u8>)>>,
+        quarantines: Mutex<Vec<ToolId>>,
     }
 
     impl FakeInspect {
@@ -1059,6 +1195,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .insert(tool, version.to_owned());
+        }
+
+        fn quarantines(&self, tool: ToolId, on: bool) {
+            let mut quarantines = self.quarantines.lock().unwrap();
+            quarantines.retain(|&other| other != tool);
+            if on {
+                quarantines.push(tool);
+            }
         }
 
         fn asked(&self) -> Vec<(ToolId, PathBuf, Vec<u8>)> {
@@ -1074,6 +1218,9 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((tool, exe.to_path_buf(), bytes));
+            if self.quarantines.lock().unwrap().contains(&tool) {
+                fs::remove_file(exe).unwrap();
+            }
             self.versions.lock().unwrap().get(&tool).cloned()
         }
     }
@@ -1610,6 +1757,7 @@ mod tests {
         );
         let exe = b"yt-dlp 2026.10.10.233141";
         setup.release(Channel::Nightly, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.10.10.233141");
         // Forced, so that the test does not wait the minute out.
         tools.check(ToolId::YtDlp, Channel::Nightly, true).unwrap();
         assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
@@ -1742,6 +1890,7 @@ mod tests {
         bundle(&setup, b"tampered", exe);
         let released = b"yt-dlp 2026.10.10";
         setup.release(Channel::Stable, &sha256_hex(released), released);
+        setup.inspect.says(ToolId::YtDlp, "2026.10.10");
         let tools = setup.tools();
         tools.check(ToolId::YtDlp, Channel::Stable, false).unwrap();
         assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), released);
@@ -1858,13 +2007,14 @@ mod tests {
             let tools = setup.tools();
             let exe = setup.exe(ToolId::Deno);
 
-            assert_eq!(tools.path(ToolId::Deno), Some(exe.clone()), "{version:?}");
+            // In place and verified, but only one yt-dlp can use is Deno's path (Ruling R9).
+            assert!(exe.is_file());
             let status = tools.status(ToolId::Deno);
             assert_eq!(status.version.as_deref(), version, "{version:?}");
             if usable {
                 assert_eq!(status.state, ToolState::Ready, "{version:?}");
                 assert_eq!(status.error, None);
-                assert_eq!(tools.runnable(ToolId::Deno), Some(exe));
+                assert_eq!(tools.path(ToolId::Deno), Some(exe));
             } else {
                 assert_eq!(status.state, ToolState::Failed, "{version:?}");
                 let error = status.error.unwrap();
@@ -1872,7 +2022,7 @@ mod tests {
                 if let Some(version) = version {
                     assert!(error.contains(version), "{error}");
                 }
-                assert_eq!(tools.runnable(ToolId::Deno), None, "{version:?}");
+                assert_eq!(tools.path(ToolId::Deno), None, "{version:?}");
             }
             // yt-dlp hears of it only when it can use it.
             let service = Service::new(tools, &setup.paths, Arc::new(FakeHost::default()));
@@ -2034,8 +2184,18 @@ mod tests {
             setup.record(ToolId::YtDlp).unwrap().channel,
             Some(Channel::Nightly)
         );
-        // The same place: nothing new for the core. Deno was not due.
-        assert_eq!(host.sent().len(), 2);
+        // Put in place anew at the same place: the hook is told in another spelling, so that it
+        // looks again. Deno was not due.
+        eventually("the hook to hear of it", || host.sent().len() == 3);
+        assert_eq!(
+            host.sent()[2],
+            command(&[
+                "change-list",
+                "script-opts",
+                "append",
+                &format!("ytdl_hook-ytdl_path={yt_dlp};;")
+            ])
+        );
         assert_eq!(setup.web.count(&deno.asset_url()), 1);
 
         // "Zkontrolovat": at once, from the channel of the settings.
@@ -2044,8 +2204,182 @@ mod tests {
         let status = service.check_now(ToolId::YtDlp);
         assert_eq!(status.state, ToolState::Ready);
         assert_eq!(setup.web.count(&sums), before + 1);
+        // Nothing was put in place: nothing for the core.
+        assert_eq!(host.sent().len(), 3);
 
         // Gone, the scheduler ends.
+        drop(service);
+    }
+
+    /// Ruling R10: a virus scanner that quarantines yt-dlp.exe right after its `--version` ran.
+    /// The check is a failure that backs off, so that the scheduler does not download it again
+    /// at every round.
+    #[test]
+    fn a_tool_that_vanishes_after_its_install_is_a_failure() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        setup.inspect.quarantines(ToolId::YtDlp, true);
+        let tools = setup.tools();
+        let source = source(ToolId::YtDlp, Channel::Stable);
+
+        let before = now();
+        let result = tools.check(ToolId::YtDlp, Channel::Stable, false);
+        let after = now();
+
+        assert_eq!(result, Err(ToolError::Gone(ToolId::YtDlp)));
+        assert!(!setup.exe(ToolId::YtDlp).exists());
+        assert_eq!(tools.path(ToolId::YtDlp), None);
+        let status = tools.status(ToolId::YtDlp);
+        assert_eq!((status.state, status.version), (ToolState::Failed, None));
+        let error = status.error.unwrap();
+        assert!(
+            error.contains("yt-dlp.exe disappeared") && error.contains("antivirus"),
+            "{error}"
+        );
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(recorded.failures, 1);
+        let next = time_of(&recorded.next_try);
+        assert!(
+            before + Duration::seconds(60) <= next && next <= after + Duration::seconds(60),
+            "{next}"
+        );
+        // A check that failed is not a check.
+        assert_eq!(recorded.checked_at, None);
+        // Not due before the backoff is over: a round of the scheduler asks nothing.
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Stable, now()),
+            Some(next)
+        );
+        let calls = setup.web.calls().len();
+        tools.check(ToolId::YtDlp, Channel::Stable, false).unwrap();
+        assert_eq!(setup.web.calls().len(), calls);
+
+        // Forced, it goes again, and the wait grows.
+        let before = now();
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, true),
+            Err(ToolError::Gone(ToolId::YtDlp))
+        );
+        let after = now();
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(recorded.failures, 2);
+        let next = time_of(&recorded.next_try);
+        assert!(
+            before + Duration::seconds(300) <= next && next <= after + Duration::seconds(300),
+            "{next}"
+        );
+        assert_eq!(setup.web.count(&source.asset_url()), 2);
+
+        // The scanner lets it be: in place, and ready.
+        setup.inspect.quarantines(ToolId::YtDlp, false);
+        let status = tools.check(ToolId::YtDlp, Channel::Stable, true).unwrap();
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(status.error, None);
+        assert_eq!(tools.path(ToolId::YtDlp), Some(setup.exe(ToolId::YtDlp)));
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!((recorded.failures, recorded.next_try), (0, None));
+        assert_eq!(tools.installs(ToolId::YtDlp), 3);
+    }
+
+    /// Ruling R10 and the scheduler's rounds: a tool put in place whose `--version` does not
+    /// answer is a failure that backs off (not a day's wait), and is asked again without the
+    /// network.
+    #[test]
+    fn a_tool_that_does_not_say_its_version_is_a_failure_and_is_asked_again() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        let tools = setup.tools();
+
+        assert_eq!(
+            tools.check(ToolId::YtDlp, Channel::Stable, false),
+            Err(ToolError::Silent(ToolId::YtDlp))
+        );
+
+        // In place and verified: the hook may run it still.
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), exe);
+        assert_eq!(tools.path(ToolId::YtDlp), Some(setup.exe(ToolId::YtDlp)));
+        let status = tools.status(ToolId::YtDlp);
+        assert_eq!((status.state, status.version), (ToolState::Failed, None));
+        assert!(status.error.unwrap().contains("did not say its version"));
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(recorded.failures, 1);
+        // Tried again after the backoff, not a day after the install.
+        let next = time_of(&recorded.next_try);
+        assert_eq!(
+            tools.next_due(ToolId::YtDlp, Channel::Stable, now()),
+            Some(next)
+        );
+        assert_eq!(tools.next_due(ToolId::YtDlp, Channel::Stable, next), None);
+
+        // Asked again: still silent, nothing changes.
+        let calls = setup.web.calls().len();
+        assert!(!tools.inspect_again(ToolId::YtDlp));
+        assert_eq!(setup.record(ToolId::YtDlp).unwrap().failures, 1);
+        // It answers now: ready, without the network.
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        assert!(tools.inspect_again(ToolId::YtDlp));
+        assert_eq!(setup.web.calls().len(), calls);
+        let status = tools.status(ToolId::YtDlp);
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(status.version.as_deref(), Some("2026.08.19"));
+        assert_eq!(status.error, None);
+        let recorded = setup.record(ToolId::YtDlp).unwrap();
+        assert_eq!(recorded.version.as_deref(), Some("2026.08.19"));
+        assert_eq!((recorded.failures, recorded.next_try), (0, None));
+        // Known: nothing to ask, and nothing runs.
+        let asked = setup.inspect.asked().len();
+        assert!(!tools.inspect_again(ToolId::YtDlp));
+        assert_eq!(setup.inspect.asked().len(), asked);
+        // Nor for a tool that is not there.
+        assert!(!tools.inspect_again(ToolId::Deno));
+    }
+
+    /// A Deno whose `--version` did not answer at first reaches the running core once a round of
+    /// the scheduler hears its version, without a check and without the network.
+    #[test]
+    fn a_deno_whose_version_comes_late_reaches_the_core() {
+        let setup = Setup::new();
+        let recent = stamp(now() - Duration::hours(1));
+        setup.installed(
+            ToolId::YtDlp,
+            b"yt-dlp",
+            record(b"yt-dlp", "2026.08.19", &recent),
+        );
+        setup.installed(
+            ToolId::Deno,
+            b"deno",
+            ToolRecord {
+                version: None,
+                channel: None,
+                ..record(b"deno", "2.9.7", &recent)
+            },
+        );
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host.clone());
+        let remove = command(&["change-list", "ytdl-raw-options", "remove", "js-runtimes"]);
+        assert!(service.options_for_new_core().contains(&remove));
+        assert_eq!(service.tools().path(ToolId::Deno), None);
+
+        setup.inspect.says(ToolId::Deno, "2.9.7");
+        service.start();
+
+        eventually("the core to hear of Deno", || host.sent().len() == 1);
+        let deno = setup.exe(ToolId::Deno).to_string_lossy().into_owned();
+        assert_eq!(
+            host.sent(),
+            [command(&[
+                "change-list",
+                "ytdl-raw-options",
+                "append",
+                &format!("js-runtimes=deno:{deno}")
+            ])]
+        );
+        assert_eq!(service.statuses()[1].state, ToolState::Ready);
+        assert_eq!(host.states_of(ToolId::Deno), [ToolState::Ready]);
+        assert!(setup.web.calls().is_empty(), "{:?}", setup.web.calls());
         drop(service);
     }
 

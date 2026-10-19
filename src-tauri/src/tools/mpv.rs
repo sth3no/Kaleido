@@ -27,8 +27,11 @@ pub const RAW_OPTIONS: &str = "ytdl-raw-options";
 /// The keys of [`RAW_OPTIONS`] that are Kaleido's (plan decision 13): a user's own value for them
 /// is replaced or removed, the user's other keys are never touched.
 pub const KALEIDO_RAW_KEYS: [&str; 2] = ["js-runtimes", "cookies-from-browser"];
-/// What separates the paths of `ytdl_path` on Windows (`ytdl_hook.lua`, l. 954).
-const PATH_SEPARATOR: char = ';';
+/// What follows the path while the file is not there: the list of the one path. `ytdl_hook`
+/// splits `ytdl_path` at `;` on Windows (`ytdl_hook.lua`, l. 954).
+const MISSING: &str = ";";
+/// What follows the path to make the hook look again ([`hook_commands_for_core`]): the same list.
+const AGAIN: &str = ";;";
 
 /// `ytdl_hook`'s yt-dlp:
 /// `change-list script-opts append ytdl_hook-ytdl_path=<tools_dir>\yt-dlp.exe`.
@@ -41,15 +44,50 @@ const PATH_SEPARATOR: char = ';';
 /// split it, by the hook's own rule; the user's folder name is the only place one could come from.)
 pub fn hook_commands(paths: &AppPaths) -> Vec<Vec<String>> {
     let exe = paths.tools_dir.join(ToolId::YtDlp.exe_name());
-    let mut value = exe.to_string_lossy().into_owned();
+    let spelled = if exe.is_file() { "" } else { MISSING };
+    vec![hook_command(&exe, spelled)]
+}
+
+/// [`hook_commands`] for a core that runs and has `current` (the tools' options it was given), as
+/// a check of the tools left them:
+/// - the file is not there: `…\yt-dlp.exe;`, as [`hook_commands`];
+/// - it was put in place since the core last heard (`put_in_place`): the path spelled unlike the
+///   core's value, `…\yt-dlp.exe` or `…\yt-dlp.exe;;` (the same one path to the hook). The hook
+///   may keep a search that failed while the file was gone (the core started, or a link was
+///   opened, in between), and only a value it has not seen makes it look again. One change, not
+///   two in a row: mpv may hand a script two quick changes of a property as one, the last, which
+///   it has seen already;
+/// - otherwise: the spelling the core has, or the plain path.
+pub fn hook_commands_for_core(
+    paths: &AppPaths,
+    current: &[Vec<String>],
+    put_in_place: bool,
+) -> Vec<Vec<String>> {
+    let exe = paths.tools_dir.join(ToolId::YtDlp.exe_name());
     if !exe.is_file() {
-        value.push(PATH_SEPARATOR);
+        return vec![hook_command(&exe, MISSING)];
     }
-    vec![change(
+    let plain = hook_command(&exe, "");
+    let again = hook_command(&exe, AGAIN);
+    let chosen = match (
+        put_in_place,
+        current.contains(&plain),
+        current.contains(&again),
+    ) {
+        (true, true, _) => again,
+        (true, false, _) | (false, _, false) => plain,
+        (false, _, true) => again,
+    };
+    vec![chosen]
+}
+
+/// `change-list script-opts append ytdl_hook-ytdl_path=<exe><spelled>`.
+fn hook_command(exe: &Path, spelled: &str) -> Vec<String> {
+    change(
         "script-opts",
         "append",
-        &format!("{YTDL_PATH_KEY}={value}"),
-    )]
+        &format!("{YTDL_PATH_KEY}={}{spelled}", exe.to_string_lossy()),
+    )
 }
 
 /// Kaleido's keys of `ytdl-raw-options`: `js-runtimes=deno:<path>` with a Deno yt-dlp can use
@@ -128,6 +166,59 @@ mod tests {
             ])]
         );
         assert!(ours.ends_with(r"\Kaleido\tools\yt-dlp.exe"), "{ours}");
+    }
+
+    /// What a running core gets after a check, from what it has.
+    #[test]
+    fn the_hook_hears_of_a_yt_dlp_put_in_place_anew() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let exe = paths.tools_dir.join("yt-dlp.exe");
+        let ours = exe.to_string_lossy().into_owned();
+        let spelled = |suffix: &str| {
+            args(&[
+                "change-list",
+                "script-opts",
+                "append",
+                &format!("ytdl_hook-ytdl_path={ours}{suffix}"),
+            ])
+        };
+        let (plain, missing, again) = (spelled(""), spelled(";"), spelled(";;"));
+        let raw = args(&["change-list", "ytdl-raw-options", "remove", "js-runtimes"]);
+
+        // Not there: missing, whatever came before.
+        for put_in_place in [false, true] {
+            for current in [&plain, &missing, &again] {
+                assert_eq!(
+                    hook_commands_for_core(&paths, &[current.clone(), raw.clone()], put_in_place),
+                    vec![missing.clone()]
+                );
+            }
+        }
+
+        fs::write(&exe, b"yt-dlp").unwrap();
+        for (current, put_in_place, chosen) in [
+            // Put in place anew: never the value the core has.
+            (&plain, true, &again),
+            (&again, true, &plain),
+            (&missing, true, &plain),
+            // Nothing new: what the core has, or the plain path.
+            (&plain, false, &plain),
+            (&again, false, &again),
+            (&missing, false, &plain),
+        ] {
+            assert_eq!(
+                hook_commands_for_core(&paths, &[raw.clone(), current.clone()], put_in_place),
+                vec![chosen.clone()],
+                "{current:?} {put_in_place}"
+            );
+        }
+        // A core that has none of them (it was given nothing yet).
+        assert_eq!(
+            hook_commands_for_core(&paths, &[], true),
+            vec![plain.clone()]
+        );
+        assert_eq!(hook_commands(&paths), [plain]);
     }
 
     #[test]
@@ -342,6 +433,53 @@ mod tests {
         events.wait_until("the stand-in ran", LOAD_TIMEOUT, |events| {
             hook_lines(events, "unexpected error occurred") > 0
         });
+        engine.command(&["stop"]);
+    }
+
+    /// Needs a real libmpv; runs a copy of Windows' where.exe as the "yt-dlp", as above. The file
+    /// was there when the core got the plain path, then gone when a link was opened: the hook
+    /// keeps that failed search for as long as the value stays, and the spelling that differs
+    /// makes it look again.
+    #[test]
+    fn a_yt_dlp_put_in_place_anew_is_looked_for_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let exe = paths.tools_dir.join("yt-dlp.exe");
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let stand_in = PathBuf::from(root).join("System32").join("where.exe");
+        fs::copy(&stand_in, &exe).unwrap();
+        let events = Recorded::default();
+        let engine = Engine::start(headless(paths.clone()), events.clone()).unwrap();
+        engine.call(|mpv| mpv.request_log_messages("warn").unwrap());
+        let given = hook_commands(&paths);
+        give(&engine, given.clone());
+
+        // A virus scanner takes it away, and a link is opened.
+        fs::remove_file(&exe).unwrap();
+        engine.command(&["loadfile", LINK]);
+        events.wait_until("the search fails", LOAD_TIMEOUT, |events| {
+            hook_lines(events, NOT_FOUND) > 0
+        });
+        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), "");
+
+        // The check puts it in place again: the value differs from the one the core has.
+        fs::copy(&stand_in, &exe).unwrap();
+        let again = hook_commands_for_core(&paths, &given, true);
+        assert_ne!(again, given);
+        give(&engine, again);
+
+        let ours = exe.to_string_lossy().into_owned();
+        for _ in 0..10 {
+            let failed = hook_lines(&events.events(), "youtube-dl failed");
+            engine.command(&["loadfile", LINK]);
+            events.wait_until("the hook tried again", LOAD_TIMEOUT, |events| {
+                hook_lines(events, "youtube-dl failed") > failed
+            });
+            if property(&engine, "user-data/mpv/ytdl/path") == ours {
+                break;
+            }
+        }
+        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), ours);
         engine.command(&["stop"]);
     }
 
