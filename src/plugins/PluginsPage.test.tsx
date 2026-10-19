@@ -599,7 +599,12 @@ describe('uninstall', () => {
     await settle();
 
     expect(names()).toHaveLength(5);
-    expect(within(row('uosc')).getByRole('alert').textContent).toBe(
+    // In the words of the page, and Rust's own message after it, in English (final review minor 3).
+    const alert = within(row('uosc')).getByRole('alert');
+    expect(alert.textContent).toBe(
+      'Kaleido could not read or change a file of the plugins. cannot move the files to the Recycle Bin: access denied',
+    );
+    expect(alert.querySelector('[lang="en"]')?.textContent).toBe(
       'cannot move the files to the Recycle Bin: access denied',
     );
     // Still asking, so that it can be tried again or called off.
@@ -992,16 +997,18 @@ describe('what Rust refuses', () => {
     expect(within(row('thumbfast')).queryByRole('alert')).toBeNull();
   });
 
-  test('a file that cannot be moved shows Rust’s message in the row', async () => {
+  test('a file that cannot be moved shows Rust’s message in the row, after the sentence of the page', async () => {
     refuse({ type: 'io', message: 'cannot save plugins.json: access denied' });
     await open();
 
     fireEvent.click(switchOf('uosc'));
     await settle();
 
-    expect(within(row('uosc')).getByRole('alert').textContent).toBe(
-      'cannot save plugins.json: access denied',
+    const alert = within(row('uosc')).getByRole('alert');
+    expect(alert.textContent).toBe(
+      'Kaleido could not read or change a file of the plugins. cannot save plugins.json: access denied',
     );
+    expect(alert.querySelector('[lang="en"]')?.textContent).toBe('cannot save plugins.json: access denied');
     expect(within(row('thumbfast')).queryByRole('alert')).toBeNull();
     // The next action clears it.
     refuse({ type: 'busy' });

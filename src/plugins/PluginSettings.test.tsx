@@ -417,6 +417,24 @@ describe('what Rust refuses', () => {
     expect(text('Prefix').value).toBe('thumb');
   });
 
+  test('a file Rust cannot write is said in the words of the page, with Rust’s message in English after it', async () => {
+    const message = 'cannot write script-opts\\thumbfast.conf: access denied';
+    rust({
+      plugins_set_setting: () => {
+        throw { type: 'io', message };
+      },
+    });
+    await open();
+
+    fireEvent.change(text('Prefix'), { target: { value: 'typed' } });
+    fireEvent.keyDown(text('Prefix'), { key: 'Enter' });
+    await settle();
+
+    const alert = within(field('prefix')).getByRole('alert');
+    expect(alert.textContent).toContain('Kaleido could not read or change a file of the plugins.');
+    expect(alert.querySelector('[lang="en"]')?.textContent).toBe(message);
+  });
+
   test('a plugin that is gone is said, and the page reads its list again', async () => {
     rust({
       plugins_set_setting: () => {

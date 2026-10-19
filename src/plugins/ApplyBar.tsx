@@ -24,7 +24,8 @@ import { useTranslation } from 'react-i18next';
 
 import { blurAfterPointer } from '../input/forward';
 import styles from './PluginsPage.module.css';
-import { problemText, type PluginProblem } from './problem';
+import type { PluginProblem } from './problem';
+import ProblemText from './ProblemText';
 
 export interface ApplyBarProps {
   /** A change waits for Apply. */
@@ -114,7 +115,7 @@ export default function ApplyBar({
       </div>
       {problem !== null && (
         <p role="alert" className={styles.problem}>
-          {problemText(problem, t)}
+          <ProblemText problem={problem} />
         </p>
       )}
     </div>

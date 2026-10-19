@@ -11,7 +11,14 @@ import { usePlayerStore } from '../../state/playerStore';
 import { useUiStore } from '../../state/uiStore';
 import ErrorCards, { LOG_FOLLOW_MS } from './ErrorCards';
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve(null)) }));
+// The stack asks for the plugins that report errors as it mounts (final review I-3): none here.
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn((command: string) =>
+    Promise.resolve(
+      command === 'plugins_list' ? { plugins: [], restartNeeded: false, removedEssentials: [], applying: false } : null,
+    ),
+  ),
+}));
 const events = vi.hoisted(() => ({
   handlers: new Map<string, ((event: { payload: unknown }) => void)[]>(),
 }));
@@ -357,9 +364,10 @@ describe('what the card says is going on (Rulings R41, R43)', () => {
 
   test('a dialog that cannot open is logged, and the card is gone all the same', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    vi.mocked(invoke).mockRejectedValueOnce('no dialog');
     render(<ErrorCards />);
     fails('loading failed', 'a.mkv');
+    // After the mount, which asks for the plugins: the rejection is the dialog's.
+    vi.mocked(invoke).mockRejectedValueOnce('no dialog');
 
     fireEvent.click(within(cards()[0]).getByRole('button', { name: 'Open file' }));
     await act(async () => {

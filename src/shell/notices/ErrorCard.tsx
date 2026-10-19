@@ -21,6 +21,11 @@
  *   twice. When Rust has taken the link the card goes (a new failure is a new card); when it refused
  *   it (in the words of the paste field, and with whether the browser was saved before), or the
  *   choice of the browser could not be saved, the card says so and offers the action again.
+ * - "Update and try again" that found nothing new (final review I-1) leaves the card up with what
+ *   it found (`streamNotice.ts`: Deno missing for a YouTube link, a check that failed, a yt-dlp
+ *   that is the newest already) and a link to Settings → Updates, which closes the card and opens
+ *   that page. The update stays only where pressing it again may help; where it goes, the focus it
+ *   had goes to the link.
  * - It goes by itself after 8 s. The clock is held while someone is dealing with the card: the
  *   pointer is over it, the focus is in it, or its details are open (a card that is being read, or
  *   copied from, must not vanish), or its action runs (Disable, Try again); the 8 s start anew when
@@ -53,7 +58,7 @@ import { useTranslation } from 'react-i18next';
 
 import { blurAfterPointer } from '../../input/forward';
 import { systemOpenDialog } from '../../ipc/commands';
-import { problemText } from '../../plugins/problem';
+import ProblemText from '../../plugins/ProblemText';
 import {
   isWorking,
   NOTICE_MS,
@@ -67,7 +72,10 @@ import styles from './ErrorCards.module.css';
 import { disableFromNotice, openPlugins } from './pluginNotice';
 import { streamErrorAction, type StreamAction } from './streamError';
 import {
+  findingText,
+  offersUpdateAfter,
   openPlaybackSettings,
+  openUpdatesSettings,
   problemKeys,
   retryFromNotice,
   saveCookiesAndRetry,
@@ -114,6 +122,10 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   const openButton = useRef<HTMLButtonElement>(null);
   /** The button of a link's action: it opens the chooser, and the focus goes back to it from there. */
   const actionButton = useRef<HTMLButtonElement>(null);
+  /** Settings → Updates, after an update that found nothing new. */
+  const updatesLink = useRef<HTMLButtonElement>(null);
+  /** The update's button had the focus when it was pressed: if the button goes, the focus goes to the link. */
+  const refocus = useRef(false);
   const chooserBox = useRef<HTMLDivElement>(null);
   /** What had the focus before it came into the card. */
   const cameFrom = useRef<HTMLElement | null>(null);
@@ -126,6 +138,18 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   const url = playback?.url ?? null;
   const action = stream !== null && url !== null ? streamErrorAction(stream) : null;
   const retrying = playback?.retry === 'working';
+  // What "Update and try again" found when it found nothing new: said in place of the problem, with
+  // Settings → Updates, and the update itself only where pressing it again may help.
+  const finding = playback?.retry === 'unchanged' ? playback.finding : null;
+  const offered = action !== null && (action !== 'update' || offersUpdateAfter(finding));
+
+  // The update's button went (it would change nothing now): the focus it had goes to the link that
+  // took its place, not to the page.
+  useEffect(() => {
+    if (finding === null || offersUpdateAfter(finding) || !refocus.current) return;
+    refocus.current = false;
+    updatesLink.current?.focus();
+  }, [finding]);
 
   // A card stays while its action runs (Disable, Try again). An open chooser holds it no more than
   // anything else: the pointer over it or the focus in it does (Ruling R14).
@@ -184,6 +208,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       else closeChooser();
       return;
     }
+    refocus.current = document.activeElement === e.currentTarget;
     void retryFromNotice(id, url, action === 'update').then((taken) => {
       if (taken) close();
     });
@@ -193,6 +218,12 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   const openSettings = () => {
     dismiss(id);
     openPlaybackSettings();
+  };
+
+  // The same for Settings → Updates, after an update that found nothing new.
+  const openUpdates = () => {
+    dismiss(id);
+    openUpdatesSettings();
   };
 
   const saveBrowser = (spec: string | null) => {
@@ -239,6 +270,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
   // Why the action did not go through: Rust refused the link (and whether the browser was saved
   // before), or the browser could not be saved.
   const problem = playback ? problemKeys(playback).map((key) => t(key)).join(' ') : '';
+  const found = finding === null ? null : findingText(finding, t);
 
   return (
     <li
@@ -271,7 +303,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
           )}
           {plugin?.phase === 'failed' && plugin.problem !== null && (
             <p className={styles.remedy} role="alert">
-              {problemText(plugin.problem, t)}
+              <ProblemText problem={plugin.problem} />
             </p>
           )}
         </div>
@@ -288,7 +320,7 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       </div>
       {playback && (
         <div className={styles.actions}>
-          {action !== null && (
+          {action !== null && offered && (
             // Not `disabled`: the button keeps the focus while the action runs.
             <button
               ref={actionButton}
@@ -303,6 +335,17 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
             >
               {retrying && <span className={styles.spinner} aria-hidden />}
               {t(`errors.streamAction.${action}`)}
+            </button>
+          )}
+          {finding !== null && (
+            <button
+              ref={updatesLink}
+              type="button"
+              className={styles.action}
+              onClick={openUpdates}
+              {...blurAfterPointer}
+            >
+              {t('errors.streamUpdate.openUpdates')}
             </button>
           )}
           {playback.remedy === 'open' && (
@@ -341,6 +384,18 @@ export default function ErrorCard({ notice }: ErrorCardProps) {
       {problem !== '' && (
         <p className={styles.problem} role="alert">
           {problem}
+        </p>
+      )}
+      {found !== null && (
+        <p className={styles.problem} role="alert">
+          {found.text}
+          {found.detail !== null && (
+            <>
+              {' '}
+              {/* Rust's reason, which is in English whatever the language of the UI. */}
+              <span lang="en">{found.detail}</span>
+            </>
+          )}
         </p>
       )}
       {playback && action === 'cookies' && chooser !== null && (

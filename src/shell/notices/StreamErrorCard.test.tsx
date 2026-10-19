@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { initI18n, setLanguage } from '../../i18n';
-import type { Browser, Settings, StreamError } from '../../ipc/types';
+import type { Browser, LinkUpdate, Settings, StreamError, ToolStatus } from '../../ipc/types';
 import { useSettingsStore } from '../../settings/store';
 import { MAX_NOTICES, NOTICE_MS, useNoticeStore } from '../../state/noticeStore';
 import { usePlayerStore } from '../../state/playerStore';
@@ -71,6 +71,8 @@ function rust(answers: Answers = {}) {
     system_browsers: () => BROWSERS,
     settings_set: () => withCookies(FORK_SPEC),
     stream_retry: () => null,
+    // The stack asks for the plugins that report errors as it mounts (final review I-3): none here.
+    plugins_list: () => ({ plugins: [], restartNeeded: false, removedEssentials: [], applying: false }),
     ...answers,
   };
   vi.mocked(invoke).mockImplementation((async (command: string, args?: unknown) =>
@@ -382,6 +384,154 @@ describe('update and try again', () => {
     expect(refused.getAttribute('role')).toBe('alert');
     // The choice of a browser was not part of it: nothing is said about one being saved.
     expect(within(card).queryByText(/The choice was saved/)).toBeNull();
+  });
+});
+
+describe('an update that finds nothing new (final review I-1)', () => {
+  const status = (over: Partial<ToolStatus> = {}): ToolStatus => ({
+    tool: 'ytDlp',
+    state: 'ready',
+    version: '2026.10.10',
+    checkedAt: '2026-10-19T08:00:00Z',
+    error: null,
+    ...over,
+  });
+  /** What `stream_retry` with the update resolves with: by default, nothing new. */
+  const found = (over: Partial<LinkUpdate> = {}): LinkUpdate => ({
+    ytDlp: status(),
+    deno: null,
+    channel: 'stable',
+    updated: false,
+    ...over,
+  });
+  const NEWEST =
+    'yt-dlp 2026.10.10 is already the newest. The website may have changed after it was released; a fix usually follows within days.';
+
+  /** The card of a link that failed with `error`, its update pressed and answered. */
+  async function updated(error: StreamError = 'outdated') {
+    render(<ErrorCards />);
+    failsLink(error);
+    const [card] = cards();
+    fireEvent.click(button(card, 'Update and try again'));
+    await settle();
+    return card;
+  }
+
+  test('something new: Rust opened the link again, and the card goes', async () => {
+    rust({ stream_retry: () => found({ updated: true }) });
+    await updated();
+    expect(sent('stream_retry')).toEqual([['stream_retry', { url: LINK, update: true }]]);
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('the newest already: the card stays and says so, with the hint at Nightly, and Settings → Updates in place of the update', async () => {
+    rust({ stream_retry: () => found() });
+    const card = await updated();
+
+    expect(cards()).toHaveLength(1);
+    const said = within(card).getByText(/already the newest/);
+    expect(said.textContent).toBe(`${NEWEST} The Nightly channel (Settings → Updates) often has it sooner.`);
+    expect(said.getAttribute('role')).toBe('alert');
+    expect(buttonNames(card)).toEqual(['Close', 'Settings → Updates', 'Open file', 'Details']);
+    // Not at work any more: nothing says the update runs.
+    expect(within(card).getByRole('status').textContent).toBe('');
+
+    // The link closes the card, then opens Settings on Updates.
+    fireEvent.click(button(card, 'Settings → Updates'));
+    expect(cards()).toHaveLength(0);
+    expect(useUiStore.getState()).toMatchObject({ page: 'settings', settingsRequest: 'updates' });
+    expect(sent('stream_retry')).toHaveLength(1);
+  });
+
+  test('on Nightly already, the hint at it is left out', async () => {
+    rust({ stream_retry: () => found({ channel: 'nightly', ytDlp: status({ version: '2026.10.18.233141' }) }) });
+    const card = await updated();
+
+    expect(within(card).getByText(/already the newest/).textContent).toBe(
+      'yt-dlp 2026.10.18.233141 is already the newest. The website may have changed after it was released; a fix usually follows within days.',
+    );
+    expect(within(card).queryByText(/Nightly channel/)).toBeNull();
+  });
+
+  test('Deno missing for a YouTube link is said instead, with Rust’s reason, and the update (which checks Deno too) is offered again', async () => {
+    const deno = status({ tool: 'deno', state: 'failed', version: null, checkedAt: null, error: 'the server cannot be reached' });
+    rust({ stream_retry: () => found({ deno }) });
+    const card = await updated();
+
+    const said = within(card).getByText(/needs Deno/);
+    expect(said.textContent).toBe(
+      'This link needs Deno, which yt-dlp uses for YouTube, and Deno is not ready. the server cannot be reached',
+    );
+    expect(said.querySelector('[lang="en"]')?.textContent).toBe('the server cannot be reached');
+    expect(within(card).queryByText(/already the newest/)).toBeNull();
+    expect(buttonNames(card)).toEqual(['Close', 'Update and try again', 'Settings → Updates', 'Open file', 'Details']);
+
+    // Pressed again, Deno comes: Rust opens the link, and the card goes.
+    rust({ stream_retry: () => found({ updated: true, deno: status({ tool: 'deno', version: '2.9.7' }) }) });
+    fireEvent.click(button(card, 'Update and try again'));
+    await settle();
+    expect(sent('stream_retry')).toHaveLength(2);
+    expect(cards()).toHaveLength(0);
+  });
+
+  test('a Deno that is not there at all is said as not installed', async () => {
+    const deno = status({ tool: 'deno', state: 'missing', version: null, checkedAt: null });
+    rust({ stream_retry: () => found({ deno }) });
+    const card = await updated();
+
+    expect(within(card).getByText(/needs Deno/).textContent).toBe(
+      'This link needs Deno, which yt-dlp uses for YouTube, and Deno is not installed yet.',
+    );
+  });
+
+  test('a check of yt-dlp that failed says so with Rust’s reason, and the update is offered again', async () => {
+    rust({ stream_retry: () => found({ ytDlp: status({ state: 'failed', error: 'the server cannot be reached' }) }) });
+    const card = await updated();
+
+    const said = within(card).getByText(/could not be updated/);
+    expect(said.textContent).toBe('yt-dlp could not be updated. the server cannot be reached');
+    expect(buttonNames(card)).toEqual(['Close', 'Update and try again', 'Settings → Updates', 'Open file', 'Details']);
+  });
+
+  test('a yt-dlp said to be missing that is there and current could not be started: said, without the update', async () => {
+    rust({ stream_retry: () => found() });
+    const card = await updated('missing');
+
+    expect(
+      within(card).getByText(
+        'yt-dlp is installed and up to date, but it could not be started. An antivirus may be blocking it.',
+      ),
+    ).toBeTruthy();
+    expect(within(card).queryByText(/already the newest/)).toBeNull();
+    expect(buttonNames(card)).toEqual(['Close', 'Settings → Updates', 'Open file', 'Details']);
+  });
+
+  test('the focus the update’s button had goes to the link that takes its place', async () => {
+    rust({ stream_retry: () => found() });
+    render(<ErrorCards />);
+    failsLink('outdated');
+    const [card] = cards();
+    const update = button(card, 'Update and try again');
+    update.focus();
+
+    fireEvent.click(update);
+    await settle();
+
+    expect(document.activeElement).toBe(button(card, 'Settings → Updates'));
+  });
+
+  test('in Czech', async () => {
+    rust({ stream_retry: () => found() });
+    const card = await updated();
+
+    act(() => {
+      setLanguage('cs');
+    });
+
+    expect(within(card).getByText(/je už nejnovější/).textContent).toBe(
+      'yt-dlp 2026.10.10 je už nejnovější. Web se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní. Kanál Nightly (Nastavení → Aktualizace) ji často mívá dřív.',
+    );
+    expect(button(card, 'Nastavení → Aktualizace')).toBeTruthy();
   });
 });
 

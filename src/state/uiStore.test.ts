@@ -42,6 +42,14 @@ test('the setters change one thing each', () => {
   expect(store.getState().quickTab).toBe('audio');
 });
 
+test('a notice asks for a section of the settings: the page goes there, and the request waits to be taken', () => {
+  expect(store.getState().settingsRequest).toBeNull();
+  store.getState().openSettings('updates');
+  expect(store.getState()).toMatchObject({ page: 'settings', settingsRequest: 'updates' });
+  store.getState().clearSettingsRequest();
+  expect(store.getState()).toMatchObject({ page: 'settings', settingsRequest: null });
+});
+
 test('quick settings can be set to the quality tab, which closing the panel leaves as it is', () => {
   store.getState().setQuickTab('quality');
   store.getState().setPanel('quick-settings');

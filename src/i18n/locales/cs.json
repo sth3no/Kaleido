@@ -179,7 +179,8 @@
       "notFound": "Tento plugin už neexistuje. Seznam byl načten znovu.",
       "gone": "Plugin {{name}} už neexistuje. Seznam byl načten znovu.",
       "unavailable": "Přehrávač neběží nebo se ho nepodařilo restartovat. Změny čekají na další Použít.",
-      "generic": "Změnu se nepodařilo provést."
+      "generic": "Změnu se nepodařilo provést.",
+      "io": "Kaleido nemohl přečíst nebo změnit soubor pluginů."
     },
     "settings": {
       "label": "Nastavení pluginu {{name}}",
@@ -629,6 +630,16 @@
       "refused": "Odkaz se nepodařilo znovu otevřít.",
       "saved": "Volba je uložená.",
       "unsaved": "Volbu se nepodařilo uložit, nic se nezměnilo. Zkus to znovu."
+    },
+    "streamUpdate": {
+      "newest": "yt-dlp {{version}} je už nejnovější. Web se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní.",
+      "newestUnknown": "yt-dlp je už nejnovější. Web se mohl změnit až po jeho vydání; oprava obvykle přijde do několika dní.",
+      "nightly": "Kanál Nightly (Nastavení → Aktualizace) ji často mívá dřív.",
+      "denoMissing": "Tento odkaz potřebuje Deno, které yt-dlp používá pro YouTube, a Deno ještě není nainstalované.",
+      "denoFailed": "Tento odkaz potřebuje Deno, které yt-dlp používá pro YouTube, a Deno není připravené.",
+      "failed": "yt-dlp se nepodařilo aktualizovat.",
+      "blocked": "yt-dlp je nainstalovaný a aktuální, ale nepodařilo se ho spustit. Možná ho blokuje antivirus.",
+      "openUpdates": "Nastavení → Aktualizace"
     },
     "browser": {
       "label": "Brát cookies z",

@@ -34,6 +34,9 @@ beforeEach(() => {
   vi.mocked(invoke).mockImplementation(((command: string) => {
     if (command === 'system_ui_ready') return Promise.resolve({ 'idle-active': true, pause: true });
     if (command === 'glass_state') return Promise.resolve({ enabled: true, reason: null });
+    if (command === 'plugins_list') {
+      return Promise.resolve({ plugins: [], restartNeeded: false, removedEssentials: [], applying: false });
+    }
     return Promise.resolve(null);
   }) as unknown as typeof invoke);
 });
@@ -76,13 +79,17 @@ test('My plugins is a page of the app, between the player and the settings', asy
     'Settings',
   ]);
 
+  // The notice stack asked once, as it mounted (final review I-3).
+  const lists = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === 'plugins_list').length;
+  const before = lists();
+
   fireEvent.click(nav.getByRole('button', { name: 'My plugins' }));
 
   expect(useUiStore.getState().page).toBe('plugins');
   expect(screen.getByRole('main').getAttribute('data-view')).toBe('plugins');
   expect(screen.getByRole('heading', { level: 1, name: 'My plugins' })).toBeTruthy();
   // The page asked Rust for the plugins.
-  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === 'plugins_list')).toBe(true);
+  expect(lists()).toBeGreaterThan(before);
 });
 
 /** What a drag carries; jsdom has no DataTransfer, and the hook reads these members only. */

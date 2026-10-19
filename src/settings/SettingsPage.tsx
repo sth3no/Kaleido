@@ -14,6 +14,10 @@
  *   (that has no list or typed text to close) comes back to the field. Typing in the field does not
  *   reach mpv (input/forward.ts leaves the keys of a text field alone).
  *
+ * A notice card's link can ask for a section (`uiStore.openSettings`): the page opens on it, or
+ * switches to it when it is up, and the focus goes to its heading as for a section opened from the
+ * list.
+ *
  * The values come from Rust when the page opens (`store.ts`), and Kaleido's own settings follow
  * `settings:changed`, so that a change made elsewhere shows here. A row is not drawn until its own
  * source has answered (Kaleido's settings are read; Rust has values for the mpv options, which it does
@@ -48,6 +52,7 @@ import { useTranslation } from 'react-i18next';
 import { blurAfterPointer } from '../input/forward';
 import { onSettingsChanged } from '../ipc/events';
 import { listenTo } from '../ipc/listen';
+import { useUiStore } from '../state/uiStore';
 import { MINI } from '../surface/mini';
 import glass from '../theme/glass.module.css';
 import { SECTIONS, type SectionId } from './descriptors';
@@ -104,9 +109,12 @@ function SectionView({ id, only, headingRef }: SectionViewProps) {
 export default function SettingsPage() {
   const { t } = useTranslation();
   const status = useSettingsStore((state) => state.status);
-  const [section, setSection] = useState<SectionId>(SECTIONS[0]);
+  // A section a notice asked for is the first one drawn (the effect below takes the request).
+  const [section, setSection] = useState<SectionId>(
+    () => useUiStore.getState().settingsRequest ?? SECTIONS[0],
+  );
   /** The item of the list that Tab reaches: the one that had the focus last. */
-  const [rover, setRover] = useState<SectionId>(SECTIONS[0]);
+  const [rover, setRover] = useState<SectionId>(() => useUiStore.getState().settingsRequest ?? SECTIONS[0]);
   const [query, setQuery] = useState('');
   /** Counts the requests to move the focus to the open section's heading. */
   const [headingFocus, setHeadingFocus] = useState(0);
@@ -115,6 +123,18 @@ export default function SettingsPage() {
   const searchField = useRef<HTMLInputElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const sources = useSourcesLoaded();
+  const requested = useUiStore((state) => state.settingsRequest);
+
+  // A notice's link asked for a section (Settings → Updates): it opens, as a click on it would,
+  // also when the page is up already.
+  useEffect(() => {
+    if (requested === null) return;
+    useUiStore.getState().clearSettingsRequest();
+    setSection(requested);
+    setRover(requested);
+    setQuery('');
+    setHeadingFocus((count) => count + 1);
+  }, [requested]);
 
   // Subscribed before the values are read: a change in between is not lost.
   useEffect(

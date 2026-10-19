@@ -179,7 +179,8 @@
       "notFound": "This plugin is gone. The list was read again.",
       "gone": "The plugin {{name}} is gone. The list was read again.",
       "unavailable": "The player is not running or could not be restarted. The changes wait for the next Apply.",
-      "generic": "The change could not be made."
+      "generic": "The change could not be made.",
+      "io": "Kaleido could not read or change a file of the plugins."
     },
     "settings": {
       "label": "Settings of {{name}}",
@@ -629,6 +630,16 @@
       "refused": "The link could not be opened again.",
       "saved": "The choice was saved.",
       "unsaved": "The choice could not be saved, so nothing was changed. Try again."
+    },
+    "streamUpdate": {
+      "newest": "yt-dlp {{version}} is already the newest. The website may have changed after it was released; a fix usually follows within days.",
+      "newestUnknown": "yt-dlp is already the newest. The website may have changed after it was released; a fix usually follows within days.",
+      "nightly": "The Nightly channel (Settings → Updates) often has it sooner.",
+      "denoMissing": "This link needs Deno, which yt-dlp uses for YouTube, and Deno is not installed yet.",
+      "denoFailed": "This link needs Deno, which yt-dlp uses for YouTube, and Deno is not ready.",
+      "failed": "yt-dlp could not be updated.",
+      "blocked": "yt-dlp is installed and up to date, but it could not be started. An antivirus may be blocking it.",
+      "openUpdates": "Settings → Updates"
     },
     "browser": {
       "label": "Take cookies from",

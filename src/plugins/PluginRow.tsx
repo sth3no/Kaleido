@@ -43,7 +43,8 @@ import { localized } from './localized';
 import PluginLog from './PluginLog';
 import PluginSettings from './PluginSettings';
 import styles from './PluginsPage.module.css';
-import { problemText, type PluginProblem } from './problem';
+import type { PluginProblem } from './problem';
+import ProblemText from './ProblemText';
 
 /** The log, the open question and the settings: what in a row has keys of its own. */
 const EXTRA = '[role="region"], [role="group"]';
@@ -340,7 +341,7 @@ export default function PluginRow({
 
       {problem !== null && (
         <p role="alert" className={styles.problem}>
-          {problemText(problem, t)}
+          <ProblemText problem={problem} />
         </p>
       )}
     </li>

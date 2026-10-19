@@ -10,11 +10,12 @@
  * focus is in it) or when it is closed (`shell/notices/ErrorCard.tsx`).
  *
  * Other code adds one with `pushAppNotice` or `pushPluginNotice`; the card stack is the only reader.
+ * A plugin has one card in a session, however often it is told (`toldPlugins`).
  */
 
 import { create } from 'zustand';
 
-import type { LogLine, SourceError, StreamError } from '../ipc/types';
+import type { LogLine, SourceError, StreamError, ToolStatus } from '../ipc/types';
 import type { PluginProblem } from '../plugins/problem';
 
 /** Cards on top of one another. */
@@ -50,10 +51,31 @@ export type PlaybackRemedy = 'continues' | 'open';
  * - `refused`: Rust did not take the link again (`stream_retry` rejected; `refusal` says how); the
  *   action is offered again.
  * - `unsaved`: the choice of the browser could not be saved, so nothing was changed.
+ * - `unchanged`: "Update and try again" found nothing new to try the link with, so Rust did not
+ *   open it again (it would fail as it did); `finding` says why (final review I-1).
  *
  * When the action succeeds the card goes: the link is with the player, and a new failure is a new card.
  */
-export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved';
+export type RetryPhase = 'idle' | 'working' | 'refused' | 'unsaved' | 'unchanged';
+
+/**
+ * What "Update and try again" found when nothing new was put in place (final review I-1), in the
+ * order the card looks for it:
+ *
+ * - `deno`: the link needs Deno (YouTube) and Deno is not ready (`status`, with Rust's reason).
+ *   The update, which checks Deno too, is offered again.
+ * - `failed`: yt-dlp's check failed (`status`, with Rust's reason). The update is offered again.
+ * - `blocked`: yt-dlp is there and current, yet the link said it is missing: mpv could not start it.
+ * - `newest`: yt-dlp `version` is the newest of its channel already; `nightly`: the channel is the
+ *   nightly one. The site may have changed after it.
+ *
+ * The last two offer Settings → Updates in place of the update, which would change nothing.
+ */
+export type UpdateFinding =
+  | { kind: 'deno'; status: ToolStatus }
+  | { kind: 'failed'; status: ToolStatus }
+  | { kind: 'blocked' }
+  | { kind: 'newest'; version: string | null; nightly: boolean };
 
 /** How Rust refused to open a link again. */
 export interface Refusal {
@@ -80,6 +102,8 @@ export interface PlaybackNotice extends NoticeBase {
   retry: RetryPhase;
   /** How the link was refused; set exactly in `refused`. */
   refusal: Refusal | null;
+  /** What the update found; set exactly in `unchanged`. */
+  finding: UpdateFinding | null;
 }
 
 /**
@@ -123,6 +147,11 @@ export interface NoticeState {
   /** The card the focus is in, `null` for none (one element has the focus at a time). */
   focused: number | null;
   /**
+   * The plugins that have had a card in this session (`PluginInfo.name`): spec 10.4 says once for
+   * a plugin, and `pushPluginNotice` adds none for a name that is here.
+   */
+  toldPlugins: readonly string[];
+  /**
    * Adds a notice on top and returns its id. An app notice that is already shown (the same text)
    * is replaced rather than stacked, so that a key pressed three times is one card with a new timer.
    * A plugin has one card at a time: a second notice for it adds nothing and gives the id of the
@@ -134,9 +163,11 @@ export interface NoticeState {
   setPluginPhase: (id: number, phase: PluginPhase, problem?: PluginProblem | null) => void;
   /**
    * Moves the action of a link's card on (`refusal` with `refused`); a card that is gone, or is no
-   * playback card, is left alone.
+   * playback card, is left alone. Not to `unchanged`, which `setUnchanged` sets with its finding.
    */
-  setRetryPhase: (id: number, retry: RetryPhase, refusal?: Refusal | null) => void;
+  setRetryPhase: (id: number, retry: Exclude<RetryPhase, 'unchanged'>, refusal?: Refusal | null) => void;
+  /** The update of a link's card found nothing new (`finding`); a card that is gone is left alone. */
+  setUnchanged: (id: number, finding: UpdateFinding) => void;
   /**
    * The focus came into the card `id` (`inside`) or left it. A card that has the focus is not pushed
    * out. Leaving a card that is not the one noted (the focus has gone to another card meanwhile)
@@ -175,6 +206,7 @@ function trimmed(notices: Notice[], focused: number | null): Notice[] {
 export const useNoticeStore = create<NoticeState>()((set, get) => ({
   notices: [],
   focused: null,
+  toldPlugins: [],
   push: (notice) => {
     if (notice.kind === 'plugin') {
       const there = get().notices.find((other) => other.kind === 'plugin' && other.name === notice.name);
@@ -187,7 +219,11 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
         notice.kind === 'app'
           ? state.notices.filter((other) => !(other.kind === 'app' && other.message === notice.message))
           : state.notices;
-      return { notices: trimmed([{ ...notice, id }, ...kept], state.focused) };
+      const told =
+        notice.kind === 'plugin' && !state.toldPlugins.includes(notice.name)
+          ? { toldPlugins: [...state.toldPlugins, notice.name] }
+          : {};
+      return { notices: trimmed([{ ...notice, id }, ...kept], state.focused), ...told };
     });
     return id;
   },
@@ -207,12 +243,26 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
       const target = state.notices.find((notice) => notice.id === id);
       // The reason belongs to a refused link only.
       const reason = retry === 'refused' ? refusal : null;
-      if (target?.kind !== 'playback' || (target.retry === retry && target.refusal === reason)) {
+      if (
+        target?.kind !== 'playback' ||
+        (target.retry === retry && target.refusal === reason && target.finding === null)
+      ) {
         return state;
       }
       return {
         notices: state.notices.map((notice) =>
-          notice === target ? { ...target, retry, refusal: reason } : notice,
+          notice === target ? { ...target, retry, refusal: reason, finding: null } : notice,
+        ),
+      };
+    });
+  },
+  setUnchanged: (id, finding) => {
+    set((state) => {
+      const target = state.notices.find((notice) => notice.id === id);
+      if (target?.kind !== 'playback') return state;
+      return {
+        notices: state.notices.map((notice) =>
+          notice === target ? { ...target, retry: 'unchanged', refusal: null, finding } : notice,
         ),
       };
     });
@@ -247,10 +297,13 @@ export const useNoticeStore = create<NoticeState>()((set, get) => ({
 
 /**
  * Puts the card of a plugin that reports errors on the stack (spec 10.4): the plugin keeps
- * running, and the card offers to disable it. Called once for a plugin in a run of the app, when
- * Rust says `plugins:error`.
+ * running, and the card offers to disable it. Once for a plugin in a session (`toldPlugins`):
+ * Rust says `plugins:error` once in a run, and the card stack asks for the plugins that report
+ * errors when it mounts, for one that broke before the UI listened (final review I-3), so the
+ * same plugin may come twice; a second time adds nothing, also after its card has gone.
  */
 export function pushPluginNotice(name: string): void {
+  if (useNoticeStore.getState().toldPlugins.includes(name)) return;
   useNoticeStore.getState().push({
     kind: 'plugin',
     message: 'errors.plugin.message',

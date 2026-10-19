@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vi
 import { initI18n, setLanguage } from '../i18n';
 import { attachVideoInput } from '../input/forward';
 import type { Binding, Browser, License, Settings, ToolStatus } from '../ipc/types';
+import { useUiStore } from '../state/uiStore';
 import { MINI } from '../surface/mini';
 import { DEFAULT_APPEARANCE } from '../theme/tokens';
 import SettingsPage from './SettingsPage';
@@ -1087,6 +1088,30 @@ describe('the default quality of links and the cookies', () => {
     expect(cookies().textContent).toBe('Do not use');
     emit('settings:changed', withCookies('firefox'));
     expect(cookies().textContent).toBe('Firefox');
+  });
+});
+
+describe('a section a notice asks for (Settings → Updates)', () => {
+  test('the page opens on it, or switches to it while it is up, with the focus on its heading', async () => {
+    useUiStore.setState(useUiStore.getInitialState(), true);
+    useUiStore.getState().openSettings('updates');
+
+    render(<SettingsPage />);
+
+    const region = await screen.findByRole('region', { name: 'Updates' });
+    expect(sectionHeadings()).toEqual(['Updates']);
+    expect(sectionButton('Updates').getAttribute('aria-current')).toBe('true');
+    expect(document.activeElement).toBe(within(region).getByRole('heading', { level: 2 }));
+    expect(useUiStore.getState().settingsRequest).toBeNull();
+
+    // Up already, on another section: it switches.
+    fireEvent.click(sectionButton('Playback'));
+    expect(sectionHeadings()).toEqual(['Playback']);
+    act(() => {
+      useUiStore.getState().openSettings('updates');
+    });
+    expect(sectionHeadings()).toEqual(['Updates']);
+    expect(useUiStore.getState().settingsRequest).toBeNull();
   });
 });
 

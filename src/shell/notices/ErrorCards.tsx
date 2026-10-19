@@ -24,7 +24,9 @@
  *   the log says what, the card says that it happened, on every page.
  * - `plugins:error` (spec 10.4): a plugin logged its first error of this run. Rust says it once for
  *   a plugin, and the card is a quiet one, with "Disable" and a link to My plugins; nothing is
- *   turned off by itself.
+ *   turned off by itself. Rust says it to nobody when the plugin broke as the app started, before
+ *   the UI listened: once listening, the stack asks for the plugins (`plugins_list`), and each that
+ *   reports errors and has had no card in this session gets one (also after a reload of the view).
  * - `pushAppNotice` from elsewhere: a dropped link that Rust refused (`home/useDrop.ts`).
  *
  * Hints (`status` notices) and the cards of plugins are announced by a live region that is always
@@ -44,8 +46,10 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { glassRegions, useGlassRegion } from '../../glass/useGlassRegion';
+import { pluginsList } from '../../ipc/commands';
 import { onPasteEmpty, onPluginsError, onSystemError } from '../../ipc/events';
 import { listenTo } from '../../ipc/listen';
+import type { PluginsState } from '../../ipc/types';
 import { nameOfFile } from '../../player/entryName';
 import {
   DETAIL_LINES,
@@ -89,6 +93,7 @@ function useNoticeFeed(): void {
           url: end.streamError !== null ? end.file : null,
           retry: 'idle',
           refusal: null,
+          finding: null,
         });
         following = { id, until: Date.now() + LOG_FOLLOW_MS };
         return;
@@ -127,7 +132,10 @@ function useNoticeFeed(): void {
     [],
   );
 
-  // A plugin logged its first error of this run (spec 10.4): one quiet card, with "Disable".
+  // A plugin logged its first error of this run (spec 10.4): one quiet card, with "Disable". The
+  // scripts load as the app starts, before anyone listens, and a plugin that breaks as it loads is
+  // told to nobody (final review I-3): once the listener is in place, the plugins that report errors
+  // by then get their card too. The store keeps the names, so the event for one of them adds none.
   useEffect(
     () =>
       listenTo(
@@ -136,9 +144,23 @@ function useNoticeFeed(): void {
           pushPluginNotice(name);
         },
         'plugins:error',
+        () => {
+          pluginsList()
+            .then(reportedPlugins)
+            .catch((error: unknown) => {
+              console.warn('cannot list the plugins that report errors', error);
+            });
+        },
       ),
     [],
   );
+}
+
+/** A card for each plugin of `state` that has logged errors in this run (`pushPluginNotice`). */
+function reportedPlugins(state: PluginsState): void {
+  for (const plugin of state.plugins) {
+    if (plugin.errors > 0) pushPluginNotice(plugin.name);
+  }
 }
 
 export default function ErrorCards() {

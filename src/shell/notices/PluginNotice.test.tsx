@@ -72,6 +72,8 @@ type Answers = Record<string, (args: unknown) => unknown>;
 function rust(answers: Answers = {}) {
   const all: Answers = {
     plugins_set_enabled: () => state([plugin('thumbfast', false)]),
+    // What the stack asks for as it mounts (final review I-3): no plugin that reports errors.
+    plugins_list: () => state([]),
     ...answers,
   };
   vi.mocked(invoke).mockImplementation((async (command: string, args?: unknown) =>
@@ -335,5 +337,78 @@ describe('a plugin that reports errors (spec 10.4)', () => {
     expect(czech.getByRole('button', { name: 'Vypnout' })).toBeTruthy();
     expect(czech.getByRole('button', { name: 'Moje pluginy' })).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('Plugin thumbfast hlásí chyby');
+  });
+});
+
+describe('a plugin that broke before the UI listened (final review I-3)', () => {
+  /** `name` as `plugins_list` has it, with `errors` logged in this run. */
+  const reporting = (name: string, errors: number): PluginInfo => ({ ...plugin(name), errors });
+
+  test('one that reports errors when the stack mounts gets its card, though no event came', async () => {
+    let listening = false;
+    rust({
+      plugins_list: () => {
+        // Asked for once the listener is in place: an event that comes meanwhile is not lost.
+        listening = (events.handlers.get('plugins:error') ?? []).length > 0;
+        return state([reporting('sub-select', 2), reporting('thumbfast', 0)]);
+      },
+    });
+
+    render(<ErrorCards />);
+    await settle();
+
+    expect(listening).toBe(true);
+    expect(sent('plugins_list')).toHaveLength(1);
+    expect(cards()).toHaveLength(1);
+    expect(within(card('sub-select')).getByText('Plugin sub-select reports errors')).toBeTruthy();
+    expect(within(card('sub-select')).getByRole('button', { name: 'Disable' })).toBeTruthy();
+  });
+
+  test('the event for it that comes later makes no second card, also once the first has gone', async () => {
+    rust({ plugins_list: () => state([reporting('sub-select', 2)]) });
+    render(<ErrorCards />);
+    await settle();
+    expect(cards()).toHaveLength(1);
+
+    pluginReportsErrors('sub-select');
+    expect(cards()).toHaveLength(1);
+    advance(NOTICE_MS);
+    expect(cards()).toHaveLength(0);
+    pluginReportsErrors('sub-select');
+    expect(cards()).toHaveLength(0);
+    // Another plugin's first error is told as before.
+    pluginReportsErrors('thumbfast');
+    expect(cards()).toHaveLength(1);
+  });
+
+  test('a plugin told by its event first gets no second card from the list', async () => {
+    const list = deferred<PluginsState>();
+    rust({ plugins_list: () => list.promise });
+    render(<ErrorCards />);
+    await settle();
+    pluginReportsErrors('sub-select');
+    expect(cards()).toHaveLength(1);
+
+    list.resolve(state([reporting('sub-select', 1)]));
+    await settle();
+
+    expect(cards()).toHaveLength(1);
+  });
+
+  test('a list that cannot be read is only logged; the events still make their cards', async () => {
+    rust({
+      plugins_list: () => {
+        throw { type: 'unavailable' };
+      },
+    });
+    render(<ErrorCards />);
+    await settle();
+
+    expect(cards()).toHaveLength(0);
+    expect(console.warn).toHaveBeenCalledWith('cannot list the plugins that report errors', {
+      type: 'unavailable',
+    });
+    pluginReportsErrors('thumbfast');
+    expect(cards()).toHaveLength(1);
   });
 });

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, test } from 'vitest';
 
 import { initI18n, setLanguage } from '../i18n';
 import { listOf, localized } from './localized';
-import { problemOf, problemText } from './problem';
+import { problemDetail, problemOf, problemText } from './problem';
 
 beforeAll(() => {
   initI18n('en');
@@ -36,17 +36,25 @@ describe('problemOf', () => {
 describe('problemText', () => {
   const { t } = i18next;
 
-  test('says each in words, and an Io problem as Rust’s own message', () => {
+  test('says each in words, and an Io problem with Rust’s own message after them', () => {
     expect(problemText({ code: 'busy', message: '' }, t)).toBe('Changes wait until Apply finishes.');
     expect(problemText({ code: 'notFound', message: 'uosc' }, t)).toBe(
       'This plugin is gone. The list was read again.',
     );
     expect(problemText({ code: 'unavailable', message: '' }, t)).toContain('could not be restarted');
+    // Final review minor 3: the sentence in the language of the UI, Rust's English message apart.
     expect(problemText({ code: 'io', message: 'cannot save plugins.json' }, t)).toBe(
-      'cannot save plugins.json',
+      'Kaleido could not read or change a file of the plugins.',
     );
-    expect(problemText({ code: 'io', message: '  ' }, t)).toBe('The change could not be made.');
+    expect(problemDetail({ code: 'io', message: 'cannot save plugins.json' })).toBe('cannot save plugins.json');
+    expect(problemText({ code: 'io', message: '  ' }, t)).toBe(
+      'Kaleido could not read or change a file of the plugins.',
+    );
+    expect(problemDetail({ code: 'io', message: '  ' })).toBeNull();
     expect(problemText({ code: 'generic', message: 'boom' }, t)).toBe('The change could not be made.');
+    // Only an Io problem has Rust's message to show; the others' message is not for the user.
+    expect(problemDetail({ code: 'generic', message: 'boom' })).toBeNull();
+    expect(problemDetail({ code: 'notFound', message: 'uosc' })).toBeNull();
   });
 
   test('follows the language', () => {
@@ -54,6 +62,9 @@ describe('problemText', () => {
     try {
       expect(problemText({ code: 'busy', message: '' }, i18next.t)).toBe(
         'Změny počkají, až Použít skončí.',
+      );
+      expect(problemText({ code: 'io', message: 'cannot save plugins.json' }, i18next.t)).toBe(
+        'Kaleido nemohl přečíst nebo změnit soubor pluginů.',
       );
     } finally {
       setLanguage('en');

@@ -8,12 +8,20 @@
  * The card is busy while an action runs (`RetryPhase`), and each function resolves with whether the
  * link is now with the player. The card closes itself then (`ErrorCard.tsx`, which also puts the
  * focus back); when Rust refused, the card stays and says so, and the action is offered again.
+ *
+ * "Update and try again" opens the link only when the update put something new in place (final
+ * review I-1): pressed again and again on a yt-dlp that is already the newest, it would bring the
+ * same card back for ever. When there was nothing new the card stays and says what the update found
+ * (`findingOf`, `findingText`): Deno missing for a YouTube link, a check that failed, or a yt-dlp
+ * that is the newest already, with Settings → Updates in place of the update.
  */
 
+import type { TFunction } from 'i18next';
+
 import { settingsSet, streamRetry } from '../../ipc/commands';
-import type { SourceError } from '../../ipc/types';
+import type { LinkUpdate, SourceError, StreamError } from '../../ipc/types';
 import { useSettingsStore } from '../../settings/store';
-import { useNoticeStore, type PlaybackNotice } from '../../state/noticeStore';
+import { useNoticeStore, type PlaybackNotice, type UpdateFinding } from '../../state/noticeStore';
 import { useUiStore } from '../../state/uiStore';
 
 /**
@@ -48,15 +56,79 @@ function refusalKind(error: unknown): SourceError | null {
 }
 
 /**
- * Opens `url` again; `true` once Rust has taken it, `false` (and the card says why) if it refused.
- * `saved`: the choice of the browser went in before, which the card then says.
+ * What the update for the link of a card whose class is `stream` found, when it put nothing new in
+ * place (`found.updated` is false), in the order that explains the failure best: a Deno the link
+ * needs and does not have, then a check of yt-dlp that failed, then a yt-dlp that is there but
+ * could not be started (the link said it is missing), and otherwise a yt-dlp that is the newest.
+ */
+export function findingOf(found: LinkUpdate, stream: StreamError | null): UpdateFinding {
+  if (found.deno !== null && found.deno.state !== 'ready') return { kind: 'deno', status: found.deno };
+  if (found.ytDlp.state !== 'ready') return { kind: 'failed', status: found.ytDlp };
+  if (stream === 'missing') return { kind: 'blocked' };
+  return { kind: 'newest', version: found.ytDlp.version, nightly: found.channel === 'nightly' };
+}
+
+/** Rust's reason in a status, where it gave one (in English). */
+const reasonOf = (error: string | null): string | null =>
+  error !== null && error.trim() !== '' ? error : null;
+
+/**
+ * What a card says about `finding`: the sentence, and Rust's reason after it where there is one
+ * (`detail`, English whatever the language of the UI).
+ */
+export function findingText(
+  finding: UpdateFinding,
+  t: TFunction,
+): { text: string; detail: string | null } {
+  switch (finding.kind) {
+    case 'deno': {
+      const missing = finding.status.state === 'missing';
+      return {
+        text: t(missing ? 'errors.streamUpdate.denoMissing' : 'errors.streamUpdate.denoFailed'),
+        detail: reasonOf(finding.status.error),
+      };
+    }
+    case 'failed':
+      return { text: t('errors.streamUpdate.failed'), detail: reasonOf(finding.status.error) };
+    case 'blocked':
+      return { text: t('errors.streamUpdate.blocked'), detail: null };
+    case 'newest': {
+      const newest =
+        finding.version === null
+          ? t('errors.streamUpdate.newestUnknown')
+          : t('errors.streamUpdate.newest', { version: finding.version });
+      // The hint at the nightly builds is no help to one that has them.
+      const text = finding.nightly ? newest : `${newest} ${t('errors.streamUpdate.nightly')}`;
+      return { text, detail: null };
+    }
+  }
+}
+
+/**
+ * Whether the card still offers the update after `finding`: again for Deno and a check that
+ * failed (the network may be back; the update checks Deno too), not when it would change nothing.
+ */
+export const offersUpdateAfter = (finding: UpdateFinding | null): boolean =>
+  finding === null || finding.kind === 'deno' || finding.kind === 'failed';
+
+/**
+ * Opens `url` again; `true` once Rust has taken it, `false` (and the card says why) if it refused,
+ * or if the update found nothing new to try it with (Rust did not open it then). `saved`: the
+ * choice of the browser went in before, which the card then says.
  */
 async function openAgain(id: number, url: string, update: boolean, saved: boolean): Promise<boolean> {
+  let found: LinkUpdate | null;
   try {
-    await streamRetry(url, update);
+    found = await streamRetry(url, update);
   } catch (error) {
     console.warn('cannot try the link again', error);
     useNoticeStore.getState().setRetryPhase(id, 'refused', { kind: refusalKind(error), saved });
+    return false;
+  }
+  if (found !== null && !found.updated) {
+    const card = useNoticeStore.getState().notices.find((notice) => notice.id === id);
+    const stream = card?.kind === 'playback' ? card.stream : null;
+    useNoticeStore.getState().setUnchanged(id, findingOf(found, stream));
     return false;
   }
   return true;
@@ -64,9 +136,9 @@ async function openAgain(id: number, url: string, update: boolean, saved: boolea
 
 /**
  * "Try again" (`update: false`) and "Update and try again" (`update: true`) on the card `id`. The
- * promise resolves when Rust has answered; with `update` that is after yt-dlp was updated (an update
- * that fails does not stop the retry, Rust logs it and the link fails as before, with a card of its
- * own). Resolves `false` at once for a card that is busy or gone.
+ * promise resolves when Rust has answered; with `update` that is after the update (Rust opens the
+ * link only when it put something new in place; otherwise the card says what it found and stays).
+ * Resolves `false` at once for a card that is busy or gone.
  */
 export async function retryFromNotice(id: number, url: string, update: boolean): Promise<boolean> {
   if (!canStart(id)) return false;
@@ -103,9 +175,17 @@ export async function saveCookiesAndRetry(
 }
 
 /**
- * The link of the chooser that found no browser: to Settings, which opens on Playback. The card has
- * done its job by then and closes first (`ErrorCard.tsx`), so that it does not stay over the page.
+ * The link of the chooser that found no browser: to Settings → Playback. The card has done its job
+ * by then and closes first (`ErrorCard.tsx`), so that it does not stay over the page.
  */
 export function openPlaybackSettings(): void {
-  useUiStore.getState().setPage('settings');
+  useUiStore.getState().openSettings('playback');
+}
+
+/**
+ * The link of a card whose update found nothing new: to Settings → Updates (the channel, the
+ * tools and their reasons). The card closes first, as for the chooser's link.
+ */
+export function openUpdatesSettings(): void {
+  useUiStore.getState().openSettings('updates');
 }

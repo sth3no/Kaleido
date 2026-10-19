@@ -45,7 +45,9 @@ export const onFileLoaded = (callback: (payload: EmptyPayload) => void) =>
 
 /**
  * The player core was restarted ("Použít" for plugins) and plays on where it was. The new core
- * reports every property in `player:state` itself; nothing has to be asked for.
+ * reports every property in `player:state` itself; nothing has to be asked for. Reserved: nothing
+ * in the UI listens to it yet (final review minor 6); it is in the contract for what may come,
+ * such as dropping a seek-preview request that the old core's thumbfast will never answer.
  */
 export const onEngineRestarted = (callback: (payload: EmptyPayload) => void) =>
   on('player:engine-restarted', callback);

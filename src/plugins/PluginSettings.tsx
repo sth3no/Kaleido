@@ -11,7 +11,8 @@
  *   settings as they are then: the forms show the value they sent while the call runs (`useSaving`),
  *   then that answer, so a value Rust refused is back in its field. A refusal is said at the field: `Invalid` as "the plugin cannot take this
  *   value" with Rust's English reason after it, any other as the sentence the page uses for it
- *   (`problemText`). A plugin that is gone is read about again by the page.
+ *   (`problemText`, and Rust's message after it for a file it could not write). A plugin that is
+ *   gone is read about again by the page.
  * - Rust keeps the keys it sets itself (`managed`) out of `entries` and the schema has none; they
  *   are filtered out here as well, so that they can never be offered.
  * - A running plugin reads its options when the core starts: the change waits for Apply, and Rust
@@ -29,7 +30,7 @@ import KeyValueEditor from './KeyValueEditor';
 import styles from './PluginSettings.module.css';
 import pluginStyles from './PluginsPage.module.css';
 import { usePluginsStore } from './pluginsStore';
-import { problemOf, problemText } from './problem';
+import { problemDetail, problemOf, problemText } from './problem';
 import SchemaForm from './SchemaForm';
 import type { SaveSetting, SettingProblem } from './settingValue';
 
@@ -59,7 +60,9 @@ function refusal(error: unknown, t: TFunction): SettingProblem {
   const problem = problemOf(error);
   // The plugin is gone from the folder: the list on the page is stale.
   if (problem.code === 'notFound') void usePluginsStore.getState().load();
-  return { text: problemText(problem, t) };
+  // Rust's own message of a file it could not write comes after the sentence, as a refused value's
+  // reason does.
+  return { text: problemText(problem, t), detail: problemDetail(problem) ?? undefined };
 }
 
 export interface PluginSettingsProps {

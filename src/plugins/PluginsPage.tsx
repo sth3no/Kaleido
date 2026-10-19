@@ -50,7 +50,7 @@ import { listOf } from './localized';
 import PluginRow from './PluginRow';
 import styles from './PluginsPage.module.css';
 import { listenToPlugins, usePluginsStore } from './pluginsStore';
-import { problemText } from './problem';
+import ProblemText from './ProblemText';
 
 export default function PluginsPage() {
   const { t, i18n } = useTranslation();
@@ -232,9 +232,11 @@ export default function PluginsPage() {
 
         {orphan !== null && (
           <p role="alert" className={styles.problem}>
-            {orphan.code === 'notFound'
-              ? t('plugins.errors.gone', { name: orphan.name })
-              : problemText(orphan, t)}
+            {orphan.code === 'notFound' ? (
+              t('plugins.errors.gone', { name: orphan.name })
+            ) : (
+              <ProblemText problem={orphan} />
+            )}
           </p>
         )}
 
@@ -285,7 +287,7 @@ export default function PluginsPage() {
           </div>
           {restoreProblem !== null && (
             <p role="alert" className={styles.problem}>
-              {problemText(restoreProblem, t)}
+              <ProblemText problem={restoreProblem} />
             </p>
           )}
         </div>

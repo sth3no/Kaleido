@@ -26,6 +26,7 @@ const playback = (name: string, lines: LogLine[] = []) =>
     url: null,
     retry: 'idle',
     refusal: null,
+    finding: null,
   });
 
 /** A link that failed for a reason Rust knows, as the card stack makes it from `end-file`. */
@@ -41,6 +42,7 @@ const link = (url: string, stream: StreamError = 'network') =>
     url,
     retry: 'idle',
     refusal: null,
+    finding: null,
   });
 
 const line = (text: string): LogLine => ({ level: 'error', prefix: 'cplayer', text });
@@ -329,6 +331,40 @@ describe('the cards of links that failed (spec 10.3)', () => {
     store.getState().setRetryPhase(id, 'refused', refusal);
 
     expect(store.getState().notices).toBe(before);
+  });
+
+  test('an update that found nothing new keeps what it found, until the action runs again', () => {
+    const id = link('https://example.com/a', 'outdated');
+    const finding = { kind: 'newest', version: '2026.10.10', nightly: false } as const;
+
+    store.getState().setUnchanged(id, finding);
+    expect(playbackCards()[0]).toMatchObject({ retry: 'unchanged', refusal: null, finding });
+    // Not a card at work: it goes by itself and can be pushed out.
+    expect(isWorking(playbackCards()[0] as PlaybackNotice)).toBe(false);
+
+    store.getState().setRetryPhase(id, 'working');
+    expect(playbackCards()[0]).toMatchObject({ retry: 'working', finding: null });
+    // A card that is gone, or no playback card, is left alone.
+    const before = store.getState().notices;
+    store.getState().setUnchanged(9999, finding);
+    expect(store.getState().notices).toBe(before);
+  });
+});
+
+describe('a plugin is told once in a session', () => {
+  test('a second notice for a plugin adds no card, also after its card has gone', () => {
+    pushPluginNotice('thumbfast');
+    const [card] = store.getState().notices;
+    expect(store.getState().toldPlugins).toEqual(['thumbfast']);
+
+    store.getState().dismiss(card?.id ?? 0);
+    pushPluginNotice('thumbfast');
+
+    expect(store.getState().notices).toHaveLength(0);
+    // Another plugin is told as before.
+    pushPluginNotice('reload');
+    expect(store.getState().notices).toHaveLength(1);
+    expect(store.getState().toldPlugins).toEqual(['thumbfast', 'reload']);
   });
 });
 

@@ -5,7 +5,9 @@
  * the card of a plugin that reports errors all use the same words.
  *
  * - `busy`: Apply runs; the change waits until it is done.
- * - `io`: a file could not be moved, read or written; Rust's own message says which.
+ * - `io`: a file could not be moved, read or written: a sentence in the language of the UI, and
+ *   Rust's own message after it, which says which (`problemDetail`; English, so `ProblemText`
+ *   marks it `lang="en"`, as Updates does).
  * - `notFound`: the plugin is gone (deleted from the folder meanwhile); the list is read again.
  * - `unavailable`: the player is not running, or Apply could not start a new core.
  * - `generic`: anything else, an error of the call itself and not Rust's word.
@@ -45,7 +47,10 @@ export function problemOf(error: unknown): PluginProblem {
   return { code: 'generic', message: error instanceof Error ? error.message : String(error) };
 }
 
-/** The words for `problem`. For an `io` problem they are Rust's message. */
+/**
+ * The words for `problem`, in the language of the UI. For an `io` problem Rust's message follows
+ * them (`problemDetail`).
+ */
 export function problemText(problem: PluginProblem, t: TFunction): string {
   switch (problem.code) {
     case 'busy':
@@ -55,8 +60,16 @@ export function problemText(problem: PluginProblem, t: TFunction): string {
     case 'unavailable':
       return t('plugins.errors.unavailable');
     case 'io':
-      return problem.message.trim() !== '' ? problem.message : t('plugins.errors.generic');
+      return t('plugins.errors.io');
     case 'generic':
       return t('plugins.errors.generic');
   }
+}
+
+/**
+ * Rust's own message of an `io` problem, which says which file and why (in English); `null` for
+ * the other problems, and for an empty message.
+ */
+export function problemDetail(problem: PluginProblem): string | null {
+  return problem.code === 'io' && problem.message.trim() !== '' ? problem.message : null;
 }

@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 
 import type { GlassState } from '../ipc/types';
+import type { SectionId } from '../settings/descriptors';
 
 export type Page = 'player' | 'plugins' | 'settings';
 export type Panel = 'quick-settings' | 'playlist';
@@ -37,7 +38,17 @@ export interface UiState {
    * clears it when it has the focus.
    */
   focusRequest: FocusRequest | null;
+  /**
+   * A section of the settings to open: the settings page opens it (and moves the focus to its
+   * heading) when it shows, or at once when it is up, and clears it. The link of a notice card
+   * asks for one (Settings → Playback, Settings → Updates).
+   */
+  settingsRequest: SectionId | null;
   setPage: (page: Page) => void;
+  /** Goes to the settings, open on `section`. */
+  openSettings: (section: SectionId) => void;
+  /** The settings page has opened the section asked for. */
+  clearSettingsRequest: () => void;
   setSidebarOpen: (open: boolean) => void;
   setPanel: (panel: Panel | null) => void;
   setQuickTab: (tab: QuickTab) => void;
@@ -54,8 +65,15 @@ export const useUiStore = create<UiState>()((set) => ({
   controlsHidden: false,
   glass: { enabled: true, reason: null },
   focusRequest: null,
+  settingsRequest: null,
   setPage: (page) => {
     set({ page });
+  },
+  openSettings: (section) => {
+    set({ page: 'settings', settingsRequest: section });
+  },
+  clearSettingsRequest: () => {
+    set({ settingsRequest: null });
   },
   setSidebarOpen: (sidebarOpen) => {
     set({ sidebarOpen });

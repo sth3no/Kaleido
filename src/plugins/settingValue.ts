@@ -26,7 +26,7 @@ import { isColor } from '../settings/values';
 export interface SettingProblem {
   /** The sentence for the user, in the language of the UI. */
   text: string;
-  /** Rust's own reason (English), where Rust refused the value. */
+  /** Rust's own reason (English), where Rust refused the value or could not write its file. */
   detail?: string;
 }
 
