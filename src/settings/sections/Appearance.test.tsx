@@ -27,6 +27,7 @@ const SETTINGS: Settings = {
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
   playback: { openWhilePlaying: 'replace' },
+  updates: { ytdlpChannel: 'stable' },
 };
 
 const WINDOWS_11: SystemAppearance = { transparencyEffects: true, highContrast: false, windowsBuild: 22631 };

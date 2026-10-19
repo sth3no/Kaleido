@@ -13,6 +13,7 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 
 use crate::player::Engine;
+use crate::tools::{ToolId, Tools};
 
 /// Shown where a value cannot be found out.
 const UNKNOWN: &str = "unknown";
@@ -31,14 +32,34 @@ pub struct Diagnostics {
     pub windows: String,
     /// The graphics adapters, joined by `; `. Software adapters (WARP) are left out.
     pub gpu: String,
+    /// The versions of yt-dlp and Deno.
+    pub tools: ToolVersions,
     /// The plugins, on and off, as `<name> <version or -> (<source>)`
     /// (`plugins::Plugins::diagnostics`): names as the plugins page shows them, no paths.
     pub plugins: Vec<String>,
 }
 
-/// Collects the diagnostics, with `plugins` as [`Diagnostics::plugins`] has them. Waits for mpv,
-/// so never on the main thread.
-pub fn collect(engine: &Engine, plugins: Vec<String>) -> Diagnostics {
+/// The versions of the managed tools as `tools.json` has them (spec 10.8), `None` for one that is
+/// not there. Versions only: never where the tools are.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolVersions {
+    pub ytdlp: Option<String>,
+    pub deno: Option<String>,
+}
+
+impl ToolVersions {
+    /// What the tools' records say of the tools that are there.
+    pub fn of(tools: &Tools) -> ToolVersions {
+        ToolVersions {
+            ytdlp: tools.status(ToolId::YtDlp).version,
+            deno: tools.status(ToolId::Deno).version,
+        }
+    }
+}
+
+/// Collects the diagnostics, with `plugins` as [`Diagnostics::plugins`] has them and the tools'
+/// versions. Waits for mpv, so never on the main thread.
+pub fn collect(engine: &Engine, plugins: Vec<String>, tools: ToolVersions) -> Diagnostics {
     let (libmpv, ffmpeg) = engine.call(|mpv| {
         let read = |name| {
             mpv.get_string(name).unwrap_or_else(|error| {
@@ -54,6 +75,7 @@ pub fn collect(engine: &Engine, plugins: Vec<String>) -> Diagnostics {
         ffmpeg,
         windows: windows_version(),
         gpu: gpu_names(),
+        tools,
         plugins,
     }
 }
@@ -66,11 +88,14 @@ pub fn render(diagnostics: &Diagnostics) -> String {
     } else {
         diagnostics.plugins.join(", ")
     };
+    let tool = |version: &Option<String>| version.clone().unwrap_or_else(|| "-".to_owned());
     format!(
-        "Kaleido: {}\nlibmpv: {}\nFFmpeg: {}\nWindows: {}\nGPU: {}\nPlugins: {}\n",
+        "Kaleido: {}\nlibmpv: {}\nFFmpeg: {}\nyt-dlp: {}\nDeno: {}\nWindows: {}\nGPU: {}\nPlugins: {}\n",
         diagnostics.kaleido,
         diagnostics.libmpv,
         diagnostics.ffmpeg,
+        tool(&diagnostics.tools.ytdlp),
+        tool(&diagnostics.tools.deno),
         diagnostics.windows,
         diagnostics.gpu,
         plugins
@@ -79,8 +104,8 @@ pub fn render(diagnostics: &Diagnostics) -> String {
 
 /// The diagnostics as the user sees and copies them: collected, rendered and cleaned of paths
 /// and URLs. Waits for mpv, so never on the main thread.
-pub fn report(engine: &Engine, plugins: Vec<String>) -> String {
-    sanitize(&render(&collect(engine, plugins)))
+pub fn report(engine: &Engine, plugins: Vec<String>, tools: ToolVersions) -> String {
+    sanitize(&render(&collect(engine, plugins, tools)))
 }
 
 fn windows_version() -> String {
@@ -398,7 +423,12 @@ mod tests {
             "uosc - (manual)".to_owned(),
         ];
 
-        let diagnostics = collect(&engine, plugins.clone());
+        let tools = ToolVersions {
+            ytdlp: Some("2026.10.10".to_owned()),
+            deno: None,
+        };
+
+        let diagnostics = collect(&engine, plugins.clone(), tools.clone());
 
         // The real libmpv.
         assert!(diagnostics.libmpv.starts_with("mpv "), "{diagnostics:?}");
@@ -411,10 +441,12 @@ mod tests {
         // No hardware adapter (a runner with WARP only) is "unknown", never empty.
         assert!(!diagnostics.gpu.is_empty());
         assert_eq!(diagnostics.plugins, plugins);
+        assert_eq!(diagnostics.tools, tools);
 
         let text = render(&diagnostics);
         assert!(text.starts_with("Kaleido: "), "{text}");
         assert!(text.contains(&format!("libmpv: {}\n", diagnostics.libmpv)));
+        assert!(text.contains("\nyt-dlp: 2026.10.10\nDeno: -\n"), "{text}");
         assert!(
             text.ends_with("Plugins: thumbfast 0f711de (bundled), uosc - (manual)\n"),
             "{text}"
@@ -429,6 +461,7 @@ mod tests {
             ffmpeg: r"7.1 built in C:\build\ffmpeg".to_owned(),
             windows: "10.0.26200".to_owned(),
             gpu: "Some GPU".to_owned(),
+            tools: ToolVersions::default(),
             plugins: Vec::new(),
         };
 
@@ -436,8 +469,77 @@ mod tests {
 
         assert_eq!(
             text,
-            "Kaleido: 0.1.0\nlibmpv: mpv v0.40.0\nFFmpeg: 7.1 built in <path>\nWindows: 10.0.26200\nGPU: Some GPU\nPlugins: none\n"
+            "Kaleido: 0.1.0\nlibmpv: mpv v0.40.0\nFFmpeg: 7.1 built in <path>\nyt-dlp: -\nDeno: -\nWindows: 10.0.26200\nGPU: Some GPU\nPlugins: none\n"
         );
+    }
+
+    /// Spec 10.8: the versions of yt-dlp and Deno as tools.json has them, `-` for one that is not
+    /// there, and nothing of where they are. Needs a temp folder.
+    #[test]
+    fn diagnostics_carry_tool_versions() {
+        use std::sync::Arc;
+
+        use crate::tools::Inspect;
+        use crate::tools::http::{Fetch, FetchError};
+        use crate::tools::store::{self, ToolRecord, ToolsFile};
+
+        struct Offline;
+        impl Fetch for Offline {
+            fn get(&self, _: &str, _: u64) -> Result<Vec<u8>, FetchError> {
+                Err(FetchError::Offline)
+            }
+        }
+        struct Silent;
+        impl Inspect for Silent {
+            fn version(&self, _: ToolId, _: &Path) -> Option<String> {
+                None
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = temp_paths(tmp.path());
+        let record = |version: &str| ToolRecord {
+            version: Some(version.to_owned()),
+            sha256: "ab".repeat(32),
+            channel: None,
+            installed_at: "2026-10-19T00:00:00Z".to_owned(),
+            checked_at: None,
+            failures: 0,
+            next_try: None,
+        };
+        // As checks leave it: yt-dlp in place, Deno recorded but its file gone.
+        let mut file = ToolsFile::default();
+        file.tools.insert(ToolId::YtDlp, record("2026.10.10"));
+        file.tools.insert(ToolId::Deno, record("2.9.7"));
+        file.save(paths.tools_dir.join(store::FILE)).unwrap();
+        fs::write(paths.tools_dir.join("yt-dlp.exe"), b"yt-dlp").unwrap();
+        let tools = Tools::new(&paths, Arc::new(Offline), Arc::new(Silent));
+
+        let versions = ToolVersions::of(&tools);
+
+        assert_eq!(
+            versions,
+            ToolVersions {
+                ytdlp: Some("2026.10.10".to_owned()),
+                deno: None,
+            }
+        );
+        let text = sanitize(&render(&Diagnostics {
+            kaleido: "0.2.0".to_owned(),
+            libmpv: "mpv v0.41.0".to_owned(),
+            ffmpeg: "7.1".to_owned(),
+            windows: "10.0.26200".to_owned(),
+            gpu: "Some GPU".to_owned(),
+            tools: versions,
+            plugins: Vec::new(),
+        }));
+        assert!(
+            text.contains("\nFFmpeg: 7.1\nyt-dlp: 2026.10.10\nDeno: -\nWindows: "),
+            "{text}"
+        );
+        let root = tmp.path().to_string_lossy();
+        assert!(!text.contains(root.as_ref()), "{text}");
+        assert!(!text.contains("tools"), "{text}");
     }
 
     fn entry(name: &str) -> License {

@@ -27,6 +27,7 @@ const SETTINGS: Settings = {
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
   playback: { openWhilePlaying: 'replace' },
+  updates: { ytdlpChannel: 'stable' },
 };
 
 /** What `settings_get_mpv` gives: the values of mpv's defaults, as mpv.conf and the player have them. */

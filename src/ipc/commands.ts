@@ -19,6 +19,7 @@ import type {
   SettingsPatch,
   SourcePage,
   ThumbFrame,
+  ToolId,
 } from './types';
 
 /** The arguments of a call: none for a command that takes none, else exactly its arguments. */
@@ -227,3 +228,15 @@ export const pluginsLog = (name: string) => call('plugins_log', { name });
  * `plugins:changed` says `applying` at the start and again when it is done.
  */
 export const pluginsApply = () => call('plugins_apply');
+
+// --- The managed tools -----------------------------------------------------------------------
+// Every change of a tool's state comes as `tools:status` too (`onToolsStatus`).
+
+/** yt-dlp's and Deno's states, in that order. Ask when the page opens; the event only says what changes. */
+export const toolsStatus = () => call('tools_status');
+
+/**
+ * "Check now": checks a tool, due or not, and resolves with its state after; a check that failed
+ * resolves with a `failed` state and its reason. It may take a while: a new version is downloaded.
+ */
+export const toolsCheck = (tool: ToolId) => call('tools_check', { tool });

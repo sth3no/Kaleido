@@ -22,6 +22,7 @@ const settings = (changes: Partial<Appearance>): Settings => ({
   language: 'system',
   appearance: { ...DEFAULT_APPEARANCE, ...changes },
   playback: { openWhilePlaying: 'replace' },
+  updates: { ytdlpChannel: 'stable' },
 });
 
 const windows = (changes: Partial<SystemAppearance> = {}): SystemAppearance => ({

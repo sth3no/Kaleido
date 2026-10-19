@@ -52,6 +52,8 @@ import returnsSettingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/retu
 import returnsSystemAppearanceJson from '../../src-tauri/tests/fixtures/ipc/returns.system_appearance.json';
 import returnsSystemLicensesJson from '../../src-tauri/tests/fixtures/ipc/returns.system_licenses.json';
 import returnsSystemPasteJson from '../../src-tauri/tests/fixtures/ipc/returns.system_paste.json';
+import returnsToolsCheckJson from '../../src-tauri/tests/fixtures/ipc/returns.tools_check.json';
+import returnsToolsStatusJson from '../../src-tauri/tests/fixtures/ipc/returns.tools_status.json';
 import settingsAudioDevicesJson from '../../src-tauri/tests/fixtures/ipc/settings_audio_devices.json';
 import settingsBindingsJson from '../../src-tauri/tests/fixtures/ipc/settings_bindings.json';
 import settingsChangedEventJson from '../../src-tauri/tests/fixtures/ipc/settings.changed.json';
@@ -85,6 +87,9 @@ import systemUiReadyJson from '../../src-tauri/tests/fixtures/ipc/system_ui_read
 import thumbClearJson from '../../src-tauri/tests/fixtures/ipc/thumb_clear.json';
 import thumbGetJson from '../../src-tauri/tests/fixtures/ipc/thumb_get.json';
 import thumbRequestJson from '../../src-tauri/tests/fixtures/ipc/thumb_request.json';
+import toolsStatusEventJson from '../../src-tauri/tests/fixtures/ipc/tools.status.json';
+import toolsCheckJson from '../../src-tauri/tests/fixtures/ipc/tools_check.json';
+import toolsStatusJson from '../../src-tauri/tests/fixtures/ipc/tools_status.json';
 import * as commands from './commands';
 import * as events from './events';
 import type {
@@ -93,6 +98,7 @@ import type {
   Binding,
   BindingSource,
   CaptionButton,
+  Channel,
   CommandErrors,
   CommandTable,
   DialogPurpose,
@@ -136,7 +142,11 @@ import type {
   SystemAppearance,
   ThemeMode,
   ThumbReady,
+  ToolId,
+  ToolState,
+  ToolStatus,
   TrackKind,
+  Updates,
   WheelKey,
 } from './types';
 
@@ -208,6 +218,8 @@ const commandFixtures = {
   thumb_clear: thumbClearJson,
   thumb_get: thumbGetJson,
   thumb_request: thumbRequestJson,
+  tools_check: toolsCheckJson,
+  tools_status: toolsStatusJson,
 } satisfies { [K in keyof CommandTable]: Fixture<Args<K>> };
 
 /** The payloads Rust emits, per event. */
@@ -227,6 +239,7 @@ const eventFixtures = {
   'system:error': systemErrorEventJson,
   'system:open-request': systemOpenRequestEventJson,
   'system:paste-empty': systemPasteEventJson,
+  'tools:status': toolsStatusEventJson,
 } satisfies { [K in keyof EventTable]: Fixture<EventTable[K]> };
 
 /** What a command resolves with, where that is more than a number or a string. */
@@ -239,6 +252,8 @@ const returnFixtures = {
   system_appearance: returnsSystemAppearanceJson,
   system_licenses: returnsSystemLicensesJson,
   system_paste: returnsSystemPasteJson,
+  tools_check: returnsToolsCheckJson,
+  tools_status: returnsToolsStatusJson,
 } satisfies {
   [K in
     | 'plugins_list'
@@ -248,7 +263,9 @@ const returnFixtures = {
     | 'settings_bindings'
     | 'system_appearance'
     | 'system_licenses'
-    | 'system_paste']: Fixture<CommandTable[K]['result']>;
+    | 'system_paste'
+    | 'tools_check'
+    | 'tools_status']: Fixture<CommandTable[K]['result']>;
 };
 
 /** What a command rejects with (the `Err` of its `Result`). */
@@ -382,9 +399,16 @@ const SYSTEM_APPEARANCE: Shape<SystemAppearance> = {
   fields: { transparencyEffects: 'required', highContrast: 'required', windowsBuild: 'required' },
 };
 const PLAYBACK: Shape<Playback> = { fields: { openWhilePlaying: 'required' } };
+const UPDATES: Shape<Updates> = { fields: { ytdlpChannel: 'required' } };
 const SETTINGS: Shape<Settings> = {
-  fields: { version: 'required', language: 'required', appearance: 'required', playback: 'required' },
-  inside: { appearance: APPEARANCE, playback: PLAYBACK },
+  fields: {
+    version: 'required',
+    language: 'required',
+    appearance: 'required',
+    playback: 'required',
+    updates: 'required',
+  },
+  inside: { appearance: APPEARANCE, playback: PLAYBACK, updates: UPDATES },
 };
 // The `source` of a binding is a tagged union: see `BINDING_SOURCE_SHAPES`.
 const BINDING: Shape<Binding> = {
@@ -423,6 +447,9 @@ const PLUGIN_SETTINGS: Shape<PluginSettings> = {
   fields: { name: 'required', schema: 'required', entries: 'required', managed: 'required' },
 };
 const PLUGIN_ERROR_EVENT: Shape<PluginErrorEvent> = { fields: { name: 'required' } };
+const TOOL_STATUS: Shape<ToolStatus> = {
+  fields: { tool: 'required', state: 'required', version: 'required', checkedAt: 'required', error: 'required' },
+};
 
 /** The setting of one kind. */
 type SpecOf<K extends SettingKind> = Extract<SettingSpec, { type: K }>;
@@ -546,6 +573,9 @@ const THEME_MODES = names<ThemeMode>({ system: true, dark: true, light: true });
 const REDUCE_TRANSPARENCY = names<ReduceTransparency>({ auto: true, on: true, off: true });
 const PLUGIN_SOURCES = names<PluginSource>({ bundled: true, store: true, url: true, manual: true });
 const SETTINGS_FORMS = names<SettingsForm>({ schema: true, keyValue: true });
+const CHANNELS = names<Channel>({ stable: true, nightly: true });
+const TOOL_IDS = names<ToolId>({ ytDlp: true, deno: true });
+const TOOL_STATES = names<ToolState>({ missing: true, checking: true, downloading: true, ready: true, failed: true });
 const SETTING_KINDS = names<SettingKind>({
   bool: true,
   int: true,
@@ -650,6 +680,7 @@ describe('fixtures type-check against the IPC types', () => {
       'reduce transparency',
     );
     expectAll(changed.map(({ playback }) => playback.openWhilePlaying), LOAD_MODES, 'open while playing');
+    expectAll(changed.map(({ updates }) => updates.ytdlpChannel), CHANNELS, 'yt-dlp channel');
   });
 
   test('system:appearance-changed and system_appearance carry the same payloads', () => {
@@ -701,6 +732,7 @@ describe('fixtures type-check against the IPC types', () => {
       'PluginInfo',
     );
     expectShape(eventFixtures['plugins:error'], PLUGIN_ERROR_EVENT, 'PluginErrorEvent');
+    expectShape(eventFixtures['tools:status'], TOOL_STATUS, 'ToolStatus');
     // What commands resolve or reject with.
     expectShape(returnFixtures.plugins_list, PLUGINS_STATE, 'PluginsState');
     expectShape(returnFixtures.plugins_settings, PLUGIN_SETTINGS, 'PluginSettings');
@@ -714,6 +746,8 @@ describe('fixtures type-check against the IPC types', () => {
     expectShape(returnFixtures.settings_audio_devices.flat(), AUDIO_DEVICE, 'AudioDevice');
     expectShape(returnFixtures.system_appearance, SYSTEM_APPEARANCE, 'SystemAppearance');
     expectShape(returnFixtures.system_licenses.flat(), LICENSE, 'License');
+    expectShape(returnFixtures.tools_status.flat(), TOOL_STATUS, 'ToolStatus');
+    expectShape(returnFixtures.tools_check, TOOL_STATUS, 'ToolStatus');
     expectShape(
       [...rejectFixtures.player_load.flat(), ...rejectFixtures.system_open_text],
       LOAD_ISSUE,
@@ -778,6 +812,26 @@ describe('fixtures type-check against the IPC types', () => {
   });
 });
 
+describe('the tools', () => {
+  test('every tool and every state', () => {
+    expectAll(commandFixtures.tools_check.map(({ tool }) => tool), TOOL_IDS, 'tool');
+    const statuses = [
+      ...eventFixtures['tools:status'],
+      ...returnFixtures.tools_status.flat(),
+      ...returnFixtures.tools_check,
+    ];
+    expectAll(eventFixtures['tools:status'].map(({ state }) => state), TOOL_STATES, 'tool state');
+    expectAll(eventFixtures['tools:status'].map(({ tool }) => tool), TOOL_IDS, 'tool');
+    expectKnown(statuses.map(({ state }) => state), TOOL_STATES, 'tool state');
+    expectKnown(statuses.map(({ tool }) => tool), TOOL_IDS, 'tool');
+    // A reason only with a failure; a failure of an earlier run has none any more.
+    for (const { state, error } of statuses) if (error !== null) expect(state).toBe('failed');
+    expect(statuses.some(({ state, error }) => state === 'failed' && error === null)).toBe(true);
+    // `tools_status` lists yt-dlp, then Deno.
+    for (const listed of returnFixtures.tools_status) expect(listed.map(({ tool }) => tool)).toEqual(['ytDlp', 'deno']);
+  });
+});
+
 // --- The wrappers and the events ---------------------------------------------------------------
 
 /**
@@ -828,6 +882,8 @@ const wrappers = {
   thumb_clear: () => commands.thumbClear(),
   thumb_get: () => commands.thumbGet(),
   thumb_request: ({ seconds }) => commands.thumbRequest(seconds),
+  tools_check: ({ tool }) => commands.toolsCheck(tool),
+  tools_status: () => commands.toolsStatus(),
 } satisfies { [K in keyof CommandTable]: (args: CommandTable[K]['args']) => Promise<unknown> };
 
 /** The `on…` function of each event. */
@@ -847,6 +903,7 @@ const subscribers = {
   'system:error': events.onSystemError,
   'system:open-request': events.onOpenRequest,
   'system:paste-empty': events.onPasteEmpty,
+  'tools:status': events.onToolsStatus,
 } satisfies { [K in keyof EventTable]: (callback: (payload: EventTable[K]) => void) => Promise<unknown> };
 
 beforeEach(() => {

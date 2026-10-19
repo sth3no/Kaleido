@@ -190,6 +190,15 @@ export interface Playback {
   openWhilePlaying: LoadMode;
 }
 
+/** yt-dlp's release channel: its stable releases, or its nightly builds. Deno has only its stable ones. */
+export type Channel = 'stable' | 'nightly';
+
+/** Settings → Updates. The app's own channel comes with the updater (M4). */
+export interface Updates {
+  /** Where yt-dlp comes from; a change is checked at once. */
+  ytdlpChannel: Channel;
+}
+
 /**
  * Kaleido's settings (settings.json), also the payload of `settings:changed`. The keys of a newer
  * Kaleido that this one does not know come along at the top level (Rust keeps them); they are not
@@ -200,6 +209,7 @@ export interface Settings {
   language: Language;
   appearance: Appearance;
   playback: Playback;
+  updates: Updates;
 }
 
 type Patch<T> = { [K in keyof T]?: (T[K] extends object ? Patch<T[K]> : T[K]) | null };
@@ -380,6 +390,39 @@ export type PluginError =
 export type PluginErrorEvent = { name: string };
 
 // ---------------------------------------------------------------------------------------------
+// The managed tools (src-tauri/src/tools/mod.rs)
+
+/** A tool Kaleido manages: yt-dlp for links, Deno for yt-dlp's YouTube. */
+export type ToolId = 'ytDlp' | 'deno';
+
+export type ToolState =
+  /** Not installed (yet), and not tried in this run. */
+  | 'missing'
+  /** A check runs: the release's checksum is being read. */
+  | 'checking'
+  /** A check found a new version, which is being downloaded and put in place. */
+  | 'downloading'
+  /** Installed, and the last check went through. */
+  | 'ready'
+  /**
+   * The last check failed, and an installed tool is still there and used; or the Deno that is
+   * there is too old for yt-dlp (`error` says so).
+   */
+  | 'failed';
+
+/** A tool's state: what `tools_status` lists (yt-dlp, then Deno), `tools_check` returns and `tools:status` carries. */
+export type ToolStatus = {
+  tool: ToolId;
+  state: ToolState;
+  /** The installed tool's version; `null` while none is installed. */
+  version: string | null;
+  /** The last check that reached the release, RFC 3339 in UTC. */
+  checkedAt: string | null;
+  /** Why it failed, while it is `failed` and this run of Kaleido knows (in English). */
+  error: string | null;
+};
+
+// ---------------------------------------------------------------------------------------------
 // The player's state (src-tauri/src/player/state.rs)
 
 /** The properties that changed, or all of them (`system_ui_ready`): mpv's property name → value. */
@@ -502,6 +545,7 @@ export interface EventTable {
   'system:appearance-changed': SystemAppearance;
   'plugins:changed': PluginsState;
   'plugins:error': PluginErrorEvent;
+  'tools:status': ToolStatus;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -565,6 +609,10 @@ export interface CommandTable {
   /** The plugin's last errors of this run, the oldest first. */
   plugins_log: { args: { name: string }; result: LogLine[] };
   plugins_apply: { args: undefined; result: PluginsState };
+  /** yt-dlp's and Deno's states, in that order. */
+  tools_status: { args: undefined; result: ToolStatus[] };
+  /** Checks a tool now, due or not; a failed check resolves with a `failed` state. */
+  tools_check: { args: { tool: ToolId }; result: ToolStatus };
 }
 
 /**

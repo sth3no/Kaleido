@@ -12,6 +12,7 @@ const SETTINGS: Settings = {
   language: 'system',
   appearance: DEFAULT_APPEARANCE,
   playback: { openWhilePlaying: 'replace' },
+  updates: { ytdlpChannel: 'stable' },
 };
 
 const APPENDING: Settings = { ...SETTINGS, playback: { openWhilePlaying: 'append' } };

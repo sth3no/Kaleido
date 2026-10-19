@@ -1,8 +1,8 @@
-//! Kaleido's own settings in `settings.json` (spec 4.3, 8.10): language, appearance and how a
-//! file opened during playback is played. The store holds valid settings only: a change is
-//! merged in, checked and written atomically, or nothing changes; a file with a bad field keeps
-//! its other fields (Ruling R23). It knows nothing of Tauri, so it can be tested on its own;
-//! the command layer tells the UI (`settings:changed`).
+//! Kaleido's own settings in `settings.json` (spec 4.3, 8.10): language, appearance, how a file
+//! opened during playback is played, and where yt-dlp's updates come from. The store holds valid
+//! settings only: a change is merged in, checked and written atomically, or nothing changes; a
+//! file with a bad field keeps its other fields (Ruling R23). It knows nothing of Tauri, so it can
+//! be tested on its own; the command layer tells the UI (`settings:changed`).
 
 use std::fs;
 use std::io;
@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 
 use super::{SettingsError, is_hex_color, write_atomic};
 use crate::player::LoadMode;
+use crate::tools::Channel;
 
 /// The version of the file's layout this Kaleido writes and reads.
 pub const SETTINGS_VERSION: u32 = 1;
@@ -37,6 +38,7 @@ pub struct Settings {
     pub language: Language,
     pub appearance: Appearance,
     pub playback: Playback,
+    pub updates: Updates,
     /// Top-level keys of the file this Kaleido does not know (a newer one's, say): kept as they
     /// are. A change cannot add, change or remove them.
     #[serde(flatten)]
@@ -50,6 +52,7 @@ impl Default for Settings {
             language: Language::default(),
             appearance: Appearance::default(),
             playback: Playback::default(),
+            updates: Updates::default(),
             extra: Map::new(),
         }
     }
@@ -175,6 +178,16 @@ impl Default for Playback {
             open_while_playing: LoadMode::Replace,
         }
     }
+}
+
+/// Nastavení → Aktualizace (spec 6.6, plan decision 14). The app's own channel comes with the
+/// updater (M4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Updates {
+    /// Where yt-dlp comes from: its stable releases (the default) or its nightly builds. A change
+    /// is checked at once (the tools' scheduler).
+    pub ytdlp_channel: Channel,
 }
 
 impl Settings {
@@ -400,7 +413,7 @@ fn from_value(value: Value) -> Result<Settings, SettingsError> {
 }
 
 /// The first known key whose value is not of its type: `version`, `language`, or a field of
-/// `appearance` or `playback` (the whole section if it is not an object).
+/// `appearance`, `playback` or `updates` (the whole section if it is not an object).
 fn misfit(object: &Map<String, Value>) -> Option<String> {
     fn fits<T: DeserializeOwned>(value: &Value) -> bool {
         T::deserialize(value).is_ok()
@@ -434,6 +447,11 @@ fn misfit(object: &Map<String, Value>) -> Option<String> {
         && !fits::<Playback>(value)
     {
         return Some(field::<Playback>("playback", value));
+    }
+    if let Some(value) = object.get("updates")
+        && !fits::<Updates>(value)
+    {
+        return Some(field::<Updates>("updates", value));
     }
     None
 }
@@ -607,7 +625,8 @@ mod tests {
                     "reduceTransparency": "auto",
                     "uiScale": 1.0
                 },
-                "playback": { "openWhilePlaying": "replace" }
+                "playback": { "openWhilePlaying": "replace" },
+                "updates": { "ytdlpChannel": "stable" }
             })
         );
 
@@ -771,7 +790,7 @@ mod tests {
         let path = file(tmp.path());
         fs::write(
             &path,
-            r#"{ "version": 1, "plugins": { "autoUpdate": true }, "updates": "beta", "language": "en" }"#,
+            r#"{ "version": 1, "plugins": { "autoUpdate": true }, "store": "beta", "language": "en" }"#,
         )
         .unwrap();
         let mut store = SettingsStore::load(&path);
@@ -790,7 +809,7 @@ mod tests {
         assert_eq!(*store.get(), updated);
         let written: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(written["plugins"], json!({ "autoUpdate": true }));
-        assert_eq!(written["updates"], "beta");
+        assert_eq!(written["store"], "beta");
         assert_eq!(written["appearance"]["uiScale"], 1.25);
         assert_eq!(*SettingsStore::load(&path).get(), updated, "it loads back");
         assert_eq!(
@@ -803,7 +822,7 @@ mod tests {
         let before = fs::read(&path).unwrap();
         for (patch, key) in [
             (json!({ "later": { "a": 1 } }), "later"),
-            (json!({ "updates": null }), "updates"),
+            (json!({ "store": null }), "store"),
             (json!({ "plugins": { "autoUpdate": false } }), "plugins"),
             (
                 json!({ "appearance": { "uiScal": 1.2 } }),
@@ -828,7 +847,82 @@ mod tests {
             .unwrap();
         assert_eq!(updated.appearance.ui_scale, 1.0);
         assert_eq!(updated.extra["plugins"], json!({ "autoUpdate": true }));
-        assert_eq!(updated.extra["updates"], "beta");
+        assert_eq!(updated.extra["store"], "beta");
+    }
+
+    #[test]
+    fn the_channel_setting_defaults_to_stable_and_rejects_others() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let mut store = SettingsStore::load(&path);
+        assert_eq!(store.get().updates.ytdlp_channel, Channel::Stable);
+        assert_eq!(
+            serde_json::to_value(store.get().updates).unwrap(),
+            json!({ "ytdlpChannel": "stable" })
+        );
+
+        let nightly = store
+            .update(json!({ "updates": { "ytdlpChannel": "nightly" } }))
+            .unwrap();
+        assert_eq!(nightly.updates.ytdlp_channel, Channel::Nightly);
+        assert_eq!(
+            SettingsStore::load(&path).get().updates.ytdlp_channel,
+            Channel::Nightly,
+            "it is written"
+        );
+
+        let before = fs::read(&path).unwrap();
+        for (patch, key) in [
+            (
+                json!({ "updates": { "ytdlpChannel": "beta" } }),
+                "updates.ytdlpChannel",
+            ),
+            (
+                json!({ "updates": { "ytdlpChannel": "Nightly" } }),
+                "updates.ytdlpChannel",
+            ),
+            (
+                json!({ "updates": { "ytdlpChannel": 1 } }),
+                "updates.ytdlpChannel",
+            ),
+            (json!({ "updates": "nightly" }), "updates"),
+        ] {
+            let error = store.update(patch.clone()).unwrap_err();
+            assert!(
+                matches!(&error, SettingsError::Invalid { key: k, .. } if k == key),
+                "{patch}: {error:?}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), before, "{patch}");
+            assert_eq!(store.get().updates.ytdlp_channel, Channel::Nightly);
+        }
+        // Only the channel of yt-dlp: the app's own comes with the updater.
+        assert_eq!(
+            store.update(json!({ "updates": { "appChannel": "beta" } })),
+            Err(SettingsError::NotAllowed {
+                key: "updates.appChannel".into()
+            })
+        );
+        // `null`: back to the default.
+        let reset = store
+            .update(json!({ "updates": { "ytdlpChannel": null } }))
+            .unwrap();
+        assert_eq!(reset.updates.ytdlp_channel, Channel::Stable);
+
+        // A file with a channel this Kaleido does not know: stable, and the rest stays (R23).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        let text = r#"{ "language": "cs", "updates": { "ytdlpChannel": "beta" } }"#;
+        fs::write(&path, text).unwrap();
+        let store = SettingsStore::load(&path);
+        assert_eq!(store.get().updates.ytdlp_channel, Channel::Stable);
+        assert_eq!(store.get().language, Language::Cs);
+        assert_eq!(kept_aside(tmp.path()), text);
+        // An older file without the section: the default, and nothing is kept aside.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = file(tmp.path());
+        fs::write(&path, r#"{ "version": 1, "language": "en" }"#).unwrap();
+        assert_eq!(SettingsStore::load(&path).get().updates, Updates::default());
+        assert_eq!(names(tmp.path()), ["settings.json"]);
     }
 
     #[test]

@@ -48,7 +48,7 @@ use crate::plugins::{
 };
 use crate::settings::{
     self, Appearance, AudioDevice, Binding, BindingSource, Language, Playback, ReduceTransparency,
-    Settings, SettingsError, SettingsStore, ThemeMode,
+    Settings, SettingsError, SettingsStore, ThemeMode, Updates,
 };
 use crate::surface::{CaptionButton, Layout};
 use crate::system::clipboard::PasteOutcome;
@@ -57,6 +57,7 @@ use crate::system::dialog::DialogPurpose;
 use crate::system::{self, OpenRequestEvent, SourcePage};
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbReady};
+use crate::tools::{self, Channel, ToolId, ToolState, ToolStatus};
 
 // ---------------------------------------------------------------------------------------------
 // Reading fixtures
@@ -256,7 +257,7 @@ fn registered_commands() -> Vec<String> {
 }
 
 /// The commands the UI calls without arguments.
-const WITHOUT_ARGUMENTS: [&str; 21] = [
+const WITHOUT_ARGUMENTS: [&str; 22] = [
     "system_ui_ready",
     "system_paste",
     "system_open_roadmap",
@@ -278,6 +279,7 @@ const WITHOUT_ARGUMENTS: [&str; 21] = [
     "plugins_list",
     "plugins_restore_essentials",
     "plugins_apply",
+    "tools_status",
 ];
 
 // ---------------------------------------------------------------------------------------------
@@ -434,6 +436,21 @@ variants!(setting_kind_name, SETTING_KIND_NAMES: SettingKind {
     SettingKind::String => "string",
     SettingKind::Enum { .. } => "enum",
     SettingKind::Color => "color",
+});
+variants!(tool_id_name, TOOL_ID_NAMES: ToolId {
+    ToolId::YtDlp => "ytDlp",
+    ToolId::Deno => "deno",
+});
+variants!(tool_state_name, TOOL_STATE_NAMES: ToolState {
+    ToolState::Missing => "missing",
+    ToolState::Checking => "checking",
+    ToolState::Downloading => "downloading",
+    ToolState::Ready => "ready",
+    ToolState::Failed => "failed",
+});
+variants!(channel_name, CHANNEL_NAMES: Channel {
+    Channel::Stable => "stable",
+    Channel::Nightly => "nightly",
 });
 // The player's events are untagged, so their names are only these; two of them never reach the UI.
 variants!(event_name, EVENT_NAMES: PlayerEvent {
@@ -780,6 +797,7 @@ fn check_command(command: &str, calls: &[Value]) {
             // `null` took the key out, so it is the default again.
             assert_eq!(now.appearance.blur, Appearance::default().blur);
             assert_eq!(now.playback.open_while_playing, LoadMode::Append);
+            assert_eq!(now.updates.ytdlp_channel, Channel::Nightly);
         }
         "settings_set_mpv" => assert_eq!(
             pairs::<String, Option<String>>(command, calls, ["key", "value"]),
@@ -823,6 +841,11 @@ fn check_command(command: &str, calls: &[Value]) {
             ]
         ),
         "plugins_log" => assert_eq!(column::<String>(command, calls, "name"), ["sub-select"]),
+        "tools_check" => {
+            let tools = column::<ToolId>(command, calls, "tool");
+            assert_eq!(tools, ToolId::ALL);
+            covers("ToolId", &tools, tool_id_name, TOOL_ID_NAMES, None);
+        }
         other => panic!("{other} is registered, but has no check here: add its fixture"),
     }
 }
@@ -1001,6 +1024,9 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
             playback: Playback {
                 open_while_playing: LoadMode::Append,
             },
+            updates: Updates {
+                ytdlp_channel: Channel::Nightly,
+            },
             ..Settings::default()
         },
         Settings {
@@ -1017,6 +1043,11 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
     covers("Language", &languages, language_name, LANGUAGE_NAMES, None);
     let modes: Vec<ThemeMode> = all_settings.iter().map(|s| s.appearance.mode).collect();
     covers("ThemeMode", &modes, theme_mode_name, THEME_MODE_NAMES, None);
+    let channels: Vec<Channel> = all_settings
+        .iter()
+        .map(|s| s.updates.ytdlp_channel)
+        .collect();
+    covers("Channel", &channels, channel_name, CHANNEL_NAMES, None);
     let reduces: Vec<ReduceTransparency> = all_settings
         .iter()
         .map(|s| s.appearance.reduce_transparency)
@@ -1452,6 +1483,102 @@ fn serialized_fixtures() -> BTreeMap<String, Vec<Value>> {
                 name: name.to_owned(),
             },
         );
+    }
+
+    // The tools: every state a tool moves to (`tools:status`), what `tools_status` lists (yt-dlp,
+    // then Deno) and what a forced check returns.
+    let tool =
+        |tool, state, version: Option<&str>, checked_at: Option<&str>, error: Option<&str>| {
+            ToolStatus {
+                tool,
+                state,
+                version: version.map(str::to_owned),
+                checked_at: checked_at.map(str::to_owned),
+                error: error.map(str::to_owned),
+            }
+        };
+    let missing_yt_dlp = tool(ToolId::YtDlp, ToolState::Missing, None, None, None);
+    let ready_yt_dlp = tool(
+        ToolId::YtDlp,
+        ToolState::Ready,
+        Some("2026.10.10"),
+        Some("2026-10-19T08:00:00Z"),
+        None,
+    );
+    let missing_deno = tool(ToolId::Deno, ToolState::Missing, None, None, None);
+    let ready_deno = tool(
+        ToolId::Deno,
+        ToolState::Ready,
+        Some("2.9.7"),
+        Some("2026-10-12T08:00:00Z"),
+        None,
+    );
+    // Too old for yt-dlp (plan decision 20): there, but failed, with the reason.
+    let old_deno = tool(
+        ToolId::Deno,
+        ToolState::Failed,
+        Some("2.2.9"),
+        Some("2026-10-12T08:00:00Z"),
+        Some("Deno 2.2.9 is too old (2.3.0 or newer is needed)"),
+    );
+    let tool_events = [
+        missing_yt_dlp.clone(),
+        tool(
+            ToolId::Deno,
+            ToolState::Checking,
+            Some("2.9.7"),
+            Some("2026-10-12T08:00:00Z"),
+            None,
+        ),
+        tool(
+            ToolId::YtDlp,
+            ToolState::Downloading,
+            Some("2026.08.19"),
+            Some("2026-10-18T08:00:00Z"),
+            None,
+        ),
+        ready_yt_dlp.clone(),
+        // Offline: the installed one stays, and the reason is known in this run.
+        tool(
+            ToolId::YtDlp,
+            ToolState::Failed,
+            Some("2026.10.10"),
+            Some("2026-10-19T08:00:00Z"),
+            Some("the server cannot be reached"),
+        ),
+        // Failed in an earlier run: the reason is not known any more.
+        tool(ToolId::Deno, ToolState::Failed, None, None, None),
+        old_deno.clone(),
+    ];
+    let states: Vec<ToolState> = tool_events.iter().map(|status| status.state).collect();
+    covers(
+        "ToolState",
+        &states,
+        tool_state_name,
+        TOOL_STATE_NAMES,
+        None,
+    );
+    let ids: Vec<ToolId> = tool_events.iter().map(|status| status.tool).collect();
+    covers("ToolId", &ids, tool_id_name, TOOL_ID_NAMES, None);
+    for status in &tool_events {
+        serialized(out, &fixture_name(tools::STATUS_EVENT), status);
+    }
+    // The first start before anything is there, and later.
+    for statuses in [
+        vec![missing_yt_dlp, missing_deno],
+        vec![ready_yt_dlp.clone(), ready_deno],
+    ] {
+        assert_eq!(
+            statuses
+                .iter()
+                .map(|status| status.tool)
+                .collect::<Vec<_>>(),
+            ToolId::ALL
+        );
+        serialized(out, "returns.tools_status", &statuses);
+    }
+    for status in [ready_yt_dlp, old_deno] {
+        serialized(out, "returns.tools_check", &status);
     }
     sent
 }

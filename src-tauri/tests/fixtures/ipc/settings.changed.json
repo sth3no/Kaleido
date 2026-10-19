@@ -14,7 +14,8 @@
       "reduceTransparency": "auto",
       "uiScale": 1
     },
-    "playback": { "openWhilePlaying": "replace" }
+    "playback": { "openWhilePlaying": "replace" },
+    "updates": { "ytdlpChannel": "stable" }
   },
   {
     "version": 1,
@@ -31,7 +32,8 @@
       "reduceTransparency": "on",
       "uiScale": 1.25
     },
-    "playback": { "openWhilePlaying": "append" }
+    "playback": { "openWhilePlaying": "append" },
+    "updates": { "ytdlpChannel": "nightly" }
   },
   {
     "version": 1,
@@ -48,6 +50,7 @@
       "reduceTransparency": "off",
       "uiScale": 1
     },
-    "playback": { "openWhilePlaying": "replace" }
+    "playback": { "openWhilePlaying": "replace" },
+    "updates": { "ytdlpChannel": "stable" }
   }
 ]

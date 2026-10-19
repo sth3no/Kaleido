@@ -17,5 +17,6 @@
     }
   },
   { "patch": { "appearance": { "blur": null } } },
-  { "patch": { "playback": { "openWhilePlaying": "append" } } }
+  { "patch": { "playback": { "openWhilePlaying": "append" } } },
+  { "patch": { "updates": { "ytdlpChannel": "nightly" } } }
 ]

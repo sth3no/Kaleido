@@ -1,0 +1,16 @@
+[
+  {
+    "tool": "ytDlp",
+    "state": "ready",
+    "version": "2026.10.10",
+    "checkedAt": "2026-10-19T08:00:00Z",
+    "error": null
+  },
+  {
+    "tool": "deno",
+    "state": "failed",
+    "version": "2.2.9",
+    "checkedAt": "2026-10-12T08:00:00Z",
+    "error": "Deno 2.2.9 is too old (2.3.0 or newer is needed)"
+  }
+]

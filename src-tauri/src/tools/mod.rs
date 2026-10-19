@@ -19,14 +19,20 @@
 //! takes it from the release). One check of a tool runs at a time: another one that comes
 //! meanwhile waits for it and gets its result; the two tools are checked independently.
 //!
-//! This module starts no process and knows nothing of Tauri: the version of a tool comes through
-//! [`Inspect`], and what runs the checks and tells the UI is the app's.
+//! [`Tools`] starts no process and knows nothing of Tauri: the version of a tool comes through
+//! [`Inspect`] (the real one is [`run::Processes`]). [`Service`] runs the checks on a scheduler
+//! thread of its own and tells the app ([`Host`]) what they change: every state of a tool for the
+//! UI (`tools:status`), and the options of mpv's `ytdl_hook` for the running core ([`mpv`]).
+//! [`ytdlp`] asks yt-dlp about a link. Tauri is lib.rs's and commands.rs's.
 
 pub mod checksum;
 pub mod http;
+pub mod mpv;
 pub mod replace;
+pub mod run;
 pub mod schedule;
 pub mod store;
+pub mod ytdlp;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -35,6 +41,7 @@ use std::io::{self, Read};
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread;
 
 use serde::{Deserialize, Serialize};
 use time::{Duration, OffsetDateTime};
@@ -54,6 +61,9 @@ pub const SUMS_LIMIT: u64 = 64 * 1024;
 pub const YT_DLP_LIMIT: u64 = 64 * 1024 * 1024;
 /// The most Deno's zip may be (v2.9.7's is 43 MB).
 pub const DENO_ZIP_LIMIT: u64 = 256 * 1024 * 1024;
+/// The event that tells the UI a tool's state changed; its payload is [`ToolStatus`].
+pub const STATUS_EVENT: &str = "tools:status";
+
 /// The most `deno.exe` may unpack to, so that a broken zip cannot fill the disk.
 const DENO_EXE_LIMIT: u64 = 1024 * 1024 * 1024;
 /// The name of Deno in its zip: at the root.
@@ -264,7 +274,12 @@ pub struct Tools {
     state: Mutex<State>,
     /// Told when a check ends.
     finished: Condvar,
+    /// Told every state a check moves a tool to ([`Tools::observe`]).
+    observer: Mutex<Option<Observer>>,
 }
+
+/// What hears the states of the tools.
+type Observer = Arc<dyn Fn(&ToolStatus) + Send + Sync>;
 
 #[derive(Default)]
 struct State {
@@ -305,6 +320,23 @@ impl Tools {
                 ..State::default()
             }),
             finished: Condvar::new(),
+            observer: Mutex::new(None),
+        }
+    }
+
+    /// From now on `observer` hears every state a check moves a tool to: checking, downloading,
+    /// and how it ended. Outside the state's lock, on the thread of the check.
+    pub fn observe(&self, observer: impl Fn(&ToolStatus) + Send + Sync + 'static) {
+        *lock(&self.observer) = Some(Arc::new(observer));
+    }
+
+    /// Tells the observer `status`. One that panics is logged and does not stop the check.
+    fn tell(&self, status: &ToolStatus) {
+        let observer = lock(&self.observer).clone();
+        if let Some(observer) = observer
+            && panic::catch_unwind(AssertUnwindSafe(|| observer(status))).is_err()
+        {
+            tracing::error!("telling the state of {} panicked", status.tool);
         }
     }
 
@@ -318,6 +350,16 @@ impl Tools {
         let state = self.lock();
         self.installed(tool, state.file.tools.get(&tool))
             .then(|| self.exe(tool))
+    }
+
+    /// The tool as Kaleido runs it or hands it to yt-dlp: [`path`](Tools::path), and for Deno
+    /// only one yt-dlp can use, 2.3.0 or newer ([`run::deno_supported`], plan decision 20). An
+    /// older Deno, or one whose version cannot be read, is as good as missing here, and its state
+    /// says why ([`ToolState::Failed`]).
+    pub fn runnable(&self, tool: ToolId) -> Option<PathBuf> {
+        let state = self.lock();
+        let record = state.file.tools.get(&tool);
+        (self.installed(tool, record) && unusable(tool, record).is_none()).then(|| self.exe(tool))
     }
 
     /// The tool's state now.
@@ -339,7 +381,7 @@ impl Tools {
         channel: Channel,
         force: bool,
     ) -> Result<ToolStatus, ToolError> {
-        let (run, record) = {
+        let (run, record, started) = {
             let mut state = self.lock();
             if let Some(running) = state.running.get(&tool) {
                 let run = running.run;
@@ -375,8 +417,9 @@ impl Tools {
                     phase: ToolState::Checking,
                 },
             );
-            (run, record)
+            (run, record, self.status_in(&state, tool))
         };
+        self.tell(&started);
 
         let (record, result) =
             panic::catch_unwind(AssertUnwindSafe(|| self.run(tool, channel, record.clone())))
@@ -405,10 +448,11 @@ impl Tools {
         }
         state.running.remove(&tool);
         let status = self.status_in(&state, tool);
-        let result = result.map(|()| status);
+        let result = result.map(|()| status.clone());
         state.results.insert(tool, (run, result.clone()));
         drop(state);
         self.finished.notify_all();
+        self.tell(&status);
         result
     }
 
@@ -551,9 +595,15 @@ impl Tools {
     }
 
     fn set_phase(&self, tool: ToolId, phase: ToolState) {
-        if let Some(running) = self.lock().running.get_mut(&tool) {
+        let status = {
+            let mut state = self.lock();
+            let Some(running) = state.running.get_mut(&tool) else {
+                return;
+            };
             running.phase = phase;
-        }
+            self.status_in(&state, tool)
+        };
+        self.tell(&status);
     }
 
     fn exe(&self, tool: ToolId) -> PathBuf {
@@ -602,7 +652,7 @@ impl Tools {
     fn status_in(&self, state: &State, tool: ToolId) -> ToolStatus {
         let record = state.file.tools.get(&tool);
         let installed = self.installed(tool, record);
-        let phase = if let Some(running) = state.running.get(&tool) {
+        let mut phase = if let Some(running) = state.running.get(&tool) {
             running.phase
         } else if record.is_some_and(|record| record.failures > 0) {
             ToolState::Failed
@@ -611,6 +661,18 @@ impl Tools {
         } else {
             ToolState::Missing
         };
+        let mut error = if phase == ToolState::Failed {
+            state.errors.get(&tool).cloned()
+        } else {
+            None
+        };
+        // A Deno that yt-dlp cannot use is there, but not ready (plan decision 20).
+        if phase == ToolState::Ready
+            && let Some(reason) = unusable(tool, record)
+        {
+            phase = ToolState::Failed;
+            error = Some(reason);
+        }
         ToolStatus {
             tool,
             state: phase,
@@ -618,11 +680,7 @@ impl Tools {
                 .filter(|_| installed)
                 .and_then(|record| record.version.clone()),
             checked_at: record.and_then(|record| record.checked_at.clone()),
-            error: if phase == ToolState::Failed {
-                state.errors.get(&tool).cloned()
-            } else {
-                None
-            },
+            error,
         }
     }
 
@@ -646,6 +704,30 @@ fn count_waiting(state: &mut State, starts: bool) {
 #[cfg(not(test))]
 fn count_waiting(_: &mut State, _: bool) {}
 
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    // What these hold is replaced in one step, so a panic elsewhere leaves it whole.
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Why the installed tool of `record` cannot be used, if it cannot: a Deno older than 2.3.0, or
+/// one whose version cannot be read (plan decision 20). yt-dlp has no such limit.
+fn unusable(tool: ToolId, record: Option<&ToolRecord>) -> Option<String> {
+    if tool != ToolId::Deno {
+        return None;
+    }
+    match record.and_then(|record| record.version.as_deref()) {
+        Some(version) if run::deno_supported(version) => None,
+        Some(version) => Some(format!(
+            "Deno {version} is too old ({} or newer is needed)",
+            run::DENO_MINIMUM_TEXT
+        )),
+        None => Some(format!(
+            "the version of Deno cannot be read ({} or newer is needed)",
+            run::DENO_MINIMUM_TEXT
+        )),
+    }
+}
+
 /// The channel a tool's record keeps: yt-dlp's, and none for Deno.
 fn channel_of(tool: ToolId, channel: Channel) -> Option<Channel> {
     (tool == ToolId::YtDlp).then_some(channel)
@@ -658,6 +740,249 @@ fn failed(record: Option<ToolRecord>, now: OffsetDateTime) -> ToolRecord {
     record.failures = failures;
     record.next_try = Some(stamp(next));
     record
+}
+
+// ---------------------------------------------------------------------------------------------
+// The service: the scheduler, and what the app hears
+
+/// The shortest sleep of the scheduler between two rounds, unless something wakes it: a tool
+/// that stays due after its check (a file that vanishes as soon as it is in place) is not checked
+/// over and over.
+pub const SCHEDULER_MIN_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+/// The longest: a clock that jumps (a laptop that slept) is noticed within it.
+pub const SCHEDULER_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+/// Added to the sleep, so that the scheduler wakes when a check is due and not just before.
+const SCHEDULER_SLACK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What the app does for the tools' [`Service`] (lib.rs: the settings, the UI and the player).
+pub trait Host: Send + Sync + 'static {
+    /// yt-dlp's release channel, as the settings say now.
+    fn channel(&self) -> Channel;
+    /// A tool's state changed (`tools:status`). On the thread of the check.
+    fn status(&self, status: &ToolStatus);
+    /// Commands for the running core, as the tools' options changed ([`mpv`]). Must not wait for
+    /// the core.
+    fn send(&self, commands: Vec<Vec<String>>);
+}
+
+/// The managed tools with their scheduler (spec 6.6): one thread that checks what is due, at once
+/// when it starts (a missing tool is downloaded at the first start, plan decision 7), then
+/// whenever the next check is due ([`Tools::next_due`]: the daily and weekly intervals, the
+/// backoff after a failure, a switch of yt-dlp's channel at once), sleeping in between
+/// ([`scheduler_wait`]). A switch of the channel and a forced check wake it, so that it looks at
+/// once.
+///
+/// After every check the running core gets what changed of the tools' options
+/// ([`Host::send`]): the managed yt-dlp once it is there, Deno once it came, was replaced by one
+/// at another place, or went. A new core gets them all ([`Service::options_for_new_core`]).
+pub struct Service {
+    shared: Arc<Shared>,
+    scheduler: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+struct Shared {
+    tools: Tools,
+    host: Arc<dyn Host>,
+    paths: AppPaths,
+    /// The tools' options the running core has: those of its start, and every change since.
+    sent: Mutex<Vec<Vec<String>>>,
+    wake: Mutex<Wake>,
+    woken: Condvar,
+}
+
+#[derive(Default)]
+struct Wake {
+    /// Something asks the scheduler to look now.
+    woken: bool,
+    /// The service is dropped.
+    stop: bool,
+}
+
+impl Service {
+    /// The service over `tools`: from now on `host` hears every state they move to. The scheduler
+    /// waits for [`start`](Service::start).
+    pub fn new(tools: Tools, paths: &AppPaths, host: Arc<dyn Host>) -> Service {
+        let told = Arc::clone(&host);
+        tools.observe(move |status| told.status(status));
+        Service {
+            shared: Arc::new(Shared {
+                tools,
+                host,
+                paths: paths.clone(),
+                sent: Mutex::new(Vec::new()),
+                wake: Mutex::new(Wake::default()),
+                woken: Condvar::new(),
+            }),
+            scheduler: Mutex::new(None),
+        }
+    }
+
+    /// Starts the scheduler, which checks what is due at once. Once the player runs, so that what
+    /// a check changes reaches it; a second call does nothing.
+    pub fn start(&self) {
+        let mut scheduler = lock(&self.scheduler);
+        if scheduler.is_some() {
+            return;
+        }
+        let shared = Arc::clone(&self.shared);
+        match thread::Builder::new()
+            .name("tools-scheduler".to_owned())
+            .spawn(move || shared.schedule())
+        {
+            Ok(handle) => *scheduler = Some(handle),
+            Err(error) => tracing::error!("the tools are not checked on their own: {error}"),
+        }
+    }
+
+    pub fn tools(&self) -> &Tools {
+        &self.shared.tools
+    }
+
+    /// Every tool's state, in the order the UI lists them ([`ToolId::ALL`]).
+    pub fn statuses(&self) -> Vec<ToolStatus> {
+        ToolId::ALL
+            .map(|tool| self.shared.tools.status(tool))
+            .to_vec()
+    }
+
+    /// Checks `tool` now, due or not ("Zkontrolovat", or a link that needs a newer yt-dlp), from
+    /// the channel of the settings, and returns its state after; a check that runs already is
+    /// waited for. Blocks for as long as the downloads take: not for the main thread.
+    pub fn check_now(&self, tool: ToolId) -> ToolStatus {
+        let status = self.shared.check(tool, self.shared.host.channel(), true);
+        // When the next check is due may be another time now (a failure backs off).
+        self.shared.wake();
+        status
+    }
+
+    /// The user chose the other channel for yt-dlp: the scheduler looks at once (a switch is due
+    /// at once). Returns at once.
+    pub fn channel_changed(&self) {
+        self.shared.wake();
+    }
+
+    /// The tools' options for a core that has just started ([`mpv::hook_commands`],
+    /// [`mpv::raw_options`]): right after the start of the player, before anything the UI sends,
+    /// and in the `prepare` of a restart. From then on that core gets what changes.
+    pub fn options_for_new_core(&self) -> Vec<Vec<String>> {
+        let mut sent = lock(&self.shared.sent);
+        *sent = self.shared.options();
+        sent.clone()
+    }
+}
+
+impl Drop for Service {
+    /// Stops the scheduler once the check it runs is done (the tests; the app keeps its service
+    /// until the process ends).
+    fn drop(&mut self) {
+        lock(&self.shared.wake).stop = true;
+        self.shared.woken.notify_all();
+        let scheduler = self
+            .scheduler
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(scheduler) = scheduler
+            && scheduler.join().is_err()
+        {
+            tracing::error!("the tools' scheduler panicked");
+        }
+    }
+}
+
+impl Shared {
+    /// The scheduler's thread (see [`Service`]).
+    fn schedule(&self) {
+        loop {
+            let channel = self.host.channel();
+            for tool in ToolId::ALL {
+                if lock(&self.wake).stop {
+                    return;
+                }
+                if self
+                    .tools
+                    .next_due(tool, channel, OffsetDateTime::now_utc())
+                    .is_none()
+                {
+                    self.check(tool, channel, false);
+                }
+            }
+            let now = OffsetDateTime::now_utc();
+            let channel = self.host.channel();
+            let next = ToolId::ALL.map(|tool| self.tools.next_due(tool, channel, now));
+            if !self.sleep(scheduler_wait(&next, now)) {
+                return;
+            }
+        }
+    }
+
+    /// [`Tools::check`], then the running core hears what changed of the tools' options. The
+    /// state after, a failed one too.
+    fn check(&self, tool: ToolId, channel: Channel, force: bool) -> ToolStatus {
+        let result = self.tools.check(tool, channel, force);
+        self.refresh_core();
+        result.unwrap_or_else(|_| self.tools.status(tool))
+    }
+
+    /// The tools' options as they are now: the managed yt-dlp, and Deno when yt-dlp can use it.
+    fn options(&self) -> Vec<Vec<String>> {
+        let mut commands = mpv::hook_commands(&self.paths);
+        // The cookies of a browser join them with their setting (Task 11).
+        commands.extend(mpv::raw_options(
+            self.tools.runnable(ToolId::Deno).as_deref(),
+            None,
+        ));
+        commands
+    }
+
+    /// Sends the running core the options that changed since it got them last.
+    fn refresh_core(&self) {
+        // Held while sending, so that two checks that end at once reach the core in the order
+        // they were recorded in.
+        let mut sent = lock(&self.sent);
+        let options = self.options();
+        let changed: Vec<Vec<String>> = options
+            .iter()
+            .filter(|command| !sent.contains(command))
+            .cloned()
+            .collect();
+        *sent = options;
+        if !changed.is_empty() {
+            self.host.send(changed);
+        }
+    }
+
+    fn wake(&self) {
+        lock(&self.wake).woken = true;
+        self.woken.notify_all();
+    }
+
+    /// Sleeps for `wait`, or until something wakes the scheduler; false when it is to stop.
+    fn sleep(&self, wait: std::time::Duration) -> bool {
+        let wake = lock(&self.wake);
+        let (mut wake, _) = self
+            .woken
+            .wait_timeout_while(wake, wait, |wake| !wake.woken && !wake.stop)
+            .unwrap_or_else(PoisonError::into_inner);
+        wake.woken = false;
+        !wake.stop
+    }
+}
+
+/// How long the scheduler sleeps at `now` when the tools' next checks are due at `next` (`None`:
+/// now, i.e. still due after the round that checked it): until the soonest, a second more, but
+/// at least [`SCHEDULER_MIN_WAIT`] and at most [`SCHEDULER_MAX_WAIT`].
+pub fn scheduler_wait(next: &[Option<OffsetDateTime>], now: OffsetDateTime) -> std::time::Duration {
+    let soonest = next
+        .iter()
+        .map(|due| due.map_or(Duration::ZERO, |at| at - now))
+        .min()
+        .unwrap_or(Duration::MAX);
+    // A time already past is no time at all.
+    std::time::Duration::try_from(soonest)
+        .unwrap_or_default()
+        .saturating_add(SCHEDULER_SLACK)
+        .clamp(SCHEDULER_MIN_WAIT, SCHEDULER_MAX_WAIT)
 }
 
 #[cfg(test)]
@@ -1503,6 +1828,250 @@ mod tests {
             Channel::Stable
         );
         assert!(serde_json::from_value::<Channel>(serde_json::json!("beta")).is_err());
+    }
+
+    /// Plan decision 20: a Deno yt-dlp cannot use is there, verified, and as good as missing.
+    #[test]
+    fn deno_older_than_2_3_counts_as_missing() {
+        assert!(!run::deno_supported("2.2.9"));
+        assert!(run::deno_supported("2.3.0"));
+        assert!(run::deno_supported("2.9.7"));
+        assert!(!run::deno_supported("x"));
+
+        for (version, usable) in [
+            (Some("2.2.9"), false),
+            (Some("2.3.0"), true),
+            (Some("2.9.7"), true),
+            (Some("x"), false),
+            (None, false),
+        ] {
+            let setup = Setup::new();
+            setup.installed(
+                ToolId::Deno,
+                b"deno",
+                ToolRecord {
+                    version: version.map(str::to_owned),
+                    channel: None,
+                    ..record(b"deno", "2.9.7", "2026-10-19T00:00:00Z")
+                },
+            );
+            let tools = setup.tools();
+            let exe = setup.exe(ToolId::Deno);
+
+            assert_eq!(tools.path(ToolId::Deno), Some(exe.clone()), "{version:?}");
+            let status = tools.status(ToolId::Deno);
+            assert_eq!(status.version.as_deref(), version, "{version:?}");
+            if usable {
+                assert_eq!(status.state, ToolState::Ready, "{version:?}");
+                assert_eq!(status.error, None);
+                assert_eq!(tools.runnable(ToolId::Deno), Some(exe));
+            } else {
+                assert_eq!(status.state, ToolState::Failed, "{version:?}");
+                let error = status.error.unwrap();
+                assert!(error.contains("2.3.0 or newer"), "{error}");
+                if let Some(version) = version {
+                    assert!(error.contains(version), "{error}");
+                }
+                assert_eq!(tools.runnable(ToolId::Deno), None, "{version:?}");
+            }
+            // yt-dlp hears of it only when it can use it.
+            let service = Service::new(tools, &setup.paths, Arc::new(FakeHost::default()));
+            let options = service.options_for_new_core();
+            let js_runtimes = options
+                .iter()
+                .find(|command| command[3].starts_with("js-runtimes"))
+                .unwrap();
+            assert_eq!(
+                js_runtimes[2],
+                if usable { "append" } else { "remove" },
+                "{version:?}"
+            );
+            // yt-dlp has no such limit.
+            assert_eq!(unusable(ToolId::YtDlp, None), None);
+        }
+    }
+
+    /// Hears what a [`Service`] tells the app.
+    #[derive(Default)]
+    struct FakeHost {
+        channel: Mutex<Channel>,
+        statuses: Mutex<Vec<ToolStatus>>,
+        sent: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl FakeHost {
+        fn states_of(&self, tool: ToolId) -> Vec<ToolState> {
+            self.statuses
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|status| status.tool == tool)
+                .map(|status| status.state)
+                .collect()
+        }
+
+        fn sent(&self) -> Vec<Vec<String>> {
+            self.sent.lock().unwrap().clone()
+        }
+    }
+
+    impl Host for FakeHost {
+        fn channel(&self) -> Channel {
+            *self.channel.lock().unwrap()
+        }
+
+        fn status(&self, status: &ToolStatus) {
+            self.statuses.lock().unwrap().push(status.clone());
+        }
+
+        fn send(&self, commands: Vec<Vec<String>>) {
+            self.sent.lock().unwrap().extend(commands);
+        }
+    }
+
+    fn command(args: &[&str]) -> Vec<String> {
+        args.iter().map(|&arg| arg.to_owned()).collect()
+    }
+
+    /// The scheduler checks at once, the UI hears every step, the running core gets what changed,
+    /// and a switch of the channel is checked without waiting for the next round.
+    #[test]
+    fn the_scheduler_checks_at_start_and_after_a_channel_switch() {
+        let setup = Setup::new();
+        let exe = b"yt-dlp 2026.08.19";
+        setup.release(Channel::Stable, &sha256_hex(exe), exe);
+        setup.inspect.says(ToolId::YtDlp, "2026.08.19");
+        let zip = zip_of(Some(b"deno 2.9.7"));
+        let deno = source(ToolId::Deno, Channel::Stable);
+        setup.web.answer(&deno.sums_url(), Ok(deno_sums(&zip)));
+        setup.web.answer(&deno.asset_url(), Ok(zip));
+        setup.inspect.says(ToolId::Deno, "2.9.7");
+        let host = Arc::new(FakeHost::default());
+        let service = Service::new(setup.tools(), &setup.paths, host.clone());
+        let yt_dlp = setup.exe(ToolId::YtDlp).to_string_lossy().into_owned();
+        let deno_exe = setup.exe(ToolId::Deno).to_string_lossy().into_owned();
+
+        // What the core gets at its start, before anything is there: the managed yt-dlp to come
+        // (spelled as a list, see `mpv::hook_commands`), no Deno, no cookies.
+        assert_eq!(
+            service.options_for_new_core(),
+            [
+                command(&[
+                    "change-list",
+                    "script-opts",
+                    "append",
+                    &format!("ytdl_hook-ytdl_path={yt_dlp};")
+                ]),
+                command(&["change-list", "ytdl-raw-options", "remove", "js-runtimes"]),
+                command(&[
+                    "change-list",
+                    "ytdl-raw-options",
+                    "remove",
+                    "cookies-from-browser"
+                ]),
+            ]
+        );
+        assert!(host.statuses.lock().unwrap().is_empty());
+
+        service.start();
+
+        eventually("both tools to be in place", || {
+            service
+                .statuses()
+                .iter()
+                .all(|status| status.state == ToolState::Ready)
+        });
+        eventually("the core to hear of both", || host.sent().len() == 2);
+        for tool in ToolId::ALL {
+            assert_eq!(
+                host.states_of(tool),
+                [
+                    ToolState::Checking,
+                    ToolState::Downloading,
+                    ToolState::Ready
+                ],
+                "{tool}"
+            );
+        }
+        // Only what changed, yt-dlp's check first.
+        assert_eq!(
+            host.sent(),
+            [
+                command(&[
+                    "change-list",
+                    "script-opts",
+                    "append",
+                    &format!("ytdl_hook-ytdl_path={yt_dlp}")
+                ]),
+                command(&[
+                    "change-list",
+                    "ytdl-raw-options",
+                    "append",
+                    &format!("js-runtimes=deno:{deno_exe}")
+                ]),
+            ]
+        );
+        assert_eq!(
+            service
+                .statuses()
+                .iter()
+                .map(|s| s.tool)
+                .collect::<Vec<_>>(),
+            ToolId::ALL
+        );
+
+        // The user switches to nightly: checked now, not in a day (nor after the 30 s floor).
+        let nightly = b"yt-dlp 2026.10.10.233141";
+        setup.release(Channel::Nightly, &sha256_hex(nightly), nightly);
+        setup.inspect.says(ToolId::YtDlp, "2026.10.10.233141");
+        *host.channel.lock().unwrap() = Channel::Nightly;
+        service.channel_changed();
+        eventually("the nightly yt-dlp to be in place", || {
+            service.statuses()[0].version.as_deref() == Some("2026.10.10.233141")
+        });
+        assert_eq!(fs::read(setup.exe(ToolId::YtDlp)).unwrap(), nightly);
+        assert_eq!(
+            setup.record(ToolId::YtDlp).unwrap().channel,
+            Some(Channel::Nightly)
+        );
+        // The same place: nothing new for the core. Deno was not due.
+        assert_eq!(host.sent().len(), 2);
+        assert_eq!(setup.web.count(&deno.asset_url()), 1);
+
+        // "Zkontrolovat": at once, from the channel of the settings.
+        let sums = source(ToolId::YtDlp, Channel::Nightly).sums_url();
+        let before = setup.web.count(&sums);
+        let status = service.check_now(ToolId::YtDlp);
+        assert_eq!(status.state, ToolState::Ready);
+        assert_eq!(setup.web.count(&sums), before + 1);
+
+        // Gone, the scheduler ends.
+        drop(service);
+    }
+
+    #[test]
+    fn the_scheduler_sleeps_until_the_next_check_within_its_bounds() {
+        let now = parse_time("2026-10-19T12:00:00Z").unwrap();
+        let at = |seconds: i64| Some(now + Duration::seconds(seconds));
+        let seconds = std::time::Duration::from_secs;
+
+        assert_eq!(scheduler_wait(&[at(120), at(7200)], now), seconds(121));
+        assert_eq!(scheduler_wait(&[at(7200), at(600)], now), seconds(601));
+        // Due now (it stayed due after its check), soon, or in the past: the floor.
+        assert_eq!(scheduler_wait(&[None, at(86_400)], now), SCHEDULER_MIN_WAIT);
+        assert_eq!(
+            scheduler_wait(&[at(5), at(86_400)], now),
+            SCHEDULER_MIN_WAIT
+        );
+        assert_eq!(scheduler_wait(&[at(-60), at(600)], now), SCHEDULER_MIN_WAIT);
+        // A day or a week away: an hour at most.
+        assert_eq!(
+            scheduler_wait(&[at(86_400), at(604_800)], now),
+            SCHEDULER_MAX_WAIT
+        );
+        assert_eq!(scheduler_wait(&[], now), SCHEDULER_MAX_WAIT);
+        assert_eq!(SCHEDULER_MIN_WAIT, seconds(30));
+        assert_eq!(SCHEDULER_MAX_WAIT, seconds(3600));
     }
 
     /// The real release, by hand only (`cargo test -p kaleido -- --ignored`): fetches only its

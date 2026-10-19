@@ -23,6 +23,7 @@ const settings = (language: Language): Settings => ({
   language,
   appearance: DEFAULT_APPEARANCE,
   playback: { openWhilePlaying: 'replace' },
+  updates: { ytdlpChannel: 'stable' },
 });
 
 describe('useLanguage', () => {

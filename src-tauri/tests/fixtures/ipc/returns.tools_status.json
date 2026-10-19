@@ -1,0 +1,22 @@
+[
+  [
+    { "tool": "ytDlp", "state": "missing", "version": null, "checkedAt": null, "error": null },
+    { "tool": "deno", "state": "missing", "version": null, "checkedAt": null, "error": null }
+  ],
+  [
+    {
+      "tool": "ytDlp",
+      "state": "ready",
+      "version": "2026.10.10",
+      "checkedAt": "2026-10-19T08:00:00Z",
+      "error": null
+    },
+    {
+      "tool": "deno",
+      "state": "ready",
+      "version": "2.9.7",
+      "checkedAt": "2026-10-12T08:00:00Z",
+      "error": null
+    }
+  ]
+]

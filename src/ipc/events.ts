@@ -20,6 +20,7 @@ import type {
   Settings,
   SystemAppearance,
   ThumbReady,
+  ToolStatus,
 } from './types';
 
 export type { UnlistenFn };
@@ -92,3 +93,6 @@ export const onPluginsChanged = (callback: (payload: PluginsState) => void) =>
 /** A plugin logged its first error of this run: show the one quiet notice with "Turn off". */
 export const onPluginsError = (callback: (payload: PluginErrorEvent) => void) =>
   on('plugins:error', callback);
+
+/** A tool's state changed: a check started, a download began, or how the check ended. Ask with `toolsStatus` at start. */
+export const onToolsStatus = (callback: (payload: ToolStatus) => void) => on('tools:status', callback);

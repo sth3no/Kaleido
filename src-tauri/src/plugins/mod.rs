@@ -1972,6 +1972,7 @@ mod tests {
             ffmpeg: "7.1".to_owned(),
             windows: "10.0.26200".to_owned(),
             gpu: "Some GPU".to_owned(),
+            tools: diagnostics::ToolVersions::default(),
             plugins: listed.clone(),
         }));
         assert!(

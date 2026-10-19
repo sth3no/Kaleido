@@ -37,6 +37,7 @@ use system::clipboard::PasteOutcome;
 use system::dialog::DialogPurpose;
 use system::logs::LogGuard;
 use system::open_queue::OpenQueue;
+use tools::{Channel, ToolStatus};
 
 pub fn run() {
     // First: every panic goes to the log once there is one, and one that ends the start is told
@@ -110,6 +111,8 @@ pub fn run() {
             commands::plugins_set_setting,
             commands::plugins_log,
             commands::plugins_apply,
+            commands::tools_status,
+            commands::tools_check,
         ])
         // A failed start is logged with its whole chain of causes and shown in a message box
         // before Tauri turns it into a panic, whose message has nowhere to go (Ruling R53).
@@ -217,6 +220,19 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
     // copied by then and have Kaleido's options in their script-opts (plan decision 2), and what
     // the service says runs is what the core loads.
     app.manage(plugins::Plugins::start(&paths, language));
+    // Before the engine: its first requests give ytdl_hook the managed yt-dlp and Deno. What
+    // `tools.json` says and the sweep of old files only; nothing is checked until `start` below.
+    let tools = tools::Service::new(
+        tools::Tools::new(
+            &paths,
+            Arc::new(tools::http::Web::github()),
+            Arc::new(tools::run::Processes),
+        ),
+        &paths,
+        Arc::new(AppTools {
+            app: app.handle().clone(),
+        }),
+    );
     let engine = Engine::start(
         EngineConfig {
             paths: paths.clone(),
@@ -238,9 +254,18 @@ fn setup(app: &mut tauri::App) -> anyhow::Result<()> {
             tracing::error!("cannot observe the player state: {error}");
         }
     })));
+    // Then ytdl_hook's yt-dlp and Deno (plan decision 2): queued before anything the UI sends, so
+    // a link the UI opens finds them in place.
+    for command in tools.options_for_new_core() {
+        engine.request(Request::Command(command));
+    }
     let shader = glass::shader_path(&paths.cache_dir);
     app.manage(paths);
     app.manage(engine);
+    app.manage(tools);
+    // Once the engine is managed, so that what a check changes reaches the core: a missing tool is
+    // downloaded now, at the first start (plan decision 7).
+    app.state::<tools::Service>().start();
     // After the engine: the glass queues its shader on it. Always managed, also when the shader
     // cannot be written (then it starts off), so the commands find it.
     let glass = GlassController::new(Arc::new(AppHost::new(app.handle().clone())), shader);
@@ -318,7 +343,8 @@ pub fn restart_engine(app: &AppHandle) -> Result<(), RestartError> {
 /// its playback is restored: the window's fullscreen and always-on-top as they are now, a change
 /// made during the restart included (first, so that the observations report them and the window
 /// stays as it is; the main thread, which answers, never waits for the request thread), the
-/// observations the UI renders, and the glass. The tools' options join them in Task 9.
+/// observations the UI renders, the tools' options for ytdl_hook (before a link of the playlist
+/// loads again), and the glass.
 fn prepare_core(app: &AppHandle, mpv: &Mpv) {
     for (name, on) in surface::window_flags(app) {
         if let Err(error) = mpv.set_property(name, if on { "yes" } else { "no" }) {
@@ -329,6 +355,9 @@ fn prepare_core(app: &AppHandle, mpv: &Mpv) {
         tracing::error!("cannot observe the player state: {error}");
     }
     let mut commands = Vec::new();
+    if let Some(tools) = app.try_state::<tools::Service>() {
+        commands.extend(tools.options_for_new_core());
+    }
     if let Some(glass) = app.try_state::<GlassController>() {
         commands.extend(glass.after_restart());
     }
@@ -336,6 +365,38 @@ fn prepare_core(app: &AppHandle, mpv: &Mpv) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         if let Err(error) = mpv.command(&args) {
             tracing::warn!("the restarted player refuses {args:?}: {error}");
+        }
+    }
+}
+
+/// What the tools' service asks of the app: the channel of the settings, `tools:status` for the
+/// UI, and commands for the running core.
+struct AppTools {
+    app: AppHandle,
+}
+
+impl tools::Host for AppTools {
+    fn channel(&self) -> Channel {
+        self.app
+            .try_state::<settings::SharedSettings>()
+            .map(|store| settings::lock(&store).get().updates.ytdlp_channel)
+            .unwrap_or_default()
+    }
+
+    fn status(&self, status: &ToolStatus) {
+        if let Err(error) = self.app.emit(tools::STATUS_EVENT, status) {
+            tracing::warn!("cannot send {} to the UI: {error}", tools::STATUS_EVENT);
+        }
+    }
+
+    /// Queued: during a restart they wait for the new core, which gets them after its own.
+    fn send(&self, commands: Vec<Vec<String>>) {
+        let Some(engine) = self.app.try_state::<Engine>() else {
+            tracing::warn!("the tools' options changed before the player runs");
+            return;
+        };
+        for command in commands {
+            engine.request(Request::Command(command));
         }
     }
 }

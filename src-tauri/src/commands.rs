@@ -15,13 +15,14 @@ use crate::player::{self, Engine, LoadIssue, LoadMode, LogLine, PlayerCommand};
 use crate::plugins::{self, PluginError, PluginSettings, Plugins, PluginsState};
 use crate::settings::{self, AudioDevice, Binding, Settings, SettingsError, SharedSettings};
 use crate::surface::{CaptionButton, Layout, Surface, sync_glass};
-use crate::system::diagnostics::{self, License};
+use crate::system::diagnostics::{self, License, ToolVersions};
 use crate::system::{
     self, ROADMAP_URL, Snapshot, SourcePage, clipboard::PasteOutcome, dialog::DialogPurpose,
     shell_open,
 };
 use crate::themes::{self, SystemAppearance};
 use crate::thumbs::{self, ThumbStore};
+use crate::tools::{self, ToolId, ToolState, ToolStatus};
 
 /// Runs a player command. The error is a message for the log; the UI has nothing to correct.
 /// A screenshot goes to the glass, which takes the glass out of the picture first (spec 8.2).
@@ -222,7 +223,8 @@ pub fn settings_get(store: State<'_, SharedSettings>) -> Settings {
 /// Changes Kaleido's settings: `patch` is merged in (a JSON merge patch), checked and written;
 /// on an error nothing changed. The UI hears the new settings as `settings:changed`. A patch
 /// that touches the appearance is also applied here: the glass shader on or off, Mica, the
-/// window's theme. Synchronous: it writes one small file and never waits for mpv.
+/// window's theme; another channel for yt-dlp wakes the tools' scheduler, which checks it.
+/// Synchronous: it writes one small file and never waits for mpv or a download.
 #[tauri::command]
 pub fn settings_set(
     app: AppHandle,
@@ -230,7 +232,11 @@ pub fn settings_set(
     patch: Value,
 ) -> Result<Settings, SettingsError> {
     let appearance_changes = themes::touches_appearance(&patch);
-    let settings = settings::lock(&store).update(patch)?;
+    let (channel_before, settings) = {
+        let mut store = settings::lock(&store);
+        let before = store.get().updates.ytdlp_channel;
+        (before, store.update(patch)?)
+    };
     if let Err(error) = app.emit(settings::CHANGED_EVENT, &settings) {
         tracing::warn!("cannot send {} to the UI: {error}", settings::CHANGED_EVENT);
     }
@@ -238,6 +244,11 @@ pub fn settings_set(
     // other settings have nothing to do with it.
     if appearance_changes {
         themes::on_settings_changed(&app, &settings.appearance);
+    }
+    if settings.updates.ytdlp_channel != channel_before
+        && let Some(tools) = app.try_state::<tools::Service>()
+    {
+        tools.channel_changed();
     }
     Ok(settings)
 }
@@ -386,7 +397,11 @@ async fn diagnostics_text(app: AppHandle) -> String {
             .try_state::<Plugins>()
             .map(|plugins| plugins.diagnostics())
             .unwrap_or_default();
-        diagnostics::report(&engine, plugins)
+        let tools = app
+            .try_state::<tools::Service>()
+            .map(|tools| ToolVersions::of(tools.tools()))
+            .unwrap_or_default();
+        diagnostics::report(&engine, plugins, tools)
     })
     .await
     .unwrap_or_default()
@@ -573,6 +588,47 @@ pub async fn plugins_apply(app: AppHandle) -> Result<PluginsState, PluginError> 
     })
     .await
     .unwrap_or(Err(PluginError::Unavailable))
+}
+
+// --- The managed tools (spec 6.6) ---------------------------------------------------------------
+//
+// Thin glue over `tools::Service`. A tool's every change of state reaches the UI as `tools:status`
+// from the service itself.
+
+/// yt-dlp's and Deno's states, in that order. Reads `tools.json`'s records and whether the files
+/// are there, hence asynchronous and on a blocking thread.
+#[tauri::command]
+pub async fn tools_status(app: AppHandle) -> Vec<ToolStatus> {
+    on_blocking_thread(move || {
+        app.try_state::<tools::Service>()
+            .map(|tools| tools.statuses())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// "Zkontrolovat": checks `tool` now, due or not, and returns its state after (a failed check is
+/// a `failed` state with its reason). Waits for the downloads, on a blocking thread.
+#[tauri::command]
+pub async fn tools_check(app: AppHandle, tool: ToolId) -> ToolStatus {
+    on_blocking_thread(move || match app.try_state::<tools::Service>() {
+        Some(tools) => tools.check_now(tool),
+        None => not_checked(tool, "the tools are not running"),
+    })
+    .await
+    .unwrap_or_else(|| not_checked(tool, "the check stopped unexpectedly"))
+}
+
+/// The state of a tool whose check could not run at all.
+fn not_checked(tool: ToolId, reason: &str) -> ToolStatus {
+    ToolStatus {
+        tool,
+        state: ToolState::Failed,
+        version: None,
+        checked_at: None,
+        error: Some(reason.to_owned()),
+    }
 }
 
 #[cfg(test)]
