@@ -46,9 +46,11 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 # which is schannel on Windows with the system's root certificates: no rustls, so no ring or
 # aws-lc-rs and the C build tools they need, and no root bundle of its own (webpki-root-certs is
 # CDLA-Permissive-2.0, a license not on the accepted list). `native-tls-no-default` is the
-# feature for that in ureq 3.4 (checked on crates.io 2026-10-19; the README calls it unstable, so
-# a newer ureq may rename it); no gzip: release assets are not sent compressed.
-ureq = { version = "3.4.2", default-features = false, features = ["native-tls-no-default"] }
+# feature for that (the README calls it unstable, so a newer ureq may rename it); ureq 3.5.0 is
+# the first where it also brings the TLS connector: in 3.4 every https request panicked
+# (`tools::http` test `https_goes_through_native_tls`). No gzip: release assets are not sent
+# compressed.
+ureq = { version = "3.5.0", default-features = false, features = ["native-tls-no-default"] }
 url = "2"
 # deno.exe out of Deno's release zip (tools/mod.rs). Deflate only, through flate2 (in the build
 # through Tauri already) with zlib-rs, which is pure Rust (flate2 then inflates with it for

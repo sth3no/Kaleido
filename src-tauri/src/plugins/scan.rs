@@ -55,9 +55,15 @@ impl Found {
     }
 }
 
-/// Every script in `scripts\` and `scripts-disabled\`, in the order mpv loads them: by the name
-/// in the folder, upper and lower case alike (`strcasecmp`); the one in `scripts\` first if the
-/// same name is in both. A folder that is not there has no scripts.
+/// Every script in `scripts\` and `scripts-disabled\`, by the name in the folder, upper and lower
+/// case alike; the one in `scripts\` first if the same name is in both. A folder that is not there
+/// has no scripts.
+///
+/// mpv means to load them in this order (`list_script_files` sorts with `strcasecmp`), but its
+/// `compare_filename` takes `qsort`'s pointers to the names for the names themselves (at the
+/// pinned accb7b2821), so it compares where the names are in memory. Only scripts that share a
+/// client name see a difference: which of them keeps the name and which is `<name>2` cannot be
+/// told from their names, and is a guess here (they are shown as duplicates).
 pub fn scan(paths: &AppPaths) -> Vec<Found> {
     let mut found = list(&paths.scripts_dir, true);
     found.extend(list(&paths.scripts_disabled_dir, false));
@@ -138,9 +144,10 @@ fn found_at(path: &Path, entry_name: &str, enabled: bool) -> Option<Found> {
 }
 
 /// The scripts of `found` that share a name in mpv, as `(script_name, entries)`: `entries` are
-/// the [`Found::entry_name`]s in the order they are in `found` (the order of [`scan`], which is
-/// the order mpv loads them in, so the first keeps the name and the second becomes `<name>2`).
-/// Sorted by `script_name`; a script that has its name to itself is not listed.
+/// the [`Found::entry_name`]s in the order they are in `found` (the order of [`scan`]; one of them
+/// keeps the name in mpv and the others are numbered, `<name>2`, but which one mpv does not let
+/// their names decide). Sorted by `script_name`; a script that has its name to itself is not
+/// listed.
 ///
 /// It goes by `found` as it is given: scripts that are off collide with the ones that are on as
 /// soon as one of them is turned on, and are reported with them. Hand it only the enabled ones to
@@ -394,13 +401,17 @@ mod tests {
     /// the config folder of a real core and starts it. Asserts that:
     /// - `scan` finds all of them and nothing else;
     /// - for every script, a client called what `scan` says exists (`script-message-to` fails
-    ///   when there is none); the second script of a name is numbered, `<name>2`, as `scan`
-    ///   orders them;
-    /// - every one answers under that name, and the name it reports is mpv's own
+    ///   when there is none); the second script of a name is numbered, `<name>2`, and so on;
+    /// - every one answers under such a name, and the name it reports is mpv's own
     ///   (`mp.get_script_name()`).
     ///
-    /// Returns the clients by name with the entry in `scripts\` each one runs.
-    fn mpv_names_the_scripts_as_scan_does(entries: &[&str]) -> BTreeMap<String, String> {
+    /// Returns what `scan` expects (the scripts of a name numbered in its order) and what mpv did,
+    /// both as the clients by name with the entry in `scripts\` each one runs. They are the same
+    /// unless two scripts share a name: which of those mpv numbers is not up to their names (see
+    /// [`scan`]).
+    fn mpv_names_the_scripts_as_scan_does(
+        entries: &[&str],
+    ) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
         let tmp = tempfile::tempdir().unwrap();
         let paths = temp_paths(tmp.path());
         for entry in entries {
@@ -438,16 +449,17 @@ mod tests {
         events.wait_until(
             "every script has answered",
             Duration::from_secs(10),
-            |seen| pongs(seen) == expected,
+            |seen| pongs(seen).keys().eq(expected.keys()),
         );
-        expected
+        let answered = pongs(&events.events());
+        (expected, answered)
     }
 
     /// Spec 6.1 and the review focus on names: the name `scan` shows for a script is the one mpv
     /// gives its client, for the shapes a user adds by hand. Needs a real libmpv.
     #[test]
     fn script_names_match_mpvs_clients() {
-        let clients = mpv_names_the_scripts_as_scan_does(&[
+        let (clients, answered) = mpv_names_the_scripts_as_scan_does(&[
             "sub-select/main.lua",
             "my.plugin.lua",
             "dot.dir/main.lua",
@@ -458,6 +470,8 @@ mod tests {
             "Shout.LUA",
             &format!("{}.lua", "x".repeat(70)),
         ]);
+        // No two of them share a name: every one is what `scan` says.
+        assert_eq!(answered, clients);
         // The names the task's plan spells out, and one of the corners, as plain facts.
         for client in [
             "sub_select",
@@ -472,25 +486,24 @@ mod tests {
         assert!(clients.contains_key(&"x".repeat(60)));
     }
 
-    /// Four ways to write one name: mpv loads them in the order of their names in the folder and
-    /// numbers the ones after the first. Needs a real libmpv.
+    /// Four ways to write one name: all four run, the first mpv loads keeps the name and the others
+    /// are numbered. Which one is which is mpv's to say, not their names' (see [`scan`]). Needs a
+    /// real libmpv.
     #[test]
-    fn a_second_script_of_a_name_is_numbered_in_load_order() {
-        let clients =
+    fn a_second_script_of_a_name_is_numbered() {
+        let entries = ["a_b.lua", "a.b", "a-b.lua", "a b.lua"];
+        let (clients, answered) =
             mpv_names_the_scripts_as_scan_does(&["a_b.lua", "a.b/main.lua", "a-b.lua", "a b.lua"]);
-        // By strcasecmp: a space, a hyphen, a dot, an underscore.
-        let by_hand = [
-            ("a_b", "a b.lua"),
-            ("a_b2", "a-b.lua"),
-            ("a_b3", "a.b"),
-            ("a_b4", "a_b.lua"),
-        ];
-        assert_eq!(
-            clients,
-            by_hand
-                .iter()
-                .map(|&(client, entry)| (client.to_owned(), entry.to_owned()))
-                .collect()
-        );
+        for found in [&clients, &answered] {
+            assert!(
+                found.keys().eq(["a_b", "a_b2", "a_b3", "a_b4"]),
+                "{found:#?}"
+            );
+            let mut runs: Vec<&str> = found.values().map(String::as_str).collect();
+            runs.sort_unstable();
+            let mut all = entries;
+            all.sort_unstable();
+            assert_eq!(runs, all, "{found:#?}");
+        }
     }
 }

@@ -69,7 +69,9 @@ impl PluginErrors {
 /// [`super::names`]), a script gets its name if no client has it yet, and else the first of
 /// `<name>2`, `<name>3`, … that none has; mpv's own clients ([`names::BUILT_IN_CLIENTS`]) come
 /// first, so a plugin named like one of them (`stats.lua`) is `stats2`, and the built-in script's
-/// errors are not the plugin's.
+/// errors are not the plugin's. Between plugins that share a name the numbers follow `running`'s
+/// order, which may not be mpv's (see [`super::scan::scan`]): their errors may go to the other of
+/// them.
 pub fn clients<'a>(
     running: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> BTreeMap<String, String> {

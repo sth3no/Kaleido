@@ -372,6 +372,25 @@ mod tests {
         assert_eq!(large_timeout(0), LARGE_TIMEOUT);
     }
 
+    /// The big test pass found every https download panicking in ureq 3.4.2: its
+    /// `native-tls-no-default` brought native-tls in without the connector ("provider is
+    /// NativeTls but feature is not enabled"). A server that speaks no TLS must be an error, not
+    /// a panic. Needs only the loopback interface.
+    #[test]
+    fn https_goes_through_native_tls() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            // Plain text where the handshake should be, and the connection is closed.
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
+            }
+        });
+        let web = Web::with_hosts(&["127.0.0.1"]);
+        let fetched = web.get(&format!("https://127.0.0.1:{port}/x"), 1024);
+        assert!(fetched.is_err(), "{fetched:?}");
+    }
+
     /// Review focus 3. Needs only the loopback interface: the server is in the test.
     #[test]
     fn a_redirect_to_another_host_is_refused() {
