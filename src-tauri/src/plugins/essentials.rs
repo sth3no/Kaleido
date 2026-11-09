@@ -1203,9 +1203,13 @@ mod tests {
             probe
         );
         let engine = Engine::start(headless(paths), NoEvents).unwrap();
+        // mpv prints a `user-data` value as JSON: the string comes quoted.
         eventually(&engine, "the probe has Kaleido's greeting", |mpv| {
             mpv.get_string("user-data/probe/greeting")
-                .is_ok_and(|greeting| greeting == "kaleido")
+                .is_ok_and(|printed| {
+                    serde_json::from_str::<String>(&printed)
+                        .is_ok_and(|greeting| greeting == "kaleido")
+                })
         });
     }
 }

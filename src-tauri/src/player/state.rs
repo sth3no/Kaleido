@@ -1572,9 +1572,11 @@ mod tests {
         let (engine, recorder) = running(tmp.path());
         engine.command(&["set", "pause", "yes"]);
         engine.command(&["loadfile", &clip.to_string_lossy()]);
-        recorder.wait_for("the duration", |event| match event {
+        // `time-pos`, not `duration`: mpv refuses a seek until playback is set up, and only then
+        // has a `time-pos`.
+        recorder.wait_for("the first position", |event| match event {
             PlayerEvent::State { changes } => {
-                changes.get("duration").filter(|d| d.is_number()).cloned()
+                changes.get("time-pos").filter(|t| t.is_number()).cloned()
             }
             _ => None,
         });

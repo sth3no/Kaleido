@@ -1515,8 +1515,10 @@ mod tests {
         engine.command(&["loadfile", &b, "append"]);
         engine.command(&["playlist-play-index", "1"]);
         let loaded = b.clone();
+        // `time-pos`, not `duration`: mpv refuses a seek until playback is set up, and only then
+        // has a `time-pos`.
         eventually(&engine, "b has loaded", move |mpv| {
-            mpv.get_string(PATH).is_ok_and(|path| path == loaded) && mpv.get_f64("duration").is_ok()
+            mpv.get_string(PATH).is_ok_and(|path| path == loaded) && mpv.get_f64("time-pos").is_ok()
         });
         engine.command(&["seek", "3", "absolute", "exact"]);
         eventually(&engine, "b is at 3 s", |mpv| {

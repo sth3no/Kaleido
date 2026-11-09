@@ -308,6 +308,16 @@ mod tests {
         engine.call(move |mpv| mpv.get_string(name).unwrap_or_default())
     }
 
+    /// The hook's `user-data/mpv/ytdl/path`, the yt-dlp it found (empty: none). mpv prints a
+    /// `user-data` value as JSON, so the text of a string comes quoted; not set yet is empty too.
+    fn hook_path(engine: &Engine) -> String {
+        let printed = property(engine, "user-data/mpv/ytdl/path");
+        if printed.is_empty() {
+            return printed;
+        }
+        serde_json::from_str(&printed).unwrap_or_else(|error| panic!("{printed}: {error}"))
+    }
+
     /// The last value of `key` in a key/value list as mpv prints it (`a=1,b=2`); none of the values
     /// here has a comma.
     fn value_of(list: &str, key: &str) -> Option<String> {
@@ -390,7 +400,7 @@ mod tests {
             hook_lines(events, NOT_FOUND) > 0
         });
         // It looked only where Kaleido said.
-        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), "");
+        assert_eq!(hook_path(&engine), "");
         engine.command(&["stop"]);
     }
 
@@ -424,11 +434,11 @@ mod tests {
             events.wait_until("the hook tried again", LOAD_TIMEOUT, |events| {
                 hook_lines(events, "youtube-dl failed") > failed
             });
-            if property(&engine, "user-data/mpv/ytdl/path") == ours {
+            if hook_path(&engine) == ours {
                 break;
             }
         }
-        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), ours);
+        assert_eq!(hook_path(&engine), ours);
         // where.exe is no yt-dlp: it ran, and failed as a program does.
         events.wait_until("the stand-in ran", LOAD_TIMEOUT, |events| {
             hook_lines(events, "unexpected error occurred") > 0
@@ -460,7 +470,7 @@ mod tests {
         events.wait_until("the search fails", LOAD_TIMEOUT, |events| {
             hook_lines(events, NOT_FOUND) > 0
         });
-        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), "");
+        assert_eq!(hook_path(&engine), "");
 
         // The check puts it in place again: the value differs from the one the core has.
         fs::copy(&stand_in, &exe).unwrap();
@@ -475,11 +485,11 @@ mod tests {
             events.wait_until("the hook tried again", LOAD_TIMEOUT, |events| {
                 hook_lines(events, "youtube-dl failed") > failed
             });
-            if property(&engine, "user-data/mpv/ytdl/path") == ours {
+            if hook_path(&engine) == ours {
                 break;
             }
         }
-        assert_eq!(property(&engine, "user-data/mpv/ytdl/path"), ours);
+        assert_eq!(hook_path(&engine), ours);
         engine.command(&["stop"]);
     }
 

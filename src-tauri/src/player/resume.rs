@@ -711,8 +711,10 @@ mod tests {
         engine.command(&["set", "mute", "yes"]);
         engine.command(&["set", "speed", "1.5"]);
         engine.command(&["playlist-play-index", "1"]);
+        // `time-pos`, not `duration`: mpv refuses a seek until playback is set up, and only then
+        // has a `time-pos`.
         eventually(&engine, "b has loaded", |mpv| {
-            mpv.get_f64("duration").is_ok()
+            mpv.get_f64("time-pos").is_ok()
         });
         engine.command(&["seek", "4", "absolute"]);
         eventually(&engine, "b is at 4 s", |mpv| near(mpv, 4.0, 0.1));

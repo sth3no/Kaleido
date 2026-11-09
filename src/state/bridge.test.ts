@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { StreamFormats } from '../ipc/types';
 import { useStreamStore } from '../streams/streamStore';
-import { startPlayerBridge, usePlayerBridge } from './bridge';
+import { startPlayerBridge as startBridge, usePlayerBridge } from './bridge';
 import { usePlayerStore } from './playerStore';
 import { useUiStore } from './uiStore';
 
@@ -63,6 +63,15 @@ const steps = (kind: 'listen' | 'unlisten' | 'invoke') =>
 
 const listening = () => expect(steps('listen')).toHaveLength(EVENTS.length);
 
+/** What stops each bridge a test started: a bridge left running still follows `path` in the next test. */
+const bridges: (() => void)[] = [];
+
+const startPlayerBridge = (signal?: AbortSignal) =>
+  startBridge(signal).then((stop) => {
+    bridges.push(stop);
+    return stop;
+  });
+
 beforeEach(() => {
   order = [];
   handlers.clear();
@@ -96,6 +105,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const stop of bridges.splice(0)) stop();
   vi.restoreAllMocks();
 });
 

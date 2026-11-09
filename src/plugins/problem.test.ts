@@ -83,6 +83,7 @@ describe('the texts of a plugin', () => {
   test('listOf puts names in a sentence’s list', () => {
     expect(listOf(['reload'], 'en')).toBe('reload');
     expect(listOf(['reload', 'sub-select'], 'en')).toBe('reload and sub-select');
-    expect(listOf(['reload', 'sub-select'], 'cs')).toBe('reload a sub-select');
+    // CLDR keeps the one-letter Czech conjunction with the next word: a no-break space after "a".
+    expect(listOf(['reload', 'sub-select'], 'cs')).toBe('reload a sub-select');
   });
 });

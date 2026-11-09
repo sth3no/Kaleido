@@ -1161,8 +1161,10 @@ mod tests {
         let engine = Arc::new(Engine::start(headless(temp_paths(tmp.path())), NoEvents).unwrap());
         engine.command(&["set", "pause", "yes"]);
         engine.command(&["loadfile", &clip.to_string_lossy()]);
+        // `time-pos`, not `duration`: mpv refuses a seek until playback is set up, and only then
+        // has a `time-pos`.
         eventually(&engine, "the clip has loaded", |mpv| {
-            mpv.get_f64("duration").is_ok()
+            mpv.get_f64("time-pos").is_ok()
         });
         engine.command(&["seek", "4", "absolute"]);
         eventually(&engine, "the clip is at 4 s", |mpv| {
